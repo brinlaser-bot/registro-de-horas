@@ -15,19 +15,23 @@ import { actions, enrichComp, settingsOf, useAppData, useIsClient } from "@/lib/
 import {
   addDays,
   computeDay,
+  expectedMinutesOf,
   formatDateShortBR,
   formatMinutes,
+  monthBounds,
   monthKey,
   nowMinutesLocal,
   todayString,
   weekdayShort,
   type EntryType,
 } from "@/lib/time";
-import type { DayResult, DaySummary } from "@/lib/types";
+import type { CompKind, DayResult, DaySummary } from "@/lib/types";
 import { Badge, Button, Card, EmptyState, Skeleton, StatCard } from "@/components/ui";
 import { QuickPunch } from "@/components/quick-punch";
 import { BarsChart, type BarDatum } from "@/components/charts";
-import { CompensationForm } from "@/components/compensation-form";
+import { ExcessPanel } from "@/components/excess-panel";
+import { SmartExit } from "@/components/smart-exit";
+import { CompensationForm, type CompFormData } from "@/components/compensation-form";
 import { useToast } from "@/components/toast";
 
 function toSummary(d: DayResult, date?: string): DaySummary {
@@ -53,12 +57,13 @@ export default function DashboardPage() {
   const todayStr = todayString();
   const [compOpen, setCompOpen] = useState(false);
 
-  // Mantém as horas "em andamento" atualizadas a cada 30s
+  // Relógio: mantém previsão de saída e horas "em andamento" em tempo real
   const [, setTick] = useState(0);
   useEffect(() => {
     const t = window.setInterval(() => setTick((n) => n + 1), 30_000);
     return () => window.clearInterval(t);
   }, []);
+  const nowMinutes = nowMinutesLocal();
 
   const { monthDays, totals, today, recent, pending } = useMemo(() => {
     const byDate = new Map<string, typeof entries>();
@@ -86,7 +91,7 @@ export default function DashboardPage() {
       { trackedDays: 0, workedTotal: 0, registrableTotal: 0, balanceTotal: 0, excessTotal: 0 },
     );
 
-    const todays = computeDay(byDate.get(todayStr) ?? [], settings, nowMinutesLocal());
+    const todays = computeDay(byDate.get(todayStr) ?? [], settings, nowMinutes);
     if (!todays.date) todays.date = todayStr;
 
     const recents: DaySummary[] = [];
@@ -101,25 +106,47 @@ export default function DashboardPage() {
       .sort((a, b) => a.targetDate.localeCompare(b.targetDate));
 
     return { monthDays: days, totals: sum, today: todays, recent: recents, pending: pend };
-  }, [entries, compensations, settings, month, todayStr]);
+  }, [entries, compensations, settings, month, todayStr, nowMinutes]);
+
+  const range = useMemo(() => monthBounds(month), [month]);
 
   const onAddEntry = async (p: { date: string; time: string; type: EntryType; note: string | null }) => {
     actions.addEntry(p);
   };
 
-  const onDeleteEntry = async (id: number) => {
-    actions.deleteEntry(id);
-  };
+  const onDeleteEntry = async (id: number) => actions.deleteEntry(id);
 
   const completeComp = async (id: number) => {
     actions.completeComp(id);
     toast.show("Compensação concluída. Bom descanso!");
   };
 
-  const createComp = async (payload: { sourceDate: string; targetDate: string; minutes: number; note: string }) => {
-    actions.addComp({ ...payload, note: payload.note || null });
+  const createComp = async (payload: CompFormData & { kind?: CompKind }) => {
+    actions.addComp({
+      sourceDate: payload.sourceDate,
+      targetDate: payload.targetDate,
+      minutes: payload.minutes,
+      note: payload.note || null,
+      kind: payload.kind ?? "excedente",
+    });
     setCompOpen(false);
     toast.show("Compensação criada!");
+  };
+
+  /** Saída em 1 clique: registra a saída e quita as compensações do dia. */
+  const smartExit = async (time: string, compIds: number[]) => {
+    actions.addEntry({
+      date: todayStr,
+      time,
+      type: "saida",
+      note: "Saída sugerida pelo assistente",
+    });
+    for (const id of compIds) actions.completeComp(id);
+    toast.show(
+      compIds.length > 0
+        ? `Saída registrada às ${time} e compensação concluída!`
+        : `Saída registrada às ${time}!`,
+    );
   };
 
   if (!mounted) {
@@ -139,8 +166,9 @@ export default function DashboardPage() {
 
   const t = today;
   const balanceTone = totals.balanceTotal > 0 ? "emerald" : totals.balanceTotal < 0 ? "rose" : "slate";
-  const excessTone = totals.excessTotal > 0 ? "amber" : "slate";
-  const todayStatusTone = t.status === "excess" ? "rose" : t.status === "deficit" ? "amber" : t.status === "in-progress" ? "indigo" : "slate";
+  const excessTone = totals.excessTotal > 0 ? "rose" : "slate";
+  const todayStatusTone =
+    t.status === "excess" ? "rose" : t.status === "deficit" ? "amber" : t.status === "in-progress" ? "indigo" : "slate";
   const firstName = user.name.split(" ")[0];
 
   const chartData: BarDatum[] = recent.map((d) => ({
@@ -183,7 +211,7 @@ export default function DashboardPage() {
           value={formatMinutes(t.workedMinutes)}
           sub={
             <>
-              base {formatMinutes(t.expectedMinutes)} ·{" "}
+              base {formatMinutes(t.expectedMinutes || expectedMinutesOf(settings))} ·{" "}
               <span className={t.balanceMinutes >= 0 ? "text-emerald-600" : "text-rose-600"}>
                 {t.balanceMinutes >= 0 ? "+" : ""}
                 {formatMinutes(t.balanceMinutes)}
@@ -220,7 +248,17 @@ export default function DashboardPage() {
         />
       </div>
 
-      {/* Registro rápido */}
+      {/* Assistente de saída + Registro rápido */}
+      <SmartExit
+        date={todayStr}
+        day={t}
+        settings={settings}
+        comps={compensations}
+        nowMinutes={nowMinutes}
+        onSmartExit={smartExit}
+        isToday
+      />
+
       <QuickPunch
         today={t}
         todayStr={todayStr}
@@ -228,6 +266,23 @@ export default function DashboardPage() {
         onAddEntry={onAddEntry}
         onDeleteEntry={onDeleteEntry}
       />
+
+      {/* Gestão de excedentes */}
+      <div>
+        <h3 className="mb-3 text-sm font-extrabold uppercase tracking-wider text-slate-400">
+          Gestão de Excedentes
+        </h3>
+        <div className="space-y-6">
+          <ExcessPanel
+            entries={entries}
+            compensations={compensations}
+            settings={settings}
+            range={range}
+            monthLabel={month}
+            onCreateComp={createComp}
+          />
+        </div>
+      </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
         {/* Compensações pendentes */}
@@ -254,7 +309,8 @@ export default function DashboardPage() {
                     <p className="text-sm font-bold text-slate-800">
                       Compensar {formatMinutes(c.minutes)}{" "}
                       <span className="font-medium text-slate-400">
-                        (excedente de {formatDateShortBR(c.sourceDate)})
+                        ({(c.kind ?? "excedente") === "deficit" ? "hora extra de " : "excedente de "}
+                        {formatDateShortBR(c.sourceDate)})
                       </span>
                     </p>
                     <p className="mt-0.5 text-xs text-slate-500">
@@ -265,7 +321,9 @@ export default function DashboardPage() {
                       {c.note ? ` · ${c.note}` : ""}
                     </p>
                   </div>
-                  <Badge tone="indigo">pendente</Badge>
+                  <Badge tone={(c.kind ?? "excedente") === "deficit" ? "emerald" : "indigo"}>
+                    {(c.kind ?? "excedente") === "deficit" ? "hora extra" : "sair cedo"}
+                  </Badge>
                   <Button size="sm" variant="secondary" onClick={() => completeComp(c.id)}>
                     Concluir
                   </Button>

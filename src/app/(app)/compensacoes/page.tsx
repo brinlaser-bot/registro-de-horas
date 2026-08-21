@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { actions, enrichComp, settingsOf, useAppData, useIsClient } from "@/lib/store";
 import { formatDateBR, formatDateShortBR, formatMinutes, todayString } from "@/lib/time";
+import type { CompKind } from "@/lib/types";
 import { Badge, Button, EmptyState, Skeleton } from "@/components/ui";
 import { CompensationForm } from "@/components/compensation-form";
 import { useToast } from "@/components/toast";
@@ -39,6 +40,7 @@ export default function CompensacoesPage() {
     minutes: number;
     note: string;
     status?: string;
+    kind?: CompKind;
   }) => {
     if (pendingEditing) {
       actions.updateComp(pendingEditing.id, {
@@ -46,6 +48,7 @@ export default function CompensacoesPage() {
         targetDate: payload.targetDate,
         minutes: payload.minutes,
         note: payload.note || null,
+        kind: payload.kind ?? (pendingEditing.kind ?? "excedente"),
         ...(payload.status ? { status: payload.status as "pendente" | "concluida" | "cancelada" } : {}),
       });
       toast.show("Compensação atualizada.");
@@ -172,6 +175,17 @@ export default function CompensacoesPage() {
                       </span>
                     )}
                     {c.note && <span className="italic">“{c.note}”</span>}
+                    <span
+                      className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${
+                        (c.kind ?? "excedente") === "deficit"
+                          ? "bg-emerald-50 text-emerald-700"
+                          : "bg-sky-50 text-sky-700"
+                      }`}
+                    >
+                      {(c.kind ?? "excedente") === "deficit"
+                        ? "↗ hora extra"
+                        : "↘ sair mais cedo"}
+                    </span>
                   </div>
                 </div>
                 {c.status === "pendente" && <Badge tone="indigo">Pendente</Badge>}

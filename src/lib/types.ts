@@ -21,9 +21,19 @@ export interface TimeEntry {
   time: string; // HH:MM
   type: EntryType;
   note: string | null;
+  /** live = ponto registrado em tempo real · manual = lançado/editado depois */
+  source?: "live" | "manual";
+  /** true quando o registro foi editado manualmente após o lançamento */
+  edited?: boolean;
 }
 
 export type CompStatus = "pendente" | "concluida" | "cancelada";
+
+/**
+ * excedente: dia passou de 10h → compensa SAINDO MAIS CEDO no dia destino.
+ * deficit:   dia ficou abaixo da base → compensa FAZENDO HORA EXTRA no destino.
+ */
+export type CompKind = "excedente" | "deficit";
 
 export interface Compensation {
   id: number;
@@ -33,6 +43,37 @@ export interface Compensation {
   status: CompStatus;
   note: string | null;
   createdAt: number;
+  kind?: CompKind; // ausente = "excedente" (compatível com dados antigos)
+}
+
+/** Resumo de um dia que gerou dívida de horas (excesso ou déficit). */
+export interface DebtDay {
+  date: string;
+  kind: CompKind;
+  workedMinutes: number;
+  expectedMinutes: number;
+  debtMinutes: number; // total original (excedente ou déficit)
+  allocatedMinutes: number; // já vinculado a compensações ativas
+  pendingMinutes: number; // vinculado e ainda pendente de execução
+  concludedMinutes: number; // vinculado e já concluído
+  remainingMinutes: number; // ainda falta alocar
+}
+
+/** Totais agregados para as barras de progresso. */
+export interface DebtTotals {
+  debtTotal: number;
+  allocated: number;
+  concluded: number;
+  pending: number;
+  remaining: number;
+  percent: number; // 0..100 concluído
+}
+
+export interface TargetSuggestion {
+  date: string;
+  workedMinutes: number;
+  balanceMinutes: number;
+  isToday: boolean;
 }
 
 export interface AppData {

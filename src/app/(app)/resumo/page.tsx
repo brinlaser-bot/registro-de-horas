@@ -14,8 +14,9 @@ import {
 } from "@/lib/time";
 import type { DaySummary } from "@/lib/types";
 import { Badge, Button, Card, EmptyState, Skeleton, StatCard } from "@/components/ui";
-import { BarsChart, type BarDatum } from "@/components/charts";
-import { computeDay } from "@/lib/time";
+import { StackedBarsChart, type StackedDatum } from "@/components/charts";
+import { appliedOnDate } from "@/lib/debt";
+import { computeDay, stackedSegments } from "@/lib/time";
 
 function zeroSummary(date: string, expected: number): DaySummary {
   return {
@@ -41,7 +42,7 @@ function statusBadgeFor(status: DaySummary["status"]) {
 
 export default function ResumoPage() {
   const mounted = useIsClient();
-  const { user, entries } = useAppData();
+  const { user, entries, compensations } = useAppData();
   const settings = settingsOf(user);
   const [month, setMonth] = useState(monthKey(todayString()));
 
@@ -89,13 +90,21 @@ export default function ResumoPage() {
     [allDays],
   );
 
-  const chartData: BarDatum[] = allDays.map((d) => ({
-    label: d.date.slice(8),
-    value: d.workedMinutes,
-    baseline: d.expectedMinutes,
-    cap: settings.maxDailyMinutes,
-    status: d.status,
-  }));
+  // Dados do gráfico empilhado: blocos + compensação aplicada no dia
+  const chartData: StackedDatum[] = allDays.map((d) => {
+    const seg = stackedSegments(d.workedMinutes, d.expectedMinutes, settings.maxDailyMinutes);
+    const used = appliedOnDate(compensations, d.date);
+    return {
+      date: d.date,
+      label: d.date.slice(8),
+      workedMinutes: d.workedMinutes,
+      expectedMinutes: d.expectedMinutes,
+      base: seg.base,
+      extra: seg.extra,
+      excess: seg.excess,
+      compensated: Math.max(0, Math.min(used, Math.max(0, d.expectedMinutes - d.workedMinutes))),
+    };
+  });
 
   const changeMonth = (delta: number) => {
     const [y, m] = month.split("-").map(Number);
@@ -184,15 +193,23 @@ export default function ResumoPage() {
         />
       </div>
 
-      <Card title={`Horas por dia — ${month}`} subtitle="Barras vermelhas ultrapassam o limite diário da empresa">
-        {allDays.length === 0 ? (
+      <Card
+        title={`Barras empilhadas — ${month}`}
+        subtitle="Base · extra no ponto · excedente (dívida) · horas compensadas"
+      >
+        {chartData.length === 0 ? (
           <EmptyState
             icon={<BarChart3 size={24} />}
             title="Sem dados neste mês"
             description="Registre seus horários para ver o gráfico e o resumo mensal."
           />
         ) : (
-          <BarsChart data={chartData} height={170} />
+          <StackedBarsChart
+            data={chartData}
+            expected={expectedMinutesOf(settings)}
+            cap={settings.maxDailyMinutes}
+            height={210}
+          />
         )}
       </Card>
 

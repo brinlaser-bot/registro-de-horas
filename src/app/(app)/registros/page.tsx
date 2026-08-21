@@ -1,11 +1,21 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { ChevronLeft, ChevronRight, Clock3 } from "lucide-react";
-import { actions, settingsOf, useAppData, useIsClient } from "@/lib/store";
-import { computeDay, formatMinutes, monthKey, todayString, type EntryType } from "@/lib/time";
-import type { DayResult, WorkSettings } from "@/lib/types";
+import { useEffect, useMemo, useState } from "react";
+import { CalendarPlus, ChevronLeft, ChevronRight, Clock3 } from "lucide-react";
+import { actions, getAppData, settingsOf, useAppData, useIsClient } from "@/lib/store";
+import {
+  computeDay,
+  formatDateShortBR,
+  formatMinutes,
+  monthKey,
+  nowMinutesLocal,
+  todayString,
+  type EntryType,
+} from "@/lib/time";
+import type { CompKind, DayResult, WorkSettings } from "@/lib/types";
+import { checkSourceOverflow } from "@/lib/debt";
 import { DayCard } from "@/components/day-card";
+import { ManualEntryModal, type ManualPairData } from "@/components/manual-entry-modal";
 import { Button, Card, EmptyState, Skeleton } from "@/components/ui";
 import { useToast } from "@/components/toast";
 
@@ -14,8 +24,18 @@ export default function RegistrosPage() {
   const mounted = useIsClient();
   const { user, entries, compensations } = useAppData();
   const [month, setMonth] = useState(monthKey(todayString()));
+  const [manualOpen, setManualOpen] = useState(false);
+  const todayStr = todayString();
 
   const settings: WorkSettings = settingsOf(user);
+
+  // Atualiza a cada 30s para manter o assistente de saída em tempo real
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const t = window.setInterval(() => setTick((n) => n + 1), 30_000);
+    return () => window.clearInterval(t);
+  }, []);
+  const nowMinutes = nowMinutesLocal();
 
   const days: DayResult[] = useMemo(() => {
     const byDate = new Map<string, DayResult["entries"]>();
@@ -47,19 +67,46 @@ export default function RegistrosPage() {
     [days],
   );
 
-  const addEntry = async (p: { date: string; time: string; type: EntryType; note: string | null }) => {
+  /** Após criar/editar/excluir um registro, verifica se alguma compensação
+   *  vinculada ficou acima do novo excedente/déficit do dia. */
+  const reconcileDay = (date: string) => {
+    const snap = getAppData();
+    const s = settingsOf(snap.user);
+    const day = computeDay(snap.entries.filter((e) => e.date === date), s);
+    const deficit = Math.max(0, day.expectedMinutes - day.workedMinutes);
+    const ov = checkSourceOverflow(snap.compensations, date, day.excessMinutes, deficit);
+    if (ov.excessOverflow > 0) {
+      toast.show(
+        `Atenção: ${formatMinutes(ov.excessOverflow)} de compensação ficou acima do novo excedente do dia ${formatDateShortBR(date)}. Abra o dia para ajustar.`,
+        "info",
+      );
+    }
+    if (ov.deficitOverflow > 0) {
+      toast.show(
+        `Atenção: ${formatMinutes(ov.deficitOverflow)} de compensação ficou acima do novo déficit do dia ${formatDateShortBR(date)}. Abra o dia para ajustar.`,
+        "info",
+      );
+    }
+  };
+
+  const addEntry = async (p: { date: string; time: string; type: EntryType; note: string | null; source?: "live" | "manual" }) => {
     actions.addEntry(p);
+    reconcileDay(p.date);
   };
 
   const updateEntry = async (
     id: number,
     patch: { time?: string; type?: EntryType; note?: string | null },
   ) => {
+    const target = entries.find((e) => e.id === id);
     actions.updateEntry(id, patch);
+    if (target) reconcileDay(target.date);
   };
 
   const deleteEntry = async (id: number) => {
+    const target = entries.find((e) => e.id === id);
     actions.deleteEntry(id);
+    if (target) reconcileDay(target.date);
   };
 
   const completeComp = async (id: number) => {
@@ -69,6 +116,20 @@ export default function RegistrosPage() {
 
   const createComp = async (payload: { sourceDate: string; targetDate: string; minutes: number; note: string }) => {
     actions.addComp({ ...payload, note: payload.note || null });
+  };
+
+  const capComp = async (date: string, kind: CompKind, maxMinutes: number) => {
+    actions.capCompensationsForSource(date, kind, maxMinutes);
+    toast.show("Compensação ajustada para manter consistência.");
+  };
+
+  /** Lança um par entrada/saída manual (hoje ou data anterior). */
+  const addManualPair = async (data: ManualPairData) => {
+    actions.addEntry({ date: data.date, time: data.entrada, type: "entrada", note: data.note || null, source: "manual" });
+    actions.addEntry({ date: data.date, time: data.saida, type: "saida", note: data.note || null, source: "manual" });
+    setMonth(monthKey(data.date));
+    reconcileDay(data.date);
+    toast.show("Lançamento manual registrado!");
   };
 
   const changeMonth = (delta: number) => {
@@ -108,7 +169,10 @@ export default function RegistrosPage() {
             </Button>
           )}
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <Button size="sm" onClick={() => setManualOpen(true)}>
+            <CalendarPlus size={14} /> Adicionar registro manual
+          </Button>
           <Chip label="Dias" value={String(summary.tracked)} />
           <Chip label="Trabalhado" value={formatMinutes(summary.worked)} />
           <Chip
@@ -134,11 +198,15 @@ export default function RegistrosPage() {
               result={d}
               settings={settings}
               compsForDate={compensations.filter((c) => c.targetDate === d.date)}
+              allComps={compensations}
+              nowMinutes={nowMinutes}
+              isToday={d.date === todayStr}
               onAddEntry={addEntry}
               onUpdateEntry={updateEntry}
               onDeleteEntry={deleteEntry}
               onCompleteComp={completeComp}
               onCreateComp={createComp}
+              onCapComp={capComp}
             />
           ))}
         </div>
@@ -162,6 +230,11 @@ export default function RegistrosPage() {
         </div>
       </Card>
 
+      <ManualEntryModal
+        open={manualOpen}
+        onClose={() => setManualOpen(false)}
+        onSave={addManualPair}
+      />
     </div>
   );
 }

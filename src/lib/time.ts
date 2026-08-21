@@ -12,6 +12,8 @@ export interface TimeEntryLike {
   time: string; // HH:MM
   type: EntryType;
   note: string | null;
+  source?: "live" | "manual";
+  edited?: boolean;
 }
 
 export interface WorkSettings {
@@ -245,4 +247,79 @@ export function listDaysInMonth(month: string): string[] {
     cur = addDays(cur, 1);
   }
   return days;
+}
+
+/* ── Assistente de jornada / projeção ─────────────────────── */
+
+const MAX_CLOCK = 23 * 60 + 59;
+
+function clampClock(m: number): string {
+  return m > MAX_CLOCK ? fromMinutes(MAX_CLOCK) : fromMinutes(m);
+}
+
+function lunchLength(s: WorkSettings): number {
+  return Math.max(0, toMinutes(s.lunchEnd) - toMinutes(s.lunchStart));
+}
+
+/**
+ * Projeta o horário de saída somando `remaining` minutos a partir de agora,
+ * acrescentando o almoço se o intervalo projetado ainda atravessar o intervalo.
+ */
+export function projectExitTime(
+  nowMinutes: number,
+  remainingMinutes: number,
+  settings: WorkSettings,
+): string {
+  const ls = toMinutes(settings.lunchStart);
+  const len = lunchLength(settings);
+  let exit = nowMinutes + Math.max(0, remainingMinutes);
+  if (nowMinutes < ls && exit > ls && len > 0) exit += len;
+  return clampClock(exit);
+}
+
+/**
+ * Horário de saída sugerido para atingir `targetMinutes` trabalhados.
+ * Retorna null quando o dia já está fechado (não há o que projetar).
+ * Considera atraso (usa a 1ª entrada real) e o almoço (já descontado ou a descontar).
+ */
+export function suggestExitTime(
+  entries: TimeEntryLike[],
+  settings: WorkSettings,
+  targetMinutes: number,
+  nowMinutes: number,
+): string | null {
+  if (entries.length === 0) {
+    // Dia ainda sem batidas: projeta a partir do início da jornada
+    const start = toMinutes(settings.workStart);
+    const ls = toMinutes(settings.lunchStart);
+    const len = lunchLength(settings);
+    let exit = start + targetMinutes;
+    if (exit > ls && len > 0) exit += len;
+    return clampClock(exit);
+  }
+
+  const day = computeDay(entries, settings, nowMinutes);
+  if (!day.open) return null;
+
+  if (day.workedMinutes >= targetMinutes) {
+    return clampClock(nowMinutes); // meta já batida: pode sair agora
+  }
+
+  const lastPunch = toMinutes(entries[entries.length - 1].time);
+  const now = Math.max(nowMinutes, lastPunch);
+  return projectExitTime(now, targetMinutes - day.workedMinutes, settings);
+}
+
+/** Divide as horas de um dia nos 3 blocos usados no gráfico empilhado. */
+export function stackedSegments(
+  workedMinutes: number,
+  expected: number,
+  maxDaily: number,
+): { base: number; extra: number; excess: number } {
+  const cap = Math.max(expected, maxDaily);
+  return {
+    base: Math.max(0, Math.min(workedMinutes, expected)),
+    extra: Math.max(0, Math.min(workedMinutes, cap) - expected),
+    excess: Math.max(0, workedMinutes - cap),
+  };
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { formatMinutes } from "@/lib/time";
+import { formatMinutes, weekdayShort } from "@/lib/time";
 
 /* ── Anel de progresso (SVG) ────────────────────────────── */
 
@@ -52,7 +52,40 @@ export function ProgressRing({
   );
 }
 
-/* ── Barras por dia (div-based) ─────────────────────────── */
+/* ── Barra de progresso linear ──────────────────────────── */
+
+export function ProgressBar({
+  concluded,
+  pending,
+  total,
+  height = 10,
+}: {
+  concluded: number;
+  pending: number;
+  total: number;
+  height?: number;
+}) {
+  const scale = Math.max(total, concluded + pending, 1);
+  const donePct = (concluded / scale) * 100;
+  const planPct = (pending / scale) * 100;
+  return (
+    <div
+      className="flex w-full overflow-hidden rounded-full bg-slate-100 ring-1 ring-inset ring-slate-200"
+      style={{ height }}
+    >
+      <div
+        className="bg-gradient-to-r from-emerald-500 to-emerald-400 transition-all duration-700"
+        style={{ width: `${donePct}%` }}
+      />
+      <div
+        className="bg-gradient-to-r from-amber-400 to-amber-300 transition-all duration-700"
+        style={{ width: `${planPct}%` }}
+      />
+    </div>
+  );
+}
+
+/* ── Barras simples por dia ─────────────────────────────── */
 
 export interface BarDatum {
   label: string;
@@ -76,7 +109,6 @@ export function BarsChart({ data, height = 140 }: { data: BarDatum[]; height?: n
   return (
     <div>
       <div className="relative flex items-end justify-between gap-1" style={{ height }}>
-        {/* Linha da base (8h) */}
         <div
           className="pointer-events-none absolute left-0 right-0 z-10 border-t-2 border-dashed border-slate-300"
           style={{ bottom: `${baselinePct * 100}%` }}
@@ -104,18 +136,129 @@ export function BarsChart({ data, height = 140 }: { data: BarDatum[]; height?: n
           </span>
         ))}
       </div>
-      <div className="mt-3 flex items-center gap-4 text-[11px] text-slate-500">
+    </div>
+  );
+}
+
+/* ── Barras EMPILHADAS (base / extra / excedente / compensado) ── */
+
+export interface StackedDatum {
+  date: string;
+  label: string;
+  workedMinutes: number;
+  expectedMinutes: number;
+  base: number;
+  extra: number;
+  excess: number;
+  compensated: number;
+}
+
+const hatch = {
+  backgroundImage:
+    "repeating-linear-gradient(135deg, rgb(148 163 184) 0 4px, rgb(203 213 225) 4px 8px)",
+};
+
+export function StackedBarsChart({
+  data,
+  expected,
+  cap,
+  height = 200,
+}: {
+  data: StackedDatum[];
+  expected: number; // base diária (min)
+  cap: number; // limite diário (min)
+  height?: number;
+}) {
+  // Escala: acompanha o maior valor exibido (trabalhado ou base + compensação)
+  const maxVal = Math.max(
+    expected * 1.25,
+    ...data.map((d) => d.workedMinutes + d.compensated),
+  );
+  const pct = (m: number) => (m / maxVal) * 100;
+  const basePct = pct(expected);
+  const capPct = Math.min(100, pct(cap));
+
+  return (
+    <div>
+      <div className="relative flex items-end justify-between gap-[3px]" style={{ height }}>
+        {/* Linha da base (8h) */}
+        <div
+          className="pointer-events-none absolute left-0 right-0 z-20 border-t-2 border-dashed border-slate-300"
+          style={{ bottom: `${basePct}%` }}
+        />
+        <span
+          className="pointer-events-none absolute right-0 z-20 -translate-y-1/2 rounded bg-white/80 px-1 text-[9px] font-bold text-slate-400"
+          style={{ bottom: `${basePct}%` }}
+        >
+          base
+        </span>
+        {/* Linha do limite (10h) */}
+        {capPct <= 100 && (
+          <div
+            className="pointer-events-none absolute left-0 right-0 z-10 border-t-2 border-dotted border-rose-300"
+            style={{ bottom: `${capPct}%` }}
+          />
+        )}
+
+        {data.map((d) => {
+          const total = d.base + d.extra + d.excess + d.compensated;
+          const tooltip = `${weekdayShort(d.date).replace(".", "")} ${d.date.slice(8)}/${d.date.slice(5, 7)} · ${formatMinutes(d.workedMinutes)}` +
+            (d.compensated > 0 ? ` (+${formatMinutes(d.compensated)} compensado)` : "");
+          return (
+            <div key={d.date} className="group relative flex h-full flex-1 items-end justify-center">
+              {total === 0 ? (
+                <div className="h-1 w-full max-w-[22px] rounded bg-slate-200" />
+              ) : (
+                <div className="flex w-full max-w-[22px] flex-col justify-end overflow-hidden rounded-t-[3px]">
+                  {d.excess > 0 && (
+                    <div className="w-full bg-rose-500" style={{ height: `${pct(d.excess) * (height / 100)}px` }} />
+                  )}
+                  {d.extra > 0 && (
+                    <div className="w-full bg-amber-400" style={{ height: `${pct(d.extra) * (height / 100)}px` }} />
+                  )}
+                  {d.compensated > 0 && (
+                    <div
+                      className="w-full border-y border-dashed border-slate-400"
+                      style={{ height: `${pct(d.compensated) * (height / 100)}px`, ...hatch }}
+                    />
+                  )}
+                  {d.base > 0 && (
+                    <div className="w-full bg-emerald-500" style={{ height: `${pct(d.base) * (height / 100)}px` }} />
+                  )}
+                </div>
+              )}
+              <div className="pointer-events-none absolute bottom-full left-1/2 z-30 mb-1 hidden -translate-x-1/2 whitespace-nowrap rounded-lg bg-slate-900 px-2 py-1 text-[10px] font-semibold text-white shadow-lg group-hover:block">
+                {tooltip}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="mt-2 flex justify-between gap-[3px]">
+        {data.map((d) => (
+          <span key={d.date} className="flex-1 text-center text-[9px] font-semibold text-slate-400">
+            {d.label}
+          </span>
+        ))}
+      </div>
+
+      {/* Legenda */}
+      <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-[11px] font-medium text-slate-600">
         <span className="inline-flex items-center gap-1.5">
-          <span className="h-2 w-2 rounded-sm bg-emerald-500" /> Dentro da base
+          <span className="h-2.5 w-2.5 rounded-sm bg-emerald-500" /> Base (até {formatMinutes(expected)})
         </span>
         <span className="inline-flex items-center gap-1.5">
-          <span className="h-2 w-2 rounded-sm bg-rose-500" /> Acima do limite
+          <span className="h-2.5 w-2.5 rounded-sm bg-amber-400" /> Extra no ponto ({formatMinutes(expected)}→{formatMinutes(cap)})
         </span>
         <span className="inline-flex items-center gap-1.5">
-          <span className="h-2 w-2 rounded-sm bg-amber-400" /> Abaixo da base
+          <span className="h-2.5 w-2.5 rounded-sm bg-rose-500" /> Excedente (dívida, &gt;{formatMinutes(cap)})
         </span>
-        <span className="ml-auto hidden items-center gap-1.5 sm:inline-flex">
-          <span className="border-t-2 border-dashed border-slate-300" style={{ width: 18 }} /> Base diária
+        <span className="inline-flex items-center gap-1.5">
+          <span
+            className="h-2.5 w-2.5 rounded-sm border border-dashed border-slate-400"
+            style={hatch}
+          /> Horas compensadas
         </span>
       </div>
     </div>

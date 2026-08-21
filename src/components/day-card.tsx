@@ -20,6 +20,9 @@ import type { EntryType, TimeEntryLike } from "@/lib/time";
 import { formatDateShortBR, formatMinutes, nextWorkday, nowTimeString, weekdayLong } from "@/lib/time";
 import { Badge, Button, Input, Select } from "@/components/ui";
 import { CompensationForm, type CompFormData } from "@/components/compensation-form";
+import { SmartExit } from "@/components/smart-exit";
+import { allocatedForSource, overflowForSource } from "@/lib/debt";
+import type { CompKind } from "@/lib/types";
 
 export function statusBadge(d: DayResult) {
   if (d.status === "excess") return <Badge tone="rose">Acima do limite</Badge>;
@@ -33,22 +36,30 @@ interface Props {
   result: DayResult;
   settings: WorkSettings;
   compsForDate: Compensation[]; // compensações com destino neste dia
-  onAddEntry: (p: { date: string; time: string; type: EntryType; note: string | null }) => Promise<void>;
+  allComps?: Compensation[]; // todas (para o abatimento fracionado)
+  nowMinutes?: number;
+  isToday?: boolean;
+  onAddEntry: (p: { date: string; time: string; type: EntryType; note: string | null; source?: "live" | "manual" }) => Promise<void>;
   onUpdateEntry: (id: number, patch: { time?: string; type?: EntryType; note?: string | null }) => Promise<void>;
   onDeleteEntry: (id: number) => Promise<void>;
   onCompleteComp: (id: number) => Promise<void>;
   onCreateComp: (data: CompFormData) => Promise<void>;
+  onCapComp?: (date: string, kind: CompKind, maxMinutes: number) => void | Promise<void>;
 }
 
 export function DayCard({
   result,
   settings,
   compsForDate,
+  allComps,
+  nowMinutes = 0,
+  isToday,
   onAddEntry,
   onUpdateEntry,
   onDeleteEntry,
   onCompleteComp,
   onCreateComp,
+  onCapComp,
 }: Props) {
   const [expanded, setExpanded] = useState(result.open || result.status === "excess");
   const [showAdd, setShowAdd] = useState(false);
@@ -73,7 +84,7 @@ export function DayCard({
     if (busy) return;
     setBusy(true);
     try {
-      await onAddEntry({ date: d.date, time: time ?? form.time, type: type ?? form.type, note: form.note || null });
+      await onAddEntry({ date: d.date, time: time ?? form.time, type: type ?? form.type, note: form.note || null, source: "manual" });
       setForm((f) => ({ ...f, note: "" }));
       setShowAdd(false);
     } finally {
@@ -105,6 +116,27 @@ export function DayCard({
   const finishComp = async (id: number) => {
     if (!window.confirm("Marcar esta compensação como concluída?")) return;
     await onCompleteComp(id);
+  };
+
+  // Registro de saída em 1 clique + conclusão automática das compensações do dia
+  const smartExit = async (time: string, compIds: number[]) => {
+    await onAddEntry({ date: d.date, time, type: "saida", note: "Saída sugerida pelo assistente" });
+    for (const id of compIds) await onCompleteComp(id);
+  };
+
+  const allocatedHere = allComps
+    ? allocatedForSource(allComps, d.date, "excedente")
+    : 0;
+  const remainingExcess = Math.max(0, d.excessMinutes - allocatedHere);
+
+  // Detecção de overflow: compensação vinculada acima da dívida atual (após correção)
+  const deficitHere = Math.max(0, d.expectedMinutes - d.workedMinutes);
+  const excessOverflow = allComps ? overflowForSource(allComps, d.date, "excedente", d.excessMinutes) : 0;
+  const deficitOverflow = allComps ? overflowForSource(allComps, d.date, "deficit", deficitHere) : 0;
+
+  const adjustOverflow = async (kind: CompKind) => {
+    const max = kind === "excedente" ? d.excessMinutes : deficitHere;
+    await onCapComp?.(d.date, kind, max);
   };
 
   const balanceTone = d.balanceMinutes > 0 ? "text-emerald-600" : d.balanceMinutes < 0 ? "text-rose-600" : "text-slate-500";
@@ -143,6 +175,21 @@ export function DayCard({
 
       {expanded && (
         <div className="border-t border-slate-100 px-5 py-4">
+          {/* Assistente de saída (somente para o dia em andamento) */}
+          {d.open && (
+            <div className="mb-4">
+              <SmartExit
+                date={d.date}
+                day={d}
+                settings={settings}
+                comps={allComps ?? []}
+                nowMinutes={nowMinutes}
+                onSmartExit={smartExit}
+                isToday={isToday}
+              />
+            </div>
+          )}
+
           {/* Métricas */}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <MiniStat label="Trabalhado" value={formatMinutes(d.workedMinutes)} tone="text-slate-900" />
@@ -163,12 +210,58 @@ export function DayCard({
               <p className="flex-1 text-xs font-medium text-rose-700">
                 Você trabalhou <b>{formatMinutes(d.workedMinutes)}</b>, acima do limite de{" "}
                 <b>{formatMinutes(settings.maxDailyMinutes)}</b>. Registre apenas{" "}
-                <b>{formatMinutes(d.registrableMinutes)}</b> no ponto e compense{" "}
-                <b>{formatMinutes(d.excessMinutes)}</b> em outro dia.
+                <b>{formatMinutes(d.registrableMinutes)}</b> no ponto
+                {remainingExcess > 0 ? (
+                  <>
+                    {" "}e compense <b>{formatMinutes(remainingExcess)}</b> em outro dia.
+                  </>
+                ) : (
+                  ". Excedente totalmente alocado. ✔"
+                )}
+                {allocatedHere > 0 && (
+                  <span className="block text-rose-500">
+                    (excedente original {formatMinutes(d.excessMinutes)} · {formatMinutes(allocatedHere)} já
+                    alocado{remainingExcess > 0 ? ` · restam ${formatMinutes(remainingExcess)}` : ""})
+                  </span>
+                )}
               </p>
               <Button variant="danger" size="sm" onClick={() => setCompOpen(true)}>
                 <ArrowLeftRight size={13} /> Compensar horas
               </Button>
+            </div>
+          )}
+
+          {/* Aviso: compensação vinculada ficou acima da dívida atual */}
+          {(excessOverflow > 0 || deficitOverflow > 0) && (
+            <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2.5">
+              <div className="flex flex-wrap items-center gap-2">
+                <TriangleAlert size={16} className="shrink-0 text-amber-600" />
+                <p className="flex-1 text-xs font-medium text-amber-800">
+                  {excessOverflow > 0 && (
+                    <>
+                      Há <b>{formatMinutes(excessOverflow)}</b> de compensação vinculada acima do novo
+                      excedente deste dia ({formatMinutes(d.excessMinutes)}).
+                    </>
+                  )}
+                  {deficitOverflow > 0 && (
+                    <>
+                      Há <b>{formatMinutes(deficitOverflow)}</b> de compensação vinculada acima do novo
+                      déficit deste dia ({formatMinutes(deficitHere)}).
+                    </>
+                  )}{" "}
+                  O histórico foi preservado — ajuste para manter consistência.
+                </p>
+                {excessOverflow > 0 && (
+                  <Button size="sm" variant="secondary" onClick={() => adjustOverflow("excedente")}>
+                    Ajustar excedente
+                  </Button>
+                )}
+                {deficitOverflow > 0 && (
+                  <Button size="sm" variant="secondary" onClick={() => adjustOverflow("deficit")}>
+                    Ajustar déficit
+                  </Button>
+                )}
+              </div>
             </div>
           )}
 
@@ -224,6 +317,8 @@ export function DayCard({
                   <span className="w-14 text-sm font-extrabold tabular-nums text-slate-900">{e.time}</span>
                   <Badge tone={e.type === "entrada" ? "emerald" : "indigo"}>{e.type === "entrada" ? "Entrada" : "Saída"}</Badge>
                   {e.note && <span className="hidden truncate text-xs text-slate-400 sm:block">· {e.note}</span>}
+                  {e.source === "manual" && <Badge tone="amber">Lançamento manual</Badge>}
+                  {e.edited && <Badge tone="slate">Editado manualmente</Badge>}
                   <div className="ml-auto flex items-center gap-1 opacity-100 sm:opacity-0 sm:transition-opacity sm:group-hover:opacity-100">
                     <button onClick={() => startEdit(e)} className="rounded-lg p-1.5 text-slate-400 hover:bg-white hover:text-slate-700 cursor-pointer" aria-label="Editar">
                       <Pencil size={14} />

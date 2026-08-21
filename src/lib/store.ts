@@ -7,6 +7,7 @@ import { computeDay, type EntryType } from "./time";
 import { buildSeedData, DEFAULT_USER } from "./seed-data";
 import type {
   AppData,
+  CompKind,
   CompStatus,
   Compensation,
   CompWithDays,
@@ -95,14 +96,26 @@ const nextId = (rows: { id: number }[]) =>
   rows.reduce((m, r) => Math.max(m, r.id), 0) + 1;
 
 export const actions = {
-  addEntry(p: { date: string; time: string; type: EntryType; note: string | null }) {
-    mutate((d) => ({ ...d, entries: [...d.entries, { id: nextId(d.entries), ...p }] }));
+  addEntry(p: {
+    date: string;
+    time: string;
+    type: EntryType;
+    note: string | null;
+    source?: "live" | "manual";
+  }) {
+    mutate((d) => ({
+      ...d,
+      entries: [
+        ...d.entries,
+        { id: nextId(d.entries), ...p, source: p.source ?? "live" },
+      ],
+    }));
   },
 
   updateEntry(id: number, patch: Partial<Pick<TimeEntry, "time" | "type" | "note">>) {
     mutate((d) => ({
       ...d,
-      entries: d.entries.map((e) => (e.id === id ? { ...e, ...patch } : e)),
+      entries: d.entries.map((e) => (e.id === id ? { ...e, ...patch, edited: true } : e)),
     }));
   },
 
@@ -116,6 +129,7 @@ export const actions = {
     minutes: number;
     note: string | null;
     status?: CompStatus;
+    kind?: CompKind;
   }) {
     mutate((d) => ({
       ...d,
@@ -128,6 +142,7 @@ export const actions = {
           minutes: p.minutes,
           status: p.status ?? "pendente",
           note: p.note,
+          kind: p.kind ?? "excedente",
           createdAt: Date.now(),
         },
       ],
@@ -147,6 +162,41 @@ export const actions = {
 
   deleteComp(id: number) {
     mutate((d) => ({ ...d, compensations: d.compensations.filter((c) => c.id !== id) }));
+  },
+
+  /**
+   * Ajusta as compensações de um dia de origem para caberem na nova dívida
+   * (após uma correção de registro). Preserva o histórico: reduz os minutos
+   * (da mais recente para a mais antiga) e, quando sobra vinculação, cancela
+   * em vez de apagar.
+   */
+  capCompensationsForSource(sourceDate: string, kind: CompKind, maxMinutes: number) {
+    mutate((d) => {
+      const linked = d.compensations
+        .map((c, idx) => ({ c, idx }))
+        .filter(
+          ({ c }) =>
+            c.sourceDate === sourceDate &&
+            (c.kind ?? "excedente") === kind &&
+            c.status !== "cancelada",
+        )
+        .sort((a, b) => b.c.createdAt - a.c.createdAt);
+
+      let budget = Math.max(0, maxMinutes);
+      const comps = [...d.compensations];
+
+      for (const { c, idx } of linked) {
+        if (budget <= 0) {
+          comps[idx] = { ...c, status: "cancelada" };
+          continue;
+        }
+        const keep = Math.min(c.minutes, budget);
+        comps[idx] = keep > 0 ? { ...c, minutes: keep } : { ...c, status: "cancelada" };
+        budget -= keep;
+      }
+
+      return { ...d, compensations: comps };
+    });
   },
 
   updateUser(patch: Partial<User>) {

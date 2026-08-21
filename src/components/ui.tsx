@@ -220,6 +220,39 @@ export function Modal({
 
 /* ── Feedback ───────────────────────────────────────────── */
 
+/* ── Barra de progresso linear ──────────────────────────── */
+
+export function ProgressBar({
+  concluded,
+  pending,
+  total,
+  height = 10,
+}: {
+  concluded: number;
+  pending: number;
+  total: number;
+  height?: number;
+}) {
+  const scale = Math.max(total, concluded + pending, 1);
+  const donePct = (concluded / scale) * 100;
+  const planPct = (pending / scale) * 100;
+  return (
+    <div
+      className="flex w-full overflow-hidden rounded-full bg-slate-100 ring-1 ring-inset ring-slate-200"
+      style={{ height }}
+    >
+      <div
+        className="bg-gradient-to-r from-emerald-500 to-emerald-400 transition-all duration-700"
+        style={{ width: `${donePct}%` }}
+      />
+      <div
+        className="bg-gradient-to-r from-amber-400 to-amber-300 transition-all duration-700"
+        style={{ width: `${planPct}%` }}
+      />
+    </div>
+  );
+}
+
 export function Spinner({ className = "" }: { className?: string }) {
   return <Loader2 className={`animate-spin text-emerald-600 ${className}`} size={20} />;
 }
