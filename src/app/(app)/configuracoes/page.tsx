@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Clock3, Database, Info, Save, Trash2, Upload, UserRound } from "lucide-react";
+import { Clock3, Database, Download, Info, Save, Trash2, Upload, UserRound } from "lucide-react";
 import {
   actions,
   getAppData,
@@ -10,8 +10,10 @@ import {
   useAppData,
   useIsClient,
 } from "@/lib/store";
+import { buildBackupPayload } from "@/lib/backup";
 import { expectedMinutesOf, formatMinutes } from "@/lib/time";
 import { Button, Card, Input, Select, Skeleton, Toggle } from "@/components/ui";
+import { ImportBackupModal } from "@/components/import-backup-modal";
 import { useToast } from "@/components/toast";
 
 export default function ConfiguracoesPage() {
@@ -30,6 +32,7 @@ export default function ConfiguracoesPage() {
   });
   const [busyProfile, setBusyProfile] = useState(false);
   const [busySchedule, setBusySchedule] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
 
   useEffect(() => {
     if (!mounted) return;
@@ -65,7 +68,7 @@ export default function ConfiguracoesPage() {
   };
 
   const exportJson = () => {
-    const blob = new Blob([JSON.stringify(getAppData(), null, 2)], {
+    const blob = new Blob([JSON.stringify(buildBackupPayload(getAppData()), null, 2)], {
       type: "application/json",
     });
     const url = URL.createObjectURL(blob);
@@ -195,7 +198,10 @@ export default function ConfiguracoesPage() {
 
         <div className="mt-4 flex flex-wrap gap-2">
           <Button variant="secondary" size="sm" onClick={exportJson}>
-            <Upload size={14} /> Exportar backup (JSON)
+            <Download size={14} /> Exportar backup (JSON)
+          </Button>
+          <Button variant="secondary" size="sm" onClick={() => setImportOpen(true)}>
+            <Upload size={14} /> Importar backup (JSON)
           </Button>
           <Button variant="secondary" size="sm" onClick={reseed}>
             <Database size={14} /> Restaurar dados de exemplo
@@ -243,6 +249,8 @@ export default function ConfiguracoesPage() {
           </div>
         </div>
       </Card>
+
+      <ImportBackupModal open={importOpen} onClose={() => setImportOpen(false)} />
     </div>
   );
 }

@@ -212,6 +212,46 @@ export const actions = {
   clearAll() {
     mutate((d) => ({ ...d, entries: [], compensations: [] }));
   },
+
+  /** Substitui integralmente os dados pelos do backup. */
+  replaceAll(p: { user: User; entries: TimeEntry[]; compensations: Compensation[] }) {
+    mutate(() => ({ user: p.user, entries: p.entries, compensations: p.compensations }));
+  },
+
+  /** Mescla o backup com os dados atuais, evitando duplicação. */
+  mergeBackup(p: { entries: TimeEntry[]; compensations: Compensation[] }) {
+    mutate((d) => {
+      const entryKeys = new Set(d.entries.map((e) => `${e.date}|${e.time}|${e.type}`));
+      const compKeys = new Set(
+        d.compensations.map((c) => `${c.sourceDate}|${c.targetDate}|${c.minutes}|${c.kind ?? "excedente"}`),
+      );
+
+      let entryCursor = d.entries.reduce((m, e) => Math.max(m, e.id), 0) + 1;
+      let compCursor = d.compensations.reduce((m, c) => Math.max(m, c.id), 0) + 1;
+
+      const newEntries: TimeEntry[] = [];
+      for (const e of p.entries) {
+        const key = `${e.date}|${e.time}|${e.type}`;
+        if (entryKeys.has(key)) continue;
+        entryKeys.add(key);
+        newEntries.push({ ...e, id: entryCursor++ });
+      }
+
+      const newComps: Compensation[] = [];
+      for (const c of p.compensations) {
+        const key = `${c.sourceDate}|${c.targetDate}|${c.minutes}|${c.kind ?? "excedente"}`;
+        if (compKeys.has(key)) continue;
+        compKeys.add(key);
+        newComps.push({ ...c, id: compCursor++, kind: c.kind ?? "excedente" });
+      }
+
+      return {
+        ...d,
+        entries: [...d.entries, ...newEntries],
+        compensations: [...d.compensations, ...newComps],
+      };
+    });
+  },
 };
 
 export function getAppData(): AppData {
