@@ -1,0 +1,322 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import {
+  ArrowLeftRight,
+  CalendarClock,
+  Clock3,
+  PlusCircle,
+  Timer,
+  TriangleAlert,
+  Wallet,
+} from "lucide-react";
+import { actions, enrichComp, settingsOf, useAppData, useIsClient } from "@/lib/store";
+import {
+  addDays,
+  computeDay,
+  formatDateShortBR,
+  formatMinutes,
+  monthKey,
+  nowMinutesLocal,
+  todayString,
+  weekdayShort,
+  type EntryType,
+} from "@/lib/time";
+import type { DayResult, DaySummary } from "@/lib/types";
+import { Badge, Button, Card, EmptyState, Skeleton, StatCard } from "@/components/ui";
+import { QuickPunch } from "@/components/quick-punch";
+import { BarsChart, type BarDatum } from "@/components/charts";
+import { CompensationForm } from "@/components/compensation-form";
+import { useToast } from "@/components/toast";
+
+function toSummary(d: DayResult, date?: string): DaySummary {
+  return {
+    date: date ?? d.date,
+    workedMinutes: d.workedMinutes,
+    expectedMinutes: d.expectedMinutes,
+    balanceMinutes: d.balanceMinutes,
+    excessMinutes: d.excessMinutes,
+    registrableMinutes: d.registrableMinutes,
+    status: d.status,
+    open: d.open,
+    entryCount: d.entries.length,
+  };
+}
+
+export default function DashboardPage() {
+  const toast = useToast();
+  const mounted = useIsClient();
+  const { user, entries, compensations } = useAppData();
+  const settings = settingsOf(user);
+  const month = monthKey(todayString());
+  const todayStr = todayString();
+  const [compOpen, setCompOpen] = useState(false);
+
+  // Mantém as horas "em andamento" atualizadas a cada 30s
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const t = window.setInterval(() => setTick((n) => n + 1), 30_000);
+    return () => window.clearInterval(t);
+  }, []);
+
+  const { monthDays, totals, today, recent, pending } = useMemo(() => {
+    const byDate = new Map<string, typeof entries>();
+    for (const e of entries) {
+      if (e.date.startsWith(month)) {
+        byDate.set(e.date, [...(byDate.get(e.date) ?? []), e]);
+      }
+    }
+
+    const days: DaySummary[] = [];
+    for (const [date, list] of byDate) {
+      days.push(toSummary(computeDay(list, settings), date));
+    }
+    days.sort((a, b) => a.date.localeCompare(b.date));
+
+    const sum = days.reduce(
+      (acc, d) => {
+        acc.trackedDays += 1;
+        acc.workedTotal += d.workedMinutes;
+        acc.registrableTotal += d.registrableMinutes;
+        acc.balanceTotal += d.balanceMinutes;
+        acc.excessTotal += d.excessMinutes;
+        return acc;
+      },
+      { trackedDays: 0, workedTotal: 0, registrableTotal: 0, balanceTotal: 0, excessTotal: 0 },
+    );
+
+    const todays = computeDay(byDate.get(todayStr) ?? [], settings, nowMinutesLocal());
+    if (!todays.date) todays.date = todayStr;
+
+    const recents: DaySummary[] = [];
+    for (let i = 13; i >= 0; i--) {
+      const d = addDays(todayStr, -i);
+      recents.push(toSummary(computeDay(entries.filter((e) => e.date === d), settings), d));
+    }
+
+    const pend = compensations
+      .filter((c) => c.status === "pendente")
+      .map((c) => enrichComp(c, entries, settings))
+      .sort((a, b) => a.targetDate.localeCompare(b.targetDate));
+
+    return { monthDays: days, totals: sum, today: todays, recent: recents, pending: pend };
+  }, [entries, compensations, settings, month, todayStr]);
+
+  const onAddEntry = async (p: { date: string; time: string; type: EntryType; note: string | null }) => {
+    actions.addEntry(p);
+  };
+
+  const onDeleteEntry = async (id: number) => {
+    actions.deleteEntry(id);
+  };
+
+  const completeComp = async (id: number) => {
+    actions.completeComp(id);
+    toast.show("Compensação concluída. Bom descanso!");
+  };
+
+  const createComp = async (payload: { sourceDate: string; targetDate: string; minutes: number; note: string }) => {
+    actions.addComp({ ...payload, note: payload.note || null });
+    setCompOpen(false);
+    toast.show("Compensação criada!");
+  };
+
+  if (!mounted) {
+    return (
+      <div className="space-y-6">
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+          {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-28" />)}
+        </div>
+        <Skeleton className="h-56" />
+        <div className="grid gap-6 lg:grid-cols-2">
+          <Skeleton className="h-64" />
+          <Skeleton className="h-64" />
+        </div>
+      </div>
+    );
+  }
+
+  const t = today;
+  const balanceTone = totals.balanceTotal > 0 ? "emerald" : totals.balanceTotal < 0 ? "rose" : "slate";
+  const excessTone = totals.excessTotal > 0 ? "amber" : "slate";
+  const todayStatusTone = t.status === "excess" ? "rose" : t.status === "deficit" ? "amber" : t.status === "in-progress" ? "indigo" : "slate";
+  const firstName = user.name.split(" ")[0];
+
+  const chartData: BarDatum[] = recent.map((d) => ({
+    label: weekdayShort(d.date).replace(".", ""),
+    value: d.workedMinutes,
+    baseline: d.expectedMinutes,
+    cap: settings.maxDailyMinutes,
+    status: d.status,
+  }));
+
+  const recentDays = [...recent].filter((d) => d.entryCount > 0).slice(-7).reverse();
+
+  return (
+    <div className="space-y-6">
+      {/* Cabeçalho */}
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h2 className="text-xl font-extrabold tracking-tight text-slate-900">
+            Olá, {firstName}! 👋
+          </h2>
+          <p className="text-sm text-slate-500">
+            {t.empty
+              ? "Você ainda não bateu o ponto hoje. Registre sua entrada abaixo."
+              : t.open
+                ? "Seu ponto de hoje está em andamento."
+                : "Seu ponto de hoje está fechado."}
+          </p>
+        </div>
+        <Link href="/registros">
+          <Button variant="secondary">
+            <CalendarClock size={15} /> Ver registros
+          </Button>
+        </Link>
+      </div>
+
+      {/* Indicadores */}
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <StatCard
+          label="Hoje"
+          value={formatMinutes(t.workedMinutes)}
+          sub={
+            <>
+              base {formatMinutes(t.expectedMinutes)} ·{" "}
+              <span className={t.balanceMinutes >= 0 ? "text-emerald-600" : "text-rose-600"}>
+                {t.balanceMinutes >= 0 ? "+" : ""}
+                {formatMinutes(t.balanceMinutes)}
+              </span>
+            </>
+          }
+          tone={todayStatusTone}
+          icon={<Timer size={16} />}
+        />
+        <StatCard
+          label="Saldo do mês"
+          value={`${totals.balanceTotal >= 0 ? "+" : ""}${formatMinutes(totals.balanceTotal)}`}
+          sub={totals.balanceTotal >= 0 ? "horas a seu favor (crédito)" : "horas em débito — atenção"}
+          tone={balanceTone}
+          icon={<Wallet size={16} />}
+        />
+        <StatCard
+          label="Excedente do mês"
+          value={formatMinutes(totals.excessTotal)}
+          sub={`acima de ${formatMinutes(settings.maxDailyMinutes)}/dia · ${totals.trackedDays} dia(s) registrados`}
+          tone={excessTone}
+          icon={<TriangleAlert size={16} />}
+        />
+        <StatCard
+          label="Compensações pendentes"
+          value={pending.length}
+          sub={
+            pending.length > 0
+              ? `${formatMinutes(pending.reduce((s, c) => s + c.minutes, 0))} a compensar`
+              : "tudo em dia 🎉"
+          }
+          tone={pending.length > 0 ? "indigo" : "slate"}
+          icon={<ArrowLeftRight size={16} />}
+        />
+      </div>
+
+      {/* Registro rápido */}
+      <QuickPunch
+        today={t}
+        todayStr={todayStr}
+        settings={settings}
+        onAddEntry={onAddEntry}
+        onDeleteEntry={onDeleteEntry}
+      />
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        {/* Compensações pendentes */}
+        <Card
+          title="Compensações pendentes"
+          subtitle="Horas excedentes que precisam ser compensadas"
+          actions={
+            <Button size="sm" variant="subtle" onClick={() => setCompOpen(true)}>
+              <PlusCircle size={13} /> Nova
+            </Button>
+          }
+        >
+          {pending.length === 0 ? (
+            <EmptyState
+              icon={<ArrowLeftRight size={24} />}
+              title="Nenhuma compensação pendente"
+              description="Quando um dia passar de 10h, crie uma compensação para o dia seguinte."
+            />
+          ) : (
+            <ul className="space-y-3">
+              {pending.map((c) => (
+                <li key={c.id} className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-100 bg-slate-50/60 p-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-bold text-slate-800">
+                      Compensar {formatMinutes(c.minutes)}{" "}
+                      <span className="font-medium text-slate-400">
+                        (excedente de {formatDateShortBR(c.sourceDate)})
+                      </span>
+                    </p>
+                    <p className="mt-0.5 text-xs text-slate-500">
+                      {c.targetDate === todayStr && (
+                        <span className="font-bold text-indigo-600">Hoje · </span>
+                      )}
+                      até {formatDateShortBR(c.targetDate)}
+                      {c.note ? ` · ${c.note}` : ""}
+                    </p>
+                  </div>
+                  <Badge tone="indigo">pendente</Badge>
+                  <Button size="sm" variant="secondary" onClick={() => completeComp(c.id)}>
+                    Concluir
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+
+        {/* Últimos 14 dias */}
+        <Card title="Últimos 14 dias" subtitle="Horas trabalhadas por dia vs. base diária">
+          <BarsChart data={chartData} height={150} />
+        </Card>
+      </div>
+
+      {/* Dias recentes */}
+      <Card title="Dias recentes" subtitle="Seus últimos dias com registro">
+        {recentDays.length === 0 ? (
+          <EmptyState
+            icon={<Clock3 size={24} />}
+            title="Nenhum registro ainda"
+            description="Use o registro rápido acima ou a página de Registros para começar."
+          />
+        ) : (
+          <div className="divide-y divide-slate-100">
+            {recentDays.map((d) => (
+              <Link key={d.date} href="/registros" className="flex items-center gap-3 py-3 transition-colors hover:bg-slate-50/70">
+                <span className="w-24 shrink-0 text-sm font-bold text-slate-800">
+                  {weekdayShort(d.date).replace(".", "")}
+                  <span className="ml-1.5 font-medium text-slate-400">{formatDateShortBR(d.date)}</span>
+                </span>
+                <span className="hidden text-xs text-slate-400 sm:block">{d.entryCount} batida(s)</span>
+                <span className="ml-auto text-sm font-extrabold tabular-nums text-slate-900">
+                  {formatMinutes(d.workedMinutes)}
+                </span>
+                <span
+                  className={`w-20 text-right text-xs font-bold tabular-nums ${
+                    d.balanceMinutes > 0 ? "text-emerald-600" : d.balanceMinutes < 0 ? "text-rose-600" : "text-slate-400"
+                  }`}
+                >
+                  {d.balanceMinutes >= 0 ? "+" : ""}
+                  {formatMinutes(d.balanceMinutes)}
+                </span>
+                {d.excessMinutes > 0 ? <Badge tone="rose">+10h</Badge> : <Badge tone="slate">ok</Badge>}
+              </Link>
+            ))}
+          </div>
+        )}
+      </Card>
+
+      <CompensationForm open={compOpen} onClose={() => setCompOpen(false)} onSave={createComp} />
+    </div>
+  );
+}
