@@ -5,21 +5,38 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { computeDay, formatMinutes, type EntryType } from "./time";
 import { buildSeedData, DEFAULT_USER } from "./seed-data";
-import { compsEqual, entriesEqual, mergeByIdAndContent } from "./backup";
+import { absencesEqual, compsEqual, entriesEqual, mergeByIdAndContent } from "./backup";
 import { extraCapacityForDate } from "./debt";
+import { validateAbsence, type Absence, type AbsenceSplit } from "./absences";
+import { sameAnnualCycle } from "./periods";
 
 /** Resultado estruturado de operações que podem ser rejeitadas por validação. */
 export interface ActionResult {
   ok: boolean;
   /** Mensagem pronta para exibição na interface. */
   error?: string;
-  code?: "over-capacity" | "invalid" | "not-found";
+  code?: "over-capacity" | "invalid" | "not-found" | "cross-cycle" | "overlap";
   /** Capacidade disponível no dia de destino (quando code = over-capacity). */
   available?: number;
   limitMinutes?: number;
+  /** Evento atravessa o fechamento anual: sugestão de divisão em 2 registros. */
+  split?: AbsenceSplit;
+  /** Operação salva, com aviso informativo (ex.: batidas existentes no período). */
+  warning?: string;
 }
 
 const OK: ActionResult = { ok: true };
+
+const CROSS_CYCLE_MSG =
+  "Esta compensação não pode ser realizada porque a origem e o destino pertencem a ciclos anuais diferentes. As compensações devem ocorrer dentro do mesmo ciclo anual.";
+
+/** Regra 14: compensação nunca atravessa o fechamento anual (30/04). */
+export function validateCompCycle(sourceDate: string, targetDate: string): ActionResult {
+  if (!sameAnnualCycle(sourceDate, targetDate)) {
+    return { ok: false, code: "cross-cycle", error: CROSS_CYCLE_MSG };
+  }
+  return OK;
+}
 import type {
   AppData,
   CompKind,
@@ -38,6 +55,7 @@ const pristine: AppData = {
   user: { ...DEFAULT_USER },
   entries: [],
   compensations: [],
+  absences: [],
 };
 
 let data: AppData = pristine;
@@ -63,14 +81,15 @@ function load() {
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (raw) {
-      const parsed = JSON.parse(raw) as AppData;
+      const parsed = JSON.parse(raw) as Partial<AppData> & AppData;
       if (
         parsed &&
         parsed.user &&
         Array.isArray(parsed.entries) &&
         Array.isArray(parsed.compensations)
       ) {
-        data = parsed;
+        // Retrocompatibilidade: dados antigos podem não ter "absences"
+        data = { ...parsed, absences: Array.isArray(parsed.absences) ? parsed.absences : [] };
         emit();
         return;
       }
@@ -159,8 +178,14 @@ export const actions = {
         result = { ok: false, code: "invalid", error: "Quantidade de minutos inválida." };
         return d;
       }
+      // Regra 14: barreira absoluta do fechamento anual
+      const cycleCheck = validateCompCycle(p.sourceDate, p.targetDate);
+      if (!cycleCheck.ok) {
+        result = cycleCheck;
+        return d;
+      }
       // Regra central: hora extra nunca ultrapassa a capacidade real do dia de destino
-      if (kind === "deficit" && p.status !== "cancelada") {
+      if ((kind === "deficit" || kind === "acordo") && p.status !== "cancelada") {
         const cap = extraCapacityForDate(
           p.targetDate,
           d.entries,
@@ -212,6 +237,12 @@ export const actions = {
         return d;
       }
       const next = { ...target, ...patch };
+      // Regra 14/17: nunca mover origem/destino para ciclos anuais diferentes
+      const cycleCheck = validateCompCycle(next.sourceDate, next.targetDate);
+      if (!cycleCheck.ok) {
+        result = cycleCheck;
+        return d;
+      }
       const kindChanged = (next.kind ?? "excedente") !== (target.kind ?? "excedente");
       const reactivated =
         patch.status !== undefined && patch.status !== "cancelada" && target.status === "cancelada";
@@ -223,7 +254,7 @@ export const actions = {
 
       if (
         touchesCapacity &&
-        (next.kind ?? "excedente") === "deficit" &&
+        ((next.kind ?? "excedente") === "deficit" || (next.kind ?? "excedente") === "acordo") &&
         next.status !== "cancelada"
       ) {
         const cap = extraCapacityForDate(
@@ -258,6 +289,74 @@ export const actions = {
 
   deleteComp(id: number) {
     mutate((d) => ({ ...d, compensations: d.compensations.filter((c) => c.id !== id) }));
+  },
+
+  /**
+   * Cria um evento de férias/afastamento. Valida: datas, período parcial,
+   * tratamento do acordo, sobreposição com outros eventos e a barreira do
+   * fechamento anual (não salva evento único atravessando 30/04 — devolve
+   * sugestão de divisão em dois registros independentes).
+   */
+  addAbsence(
+    draft: Omit<Absence, "id" | "createdAt">,
+  ): ActionResult {
+    let result: ActionResult = OK;
+    mutate((d) => {
+      const v = validateAbsence(draft, d.absences, d.entries);
+      if (!v.ok) {
+        result = { ok: false, code: v.code, error: v.error, split: v.split };
+        return d;
+      }
+      const created: Absence = { ...draft, id: nextId(d.absences), createdAt: Date.now() };
+      result = v.warning ? { ok: true, warning: v.warning } : OK;
+      return { ...d, absences: [...d.absences, created] };
+    });
+    return result;
+  },
+
+  updateAbsence(id: number, patch: Partial<Omit<Absence, "id" | "createdAt">>): ActionResult {
+    let result: ActionResult = OK;
+    mutate((d) => {
+      const target = d.absences.find((a) => a.id === id);
+      if (!target) {
+        result = { ok: false, code: "not-found", error: "Evento não encontrado." };
+        return d;
+      }
+      const next = { ...target, ...patch };
+      const v = validateAbsence(next, d.absences, d.entries, id);
+      if (!v.ok) {
+        result = { ok: false, code: v.code, error: v.error, split: v.split };
+        return d;
+      }
+      result = v.warning ? { ok: true, warning: v.warning } : OK;
+      return { ...d, absences: d.absences.map((a) => (a.id === id ? next : a)) };
+    });
+    return result;
+  },
+
+  deleteAbsence(id: number): ActionResult {
+    let result: ActionResult = OK;
+    mutate((d) => {
+      const target = d.absences.find((a) => a.id === id);
+      if (!target) {
+        result = { ok: false, code: "not-found", error: "Evento não encontrado." };
+        return d;
+      }
+      // Preserva histórico: avisa se houver compensações ligadas ao período,
+      // mas não apaga nada silenciosamente.
+      const linked = d.compensations.filter(
+        (c) => c.sourceDate >= target.startDate && c.sourceDate <= target.endDate,
+      );
+      result =
+        linked.length > 0
+          ? {
+              ok: true,
+              warning: `Existem ${linked.length} compensação(ões) ligadas a este período. Elas foram preservadas no histórico.`,
+            }
+          : OK;
+      return { ...d, absences: d.absences.filter((a) => a.id !== id) };
+    });
+    return result;
   },
 
   /**
@@ -310,22 +409,34 @@ export const actions = {
   },
 
   /** Substitui integralmente os dados pelos do backup. */
-  replaceAll(p: { user: User; entries: TimeEntry[]; compensations: Compensation[] }) {
-    mutate(() => ({ user: p.user, entries: p.entries, compensations: p.compensations }));
+  replaceAll(p: { user: User; entries: TimeEntry[]; compensations: Compensation[]; absences?: Absence[] }) {
+    mutate(() => ({
+      user: p.user,
+      entries: p.entries,
+      compensations: p.compensations,
+      absences: p.absences ?? [],
+    }));
   },
 
   /**
    * Mescla o backup com os dados atuais, preservando eventos distintos.
    * Deduplicação segura via ID + conteúdo completo (nunca apenas dias/minutos).
    */
-  mergeBackup(p: { entries: TimeEntry[]; compensations: Compensation[] }) {
+  mergeBackup(p: { entries: TimeEntry[]; compensations: Compensation[]; absences?: Absence[] }) {
     mutate((d) => {
       const entryMerge = mergeByIdAndContent(d.entries, p.entries, entriesEqual);
       const compMerge = mergeByIdAndContent(d.compensations, p.compensations, compsEqual);
+      // Eventos divididos no fechamento anual permanecem independentes (sem recombinar)
+      const absenceMerge = mergeByIdAndContent(
+        d.absences,
+        p.absences ?? [],
+        absencesEqual,
+      );
       return {
         ...d,
         entries: entryMerge.merged,
         compensations: compMerge.merged,
+        absences: absenceMerge.merged,
       };
     });
   },

@@ -1,5 +1,7 @@
 // Matemática de dívida de horas: abatimento fracionado + sugestões inteligentes.
 import { computeDay, expectedMinutesOf } from "./time";
+import { dayContext, type Absence } from "./absences";
+import { sameAnnualCycle } from "./periods";
 import type {
   CompKind,
   Compensation,
@@ -50,26 +52,37 @@ export function pendingForTarget(comps: Compensation[], date: string): Compensat
 }
 
 /**
- * Varre todos os dias com registros e devolve os que geraram dívida,
- * já com o abatimento fracionado aplicado (alocado / pendente / concluído / restante).
+ * Varre todos os dias com registros (e/ou ausências) e devolve os que geraram
+ * dívida — excedente, déficit ou acordo a compensar — já com o abatimento
+ * fracionado aplicado (alocado / pendente / concluído / restante).
+ * Férias/saúde/dispensado não geram dívida (via dayContext).
  */
 export function buildDebtDays(
   entries: TimeEntry[],
   comps: Compensation[],
   settings: WorkSettings,
   range?: { from: string; to: string },
+  absences: Absence[] = [],
 ): DebtDay[] {
-  const byDate = new Map<string, TimeEntry[]>();
+  // Datas relevantes: com batidas OU cobertas por ausência (acordo sem batidas conta)
+  const dates = new Set<string>();
   for (const e of entries) {
     if (range && (e.date < range.from || e.date > range.to)) continue;
-    byDate.set(e.date, [...(byDate.get(e.date) ?? []), e]);
+    dates.add(e.date);
+  }
+  for (const a of absences) {
+    let cur = a.startDate;
+    while (cur <= a.endDate) {
+      if (!range || (cur >= range.from && cur <= range.to)) dates.add(cur);
+      cur = addOneDay(cur);
+    }
   }
 
   const out: DebtDay[] = [];
 
-  for (const [date, list] of byDate) {
-    const day = computeDay(list, settings);
-    if (day.empty) continue;
+  for (const date of dates) {
+    const ctx = dayContext(date, entries, absences, settings);
+    const day = ctx.day;
 
     const excess = day.excessMinutes;
 
@@ -77,11 +90,10 @@ export function buildDebtDays(
     const coveredByEarlyExit = sumMinutes(
       comps.filter((c) => c.targetDate === date && kindOf(c) === "excedente" && isActive(c)),
     );
-    // Dia com ponto aberto (entrada sem saída) está "em andamento":
-    // o déficit só é definitivo após a saída final.
+    // Dia com ponto aberto: déficit só é definitivo após a saída final.
     const deficit = day.open
       ? 0
-      : Math.max(0, day.expectedMinutes - day.workedMinutes - coveredByEarlyExit);
+      : Math.max(0, ctx.adjustedDeficit - coveredByEarlyExit);
 
     const push = (kind: CompKind, debtMinutes: number) => {
       if (debtMinutes <= 0) return;
@@ -90,7 +102,7 @@ export function buildDebtDays(
         date,
         kind,
         workedMinutes: day.workedMinutes,
-        expectedMinutes: day.expectedMinutes,
+        expectedMinutes: ctx.effectiveExpected,
         debtMinutes,
         allocatedMinutes: Math.min(allocated, debtMinutes),
         pendingMinutes: pendingForSource(comps, date, kind),
@@ -101,9 +113,18 @@ export function buildDebtDays(
 
     push("excedente", excess);
     push("deficit", deficit);
+    push("acordo", ctx.acordoMinutes);
   }
 
   return out.sort((a, b) => a.date.localeCompare(b.date));
+}
+
+function addOneDay(d: string): string {
+  // helper local para varrer o intervalo da ausência sem circular dependências
+  const dt = new Date(`${d}T12:00:00`);
+  dt.setDate(dt.getDate() + 1);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${dt.getFullYear()}-${p(dt.getMonth() + 1)}-${p(dt.getDate())}`;
 }
 
 export function totalsOf(days: DebtDay[]): DebtTotals {
@@ -144,6 +165,8 @@ export function suggestTargets(
   const out: TargetSuggestion[] = [];
   for (const [date, list] of byDate) {
     if (date === excludeDate) continue;
+    // Regra 16: nunca sugerir destino de outro ciclo anual
+    if (!sameAnnualCycle(date, excludeDate)) continue;
     const day = computeDay(list, settings);
     if (day.empty || day.workedMinutes === 0) continue;
     // Dia em andamento não é candidato: o saldo ainda não está fechado
@@ -226,11 +249,12 @@ export function extraCapacityForDate(
   const limitMinutes = settings.maxDailyMinutes;
   const headroom = Math.max(0, limitMinutes - baseMinutes);
 
+  // Hora extra do dia é consumida tanto por déficit quanto por acordo a compensar
   const alreadyAllocated = sumMinutes(
     comps.filter(
       (c) =>
         c.targetDate === date &&
-        kindOf(c) === "deficit" &&
+        (kindOf(c) === "deficit" || kindOf(c) === "acordo") &&
         isActive(c) &&
         c.id !== opts?.excludeCompId,
     ),

@@ -37,8 +37,10 @@ export function buildExitPlan(
   comps: Compensation[],
   nowMinutes: number,
   date: string,
+  /** Jornada esperada efetiva do dia (reduzida por férias/afastamentos), quando houver. */
+  effectiveExpected?: number,
 ): SmartExitPlan {
-  const base = day.expectedMinutes || expectedMinutesOf(settings);
+  const base = effectiveExpected ?? day.expectedMinutes ?? expectedMinutesOf(settings);
   const targeted = pendingForTarget(comps, date);
 
   const earlyMinutes = targeted
@@ -107,6 +109,8 @@ interface Props {
   /** Confirma a quitação de compensações por hora extra (sem registrar saída). */
   onConfirmComps?: (compIds: number[]) => Promise<void>;
   isToday?: boolean;
+  /** Jornada esperada efetiva (com ausências já descontadas), quando houver. */
+  effectiveExpected?: number;
 }
 
 export function SmartExit({
@@ -118,10 +122,11 @@ export function SmartExit({
   onSmartExit,
   onConfirmComps,
   isToday,
+  effectiveExpected,
 }: Props) {
   const plan = useMemo(
-    () => buildExitPlan(day, settings, comps, nowMinutes, date),
-    [day, settings, comps, nowMinutes, date],
+    () => buildExitPlan(day, settings, comps, nowMinutes, date, effectiveExpected),
+    [day, settings, comps, nowMinutes, date, effectiveExpected],
   );
 
   const [busy, setBusy] = useState(false);

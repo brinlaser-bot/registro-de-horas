@@ -32,8 +32,10 @@ export type CompStatus = "pendente" | "concluida" | "cancelada";
 /**
  * excedente: dia passou de 10h → compensa SAINDO MAIS CEDO no dia destino.
  * deficit:   dia ficou abaixo da base → compensa FAZENDO HORA EXTRA no destino.
+ * acordo:    horas de afastamento acordado "a compensar" → HORA EXTRA no destino
+ *            (sempre dentro do mesmo ciclo anual da origem).
  */
-export type CompKind = "excedente" | "deficit";
+export type CompKind = "excedente" | "deficit" | "acordo";
 
 export interface Compensation {
   id: number;
@@ -80,6 +82,7 @@ export interface AppData {
   user: User;
   entries: TimeEntry[];
   compensations: Compensation[];
+  absences: import("./absences").Absence[];
 }
 
 export interface CompWithDays extends Compensation {

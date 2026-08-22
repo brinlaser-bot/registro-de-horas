@@ -1,35 +1,67 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { CalendarPlus, ChevronLeft, ChevronRight, Clock3 } from "lucide-react";
+import { CalendarClock, ChevronLeft, ChevronRight, Clock3, Search, X } from "lucide-react";
 import { actions, getAppData, settingsOf, useAppData, useIsClient } from "@/lib/store";
 import {
   computeDay,
   formatDateShortBR,
   formatMinutes,
-  monthKey,
   nowMinutesLocal,
   todayString,
   type EntryType,
 } from "@/lib/time";
+import { absenceOnDate, dayContext, type Absence } from "@/lib/absences";
+import {
+  getAnnualPointCycle,
+  getNextPointPeriod,
+  getPointPeriod,
+  getPreviousPointPeriod,
+  listDaysBetween,
+  periodLabel,
+  type PointPeriod,
+} from "@/lib/periods";
+import { buildDebtDays, checkSourceOverflow } from "@/lib/debt";
 import type { CompKind, DayResult, WorkSettings } from "@/lib/types";
-import { checkSourceOverflow } from "@/lib/debt";
 import { DayCard } from "@/components/day-card";
 import { ManualEntryModal, type ManualPairData } from "@/components/manual-entry-modal";
-import { Button, Card, EmptyState, Skeleton } from "@/components/ui";
+import { Badge, Button, Card, EmptyState, Skeleton } from "@/components/ui";
 import { useToast } from "@/components/toast";
+
+interface RangeSummary {
+  cycle: string;
+  workedDays: number;
+  workedMinutes: number;
+  registrableMinutes: number;
+  balanceMinutes: number;
+  excessMinutes: number;
+  deficitMinutes: number;
+  compensatedMinutes: number; // concluídas no intervalo
+  pendingCompMinutes: number; // pendentes com origem no intervalo
+  vacationDays: number;
+  healthDays: number;
+  waivedDays: number; // acordado dispensado / outro
+  acordoTotal: number;
+  acordoDone: number;
+  acordoPending: number;
+}
 
 export default function RegistrosPage() {
   const toast = useToast();
   const mounted = useIsClient();
-  const { user, entries, compensations } = useAppData();
-  const [month, setMonth] = useState(monthKey(todayString()));
-  const [manualOpen, setManualOpen] = useState(false);
+  const { user, entries, compensations, absences } = useAppData();
   const todayStr = todayString();
 
   const settings: WorkSettings = settingsOf(user);
 
-  // Atualiza a cada 30s para manter o assistente de saída em tempo real
+  // Navegação por período oficial do ponto (21→20, com especiais 21/04–30/04 e 01/05–20/05)
+  const [period, setPeriod] = useState<PointPeriod>(() => getPointPeriod(todayStr));
+  // Consulta personalizada (apenas leitura, pode atravessar períodos/ciclos/anos)
+  const [query, setQuery] = useState<{ from: string; to: string } | null>(null);
+  const [queryDraft, setQueryDraft] = useState({ from: "", to: "" });
+  const [manualOpen, setManualOpen] = useState(false);
+
+  // Relógio para o assistente de saída em tempo real
   const [, setTick] = useState(0);
   useEffect(() => {
     const t = window.setInterval(() => setTick((n) => n + 1), 30_000);
@@ -37,53 +69,97 @@ export default function RegistrosPage() {
   }, []);
   const nowMinutes = nowMinutesLocal();
 
-  const days: DayResult[] = useMemo(() => {
-    const byDate = new Map<string, DayResult["entries"]>();
+  const range = query ?? period;
+
+  // Dias do intervalo: com batidas OU cobertos por ausência
+  const days = useMemo(() => {
+    const dates = new Set<string>();
     for (const e of entries) {
-      if (!e.date.startsWith(month)) continue;
-      byDate.set(e.date, [...(byDate.get(e.date) ?? []), e]);
+      if (e.date >= range.from && e.date <= range.to) dates.add(e.date);
     }
-    return [...byDate.entries()]
-      .map(([date, list]) => {
-        const res = computeDay(list, settings);
-        res.date = date;
-        return res;
-      })
-      .sort((a, b) => b.date.localeCompare(a.date));
-  }, [entries, month, settings]);
+    for (const a of absences) {
+      for (const d of listDaysBetween(a.startDate, a.endDate)) {
+        if (d >= range.from && d <= range.to) dates.add(d);
+      }
+    }
+    return [...dates]
+      .sort((a, b) => b.localeCompare(a))
+      .map((date) => ({
+        date,
+        ctx: dayContext(date, entries, absences, settings, date === todayStr ? nowMinutes : undefined),
+        absence: absenceOnDate(absences, date),
+      }));
+  }, [entries, absences, settings, range, todayStr, nowMinutes]);
 
-  const summary = useMemo(
-    () =>
-      days.reduce(
-        (acc, d) => {
-          acc.tracked += 1;
-          acc.worked += d.workedMinutes;
-          acc.balance += d.balanceMinutes;
-          acc.excess += d.excessMinutes;
-          return acc;
-        },
-        { tracked: 0, worked: 0, balance: 0, excess: 0 },
-      ),
-    [days],
-  );
+  // Resumo do intervalo, AGRUPADO POR CICLO ANUAL (nunca mistura pendências)
+  const summaries = useMemo(() => {
+    const debts = buildDebtDays(entries, compensations, settings, range, absences);
+    const byCycle = new Map<string, RangeSummary>();
+    const get = (cycle: string): RangeSummary => {
+      let s = byCycle.get(cycle);
+      if (!s) {
+        s = {
+          cycle, workedDays: 0, workedMinutes: 0, registrableMinutes: 0, balanceMinutes: 0,
+          excessMinutes: 0, deficitMinutes: 0, compensatedMinutes: 0, pendingCompMinutes: 0,
+          vacationDays: 0, healthDays: 0, waivedDays: 0, acordoTotal: 0, acordoDone: 0, acordoPending: 0,
+        };
+        byCycle.set(cycle, s);
+      }
+      return s;
+    };
 
-  /** Após criar/editar/excluir um registro, verifica se alguma compensação
-   *  vinculada ficou acima do novo excedente/déficit do dia. */
+    for (const { date, ctx, absence } of days) {
+      const s = get(getAnnualPointCycle(date));
+      if (ctx.day.entries.length > 0) {
+        s.workedDays += 1;
+        s.workedMinutes += ctx.day.workedMinutes;
+        s.registrableMinutes += ctx.day.registrableMinutes;
+        s.excessMinutes += ctx.day.excessMinutes;
+      }
+      s.balanceMinutes += ctx.adjustedBalance;
+      s.deficitMinutes += ctx.adjustedDeficit;
+      if (absence?.kind === "ferias") s.vacationDays += 1;
+      if (absence?.kind === "saude") s.healthDays += 1;
+      if (absence && (absence.kind === "outro" || (absence.kind === "acordado" && absence.treatment === "dispensado"))) {
+        s.waivedDays += 1;
+      }
+    }
+
+    for (const d of debts) {
+      const s = get(getAnnualPointCycle(d.date));
+      if (d.kind === "acordo") {
+        s.acordoTotal += d.debtMinutes;
+        s.acordoDone += d.concludedMinutes;
+        s.acordoPending += d.remainingMinutes;
+      }
+    }
+
+    for (const c of compensations) {
+      if (c.sourceDate < range.from || c.sourceDate > range.to) continue;
+      const s = get(getAnnualPointCycle(c.sourceDate));
+      if (c.status === "concluida") s.compensatedMinutes += c.minutes;
+      if (c.status === "pendente") s.pendingCompMinutes += c.minutes;
+    }
+
+    return [...byCycle.values()].sort((a, b) => a.cycle.localeCompare(b.cycle));
+  }, [days, entries, compensations, absences, settings, range]);
+
+  /* ── Handlers (preservam comportamento validado) ── */
+
   const reconcileDay = (date: string) => {
     const snap = getAppData();
     const s = settingsOf(snap.user);
-    const day = computeDay(snap.entries.filter((e) => e.date === date), s);
-    const deficit = Math.max(0, day.expectedMinutes - day.workedMinutes);
-    const ov = checkSourceOverflow(snap.compensations, date, day.excessMinutes, deficit);
+    const ctx = dayContext(date, snap.entries, snap.absences, s);
+    const ov = checkSourceOverflow(snap.compensations, date, ctx.day.excessMinutes, ctx.adjustedDeficit);
     if (ov.excessOverflow > 0) {
       toast.show(
-        `Atenção: ${formatMinutes(ov.excessOverflow)} de compensação ficou acima do novo excedente do dia ${formatDateShortBR(date)}. Abra o dia para ajustar.`,
+        `Atenção: ${formatMinutes(ov.excessOverflow)} de compensação ficou acima do novo excedente do dia ${formatDateShortBR(date)}. Abra o dia para revisar.`,
         "info",
       );
     }
     if (ov.deficitOverflow > 0) {
       toast.show(
-        `Atenção: ${formatMinutes(ov.deficitOverflow)} de compensação ficou acima do novo déficit do dia ${formatDateShortBR(date)}. Abra o dia para ajustar.`,
+        `Atenção: ${formatMinutes(ov.deficitOverflow)} de compensação ficou acima do novo déficit do dia ${formatDateShortBR(date)}. Abra o dia para revisar.`,
         "info",
       );
     }
@@ -94,10 +170,7 @@ export default function RegistrosPage() {
     reconcileDay(p.date);
   };
 
-  const updateEntry = async (
-    id: number,
-    patch: { time?: string; type?: EntryType; note?: string | null },
-  ) => {
+  const updateEntry = async (id: number, patch: { time?: string; type?: EntryType; note?: string | null }) => {
     const target = entries.find((e) => e.id === id);
     actions.updateEntry(id, patch);
     if (target) reconcileDay(target.date);
@@ -114,8 +187,8 @@ export default function RegistrosPage() {
     toast.show("Compensação concluída!");
   };
 
-  const createComp = async (payload: { sourceDate: string; targetDate: string; minutes: number; note: string }) => {
-    const res = actions.addComp({ ...payload, note: payload.note || null });
+  const createComp = async (payload: { sourceDate: string; targetDate: string; minutes: number; note: string; kind?: CompKind }) => {
+    const res = actions.addComp({ ...payload, note: payload.note || null, kind: payload.kind ?? "excedente" });
     if (!res.ok) throw new Error(res.error); // modal exibe a mensagem e permanece aberto
   };
 
@@ -124,19 +197,23 @@ export default function RegistrosPage() {
     toast.show("Compensação ajustada para manter consistência.");
   };
 
-  /** Lança um par entrada/saída manual (hoje ou data anterior). */
   const addManualPair = async (data: ManualPairData) => {
     actions.addEntry({ date: data.date, time: data.entrada, type: "entrada", note: data.note || null, source: "manual" });
     actions.addEntry({ date: data.date, time: data.saida, type: "saida", note: data.note || null, source: "manual" });
-    setMonth(monthKey(data.date));
     reconcileDay(data.date);
     toast.show("Lançamento manual registrado!");
   };
 
-  const changeMonth = (delta: number) => {
-    const [y, m] = month.split("-").map(Number);
-    const d = new Date(y, m - 1 + delta, 1);
-    setMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+  const runQuery = () => {
+    if (!queryDraft.from || !queryDraft.to) {
+      toast.show("Informe as datas inicial e final.", "error");
+      return;
+    }
+    if (queryDraft.to < queryDraft.from) {
+      toast.show("A data final não pode ser anterior à inicial.", "error");
+      return;
+    }
+    setQuery({ from: queryDraft.from, to: queryDraft.to });
   };
 
   if (!mounted) {
@@ -149,59 +226,139 @@ export default function RegistrosPage() {
 
   return (
     <div className="space-y-6">
-      {/* Controles do mês */}
+      {/* Navegação por período oficial + consulta personalizada */}
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <Button variant="secondary" size="sm" onClick={() => changeMonth(-1)} aria-label="Mês anterior">
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="secondary" size="sm" onClick={() => { setQuery(null); setPeriod(getPreviousPointPeriod(period)); }} aria-label="Período anterior">
             <ChevronLeft size={16} />
           </Button>
-          <input
-            type="month"
-            value={month}
-            onChange={(e) => e.target.value && setMonth(e.target.value)}
-            className="h-9 rounded-xl border border-slate-300 bg-white px-3 text-sm font-bold text-slate-700 outline-none focus:border-emerald-500"
-          />
-          <Button variant="secondary" size="sm" onClick={() => changeMonth(1)} aria-label="Próximo mês">
+          <div className="rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-sm font-extrabold text-slate-800">
+            {query ? (
+              <span>
+                Consulta: {formatDateShortBR(query.from)} → {formatDateShortBR(query.to)}
+              </span>
+            ) : (
+              <span>
+                Período do ponto: {periodLabel(period)}
+              </span>
+            )}
+          </div>
+          <Button variant="secondary" size="sm" onClick={() => { setQuery(null); setPeriod(getNextPointPeriod(period)); }} aria-label="Próximo período">
             <ChevronRight size={16} />
           </Button>
-          {month !== monthKey(todayString()) && (
-            <Button variant="ghost" size="sm" onClick={() => setMonth(monthKey(todayString()))}>
-              Hoje
+          {(query || periodLabel(period) !== periodLabel(getPointPeriod(todayStr))) && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setQuery(null);
+                setPeriod(getPointPeriod(todayStr));
+              }}
+            >
+              Período atual
             </Button>
           )}
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
+          {query && (
+            <Button variant="ghost" size="sm" onClick={() => setQuery(null)}>
+              <X size={13} /> Limpar consulta
+            </Button>
+          )}
           <Button size="sm" onClick={() => setManualOpen(true)}>
-            <CalendarPlus size={14} /> Adicionar registro manual
+            Lançamento manual
           </Button>
-          <Chip label="Dias" value={String(summary.tracked)} />
-          <Chip label="Trabalhado" value={formatMinutes(summary.worked)} />
-          <Chip
-            label="Saldo"
-            value={`${summary.balance >= 0 ? "+" : ""}${formatMinutes(summary.balance)}`}
-            tone={summary.balance >= 0 ? "emerald" : summary.balance < 0 ? "rose" : "slate"}
-          />
+        </div>
+
+        {/* Consulta personalizada */}
+        <div className="flex flex-wrap items-end gap-2">
+          <label className="text-[11px] font-bold uppercase tracking-wide text-slate-400">
+            De
+            <input
+              type="date"
+              value={queryDraft.from}
+              onChange={(e) => setQueryDraft({ ...queryDraft, from: e.target.value })}
+              className="mt-0.5 block h-9 rounded-xl border border-slate-300 bg-white px-2 text-xs font-semibold text-slate-700 outline-none focus:border-emerald-500"
+            />
+          </label>
+          <label className="text-[11px] font-bold uppercase tracking-wide text-slate-400">
+            Até
+            <input
+              type="date"
+              value={queryDraft.to}
+              onChange={(e) => setQueryDraft({ ...queryDraft, to: e.target.value })}
+              className="mt-0.5 block h-9 rounded-xl border border-slate-300 bg-white px-2 text-xs font-semibold text-slate-700 outline-none focus:border-emerald-500"
+            />
+          </label>
+          <Button variant="secondary" size="sm" onClick={runQuery}>
+            <Search size={14} /> Consultar
+          </Button>
         </div>
       </div>
 
+      {/* Resumo do intervalo — agrupado por ciclo anual */}
+      {summaries.length > 0 && (
+        <Card
+          title={query ? "Resumo do intervalo consultado" : "Resumo do período"}
+          subtitle={
+            summaries.length > 1
+              ? "Intervalo atravessa ciclos anuais — as pendências NÃO são transferíveis entre ciclos."
+              : undefined
+          }
+        >
+          <div className="space-y-4">
+            {summaries.map((s) => (
+              <div key={s.cycle} className="rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+                {summaries.length > 1 && (
+                  <p className="mb-2 text-xs font-extrabold uppercase tracking-wide text-slate-500">
+                    Ciclo anual {s.cycle}
+                  </p>
+                )}
+                <div className="grid grid-cols-2 gap-2 text-xs text-slate-600 sm:grid-cols-3 lg:grid-cols-4">
+                  <Sum label="Dias trabalhados" value={String(s.workedDays)} />
+                  <Sum label="Horas trabalhadas" value={formatMinutes(s.workedMinutes)} />
+                  <Sum label="No ponto" value={formatMinutes(s.registrableMinutes)} />
+                  <Sum
+                    label="Saldo"
+                    value={`${s.balanceMinutes >= 0 ? "+" : ""}${formatMinutes(s.balanceMinutes)}`}
+                    tone={s.balanceMinutes >= 0 ? "text-emerald-600" : "text-rose-600"}
+                  />
+                  <Sum label="Excedentes" value={formatMinutes(s.excessMinutes)} />
+                  <Sum label="Déficit" value={formatMinutes(s.deficitMinutes)} />
+                  <Sum label="Horas compensadas" value={formatMinutes(s.compensatedMinutes)} />
+                  <Sum label="Compensações pendentes" value={formatMinutes(s.pendingCompMinutes)} />
+                  <Sum label="Férias (dias)" value={String(s.vacationDays)} />
+                  <Sum label="Saúde (dias)" value={String(s.healthDays)} />
+                  <Sum label="Dispensados (dias)" value={String(s.waivedDays)} />
+                  <Sum
+                    label="Acordo a compensar"
+                    value={`${formatMinutes(s.acordoTotal)} (feito ${formatMinutes(s.acordoDone)} · falta ${formatMinutes(s.acordoPending)})`}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      {/* Dias — todos recolhidos por padrão */}
       {days.length === 0 ? (
         <EmptyState
           icon={<Clock3 size={26} />}
-          title="Nenhum registro neste mês"
-          description="Registre entradas e saídas no painel inicial ou adicione manualmente nos dias abaixo."
-          action={<Button onClick={() => setMonth(monthKey(todayString()))}>Ir para o mês atual</Button>}
+          title={query ? "Nenhum registro no intervalo consultado" : "Nenhum registro neste período"}
+          description="Use o lançamento manual para incluir entradas e saídas de dias anteriores."
         />
       ) : (
         <div className="space-y-4">
-          {days.map((d) => (
+          {days.map(({ date, ctx, absence }) => (
             <DayCard
-              key={d.date}
-              result={d}
+              key={date}
+              result={ctx.day}
               settings={settings}
-              compsForDate={compensations.filter((c) => c.targetDate === d.date)}
+              compsForDate={compensations.filter((c) => c.targetDate === date)}
               allComps={compensations}
               nowMinutes={nowMinutes}
-              isToday={d.date === todayStr}
+              isToday={date === todayStr}
+              absence={absence}
+              effectiveExpected={ctx.effectiveExpected}
               onAddEntry={addEntry}
               onUpdateEntry={updateEntry}
               onDeleteEntry={deleteEntry}
@@ -216,39 +373,31 @@ export default function RegistrosPage() {
       <Card padded={false} className="bg-slate-900 !border-slate-800">
         <div className="grid gap-4 px-5 py-4 text-xs text-slate-300 sm:grid-cols-3">
           <p>
-            <span className="font-bold text-emerald-400">Base diária:</span> 8h (jornada com 1h de
-            almoço descontada automaticamente).
+            <span className="font-bold text-emerald-400">Período do ponto:</span> dia 21 até dia 20
+            do mês seguinte (especiais: 21/04–30/04 e 01/05–20/05 no fechamento anual).
           </p>
           <p>
             <span className="font-bold text-rose-400">Limite da empresa:</span>{" "}
             {formatMinutes(settings.maxDailyMinutes)} por dia. O que passar disso é excedente e
-            precisa ser compensado.
+            precisa ser compensado no mesmo ciclo anual.
           </p>
           <p>
-            <span className="font-bold text-indigo-400">No ponto:</span> é o total que você pode
-            lançar no sistema da empresa, limitado ao máximo diário.
+            <span className="font-bold text-sky-400">Férias e afastamentos:</span> não geram déficit.
+            Acordo &quot;compensar posteriormente&quot; vira pendência própria, nunca déficit comum.
           </p>
         </div>
       </Card>
 
-      <ManualEntryModal
-        open={manualOpen}
-        onClose={() => setManualOpen(false)}
-        onSave={addManualPair}
-      />
+      <ManualEntryModal open={manualOpen} onClose={() => setManualOpen(false)} onSave={addManualPair} />
     </div>
   );
 }
 
-function Chip({ label, value, tone = "slate" }: { label: string; value: string; tone?: "slate" | "emerald" | "rose" }) {
-  const tones = {
-    slate: "text-slate-700 bg-white border-slate-200",
-    emerald: "text-emerald-700 bg-emerald-50 border-emerald-200",
-    rose: "text-rose-700 bg-rose-50 border-rose-200",
-  };
+function Sum({ label, value, tone }: { label: string; value: string; tone?: string }) {
   return (
-    <span className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-bold ${tones[tone]}`}>
-      <span className="font-medium opacity-60">{label}</span> {value}
-    </span>
+    <div className="rounded-lg bg-white px-2.5 py-1.5 ring-1 ring-inset ring-slate-200">
+      <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">{label}</p>
+      <p className={`font-extrabold tabular-nums ${tone ?? "text-slate-800"}`}>{value}</p>
+    </div>
   );
 }

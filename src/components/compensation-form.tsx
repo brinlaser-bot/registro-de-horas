@@ -7,6 +7,7 @@ import { useToast } from "@/components/toast";
 import { formatDateBR, formatMinutes, todayString, weekdayShort } from "@/lib/time";
 import type { CompKind, TargetSuggestion } from "@/lib/types";
 import type { ExtraCapacity } from "@/lib/debt";
+import { getAnnualPointCycle, sameAnnualCycle } from "@/lib/periods";
 
 export interface CompFormData {
   sourceDate: string;
@@ -55,6 +56,14 @@ const COPY = {
       "O dia de origem ficou abaixo da base e gerou saldo negativo. Você quita essa dívida trabalhando além da jornada em outro dia, sem ultrapassar o limite diário.",
     cta: "Criar compensação por hora extra",
   },
+  acordo: {
+    sourceLabel: "Dia do acordo (afastamento acordado)",
+    targetLabel: "Dia em que vai fazer hora extra",
+    minutesHint: "Quanto de hora extra você fará para quitar o acordo (respeitando o teto de 10h)",
+    explain:
+      "As horas do afastamento acordado devem ser compensadas com hora extra em outro dia do MESMO ciclo anual, sem ultrapassar o limite diário de 10h.",
+    cta: "Criar compensação do acordo",
+  },
 } as const;
 
 export function CompensationForm({
@@ -92,21 +101,35 @@ export function CompensationForm({
     }
   }, [open, initial, kind]);
 
+  // ── Validação visual (não substitui a validação central do store) ──
+  const usesCapacity = kind === "deficit" || kind === "acordo";
+  const cap = usesCapacity && getCapacity ? getCapacity(form.targetDate) : null;
+  const crossCycle =
+    !!form.sourceDate && !!form.targetDate && !sameAnnualCycle(form.sourceDate, form.targetDate);
+  const missingFields =
+    !form.sourceDate || !form.targetDate || form.sourceDate === form.targetDate;
+  const invalidMinutes = !Number.isFinite(form.minutes) || form.minutes < 5 || form.minutes > 720;
+  const overCapacity = cap !== null && form.minutes > cap.available;
+
+  const invalidReason = crossCycle
+    ? "Esta compensação não pode ser realizada porque a origem e o destino pertencem a ciclos anuais diferentes. As compensações devem ocorrer dentro do mesmo ciclo anual."
+    : missingFields
+      ? "Informe origem e destino (dias diferentes)."
+      : invalidMinutes
+        ? "As horas devem ficar entre 5min e 12h."
+        : overCapacity && cap && cap.available <= 0
+          ? "Este dia já foi encerrado e não possui hora extra disponível para compensação. Escolha outro dia."
+          : overCapacity && cap
+            ? `Neste dia você pode compensar no máximo ${formatMinutes(cap.available)}.`
+            : null;
+
   const submit = async () => {
-    if (!form.sourceDate || !form.targetDate) {
-      toast.show("Informe os dois dias.", "error");
-      return;
-    }
-    if (form.sourceDate === form.targetDate) {
-      toast.show("Origem e destino devem ser dias diferentes.", "error");
-      return;
-    }
-    if (!Number.isFinite(form.minutes) || form.minutes < 5 || form.minutes > 720) {
-      toast.show("As horas devem ficar entre 5min e 12h.", "error");
+    if (invalidReason) {
+      toast.show(invalidReason, "error");
       return;
     }
     // Regra central: hora extra limitada à capacidade real do dia de destino
-    if (kind === "deficit" && getCapacity) {
+    if (usesCapacity && getCapacity) {
       const cap = getCapacity(form.targetDate);
       if (form.minutes > cap.available) {
         toast.show(
@@ -144,7 +167,7 @@ export function CompensationForm({
       footer={
         <>
           <Button variant="secondary" onClick={onClose}>Cancelar</Button>
-          <Button onClick={submit} loading={busy}>
+          <Button onClick={submit} loading={busy} disabled={!!invalidReason}>
             <ArrowLeftRight size={15} /> {editingId ? "Salvar alterações" : copy.cta}
           </Button>
         </>
@@ -154,6 +177,15 @@ export function CompensationForm({
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs font-medium text-amber-800">
           <b>Como funciona:</b> {copy.explain}
         </div>
+
+        {/* Barreira do fechamento anual (30/04) */}
+        {crossCycle && (
+          <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-xs font-semibold text-rose-700">
+            Origem ({getAnnualPointCycle(form.sourceDate)}) e destino (
+            {getAnnualPointCycle(form.targetDate)}) pertencem a <b>ciclos anuais diferentes</b>. O
+            fechamento anual ocorre em 30/04 e as compensações não podem atravessá-lo.
+          </div>
+        )}
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Input
@@ -211,7 +243,7 @@ export function CompensationForm({
         )}
 
         {/* Capacidade do dia de destino (hora extra) — regra central */}
-        {kind === "deficit" && getCapacity && (() => {
+        {usesCapacity && getCapacity && (() => {
           const cap = getCapacity(form.targetDate);
           const restante =
             pendingDebtMinutes !== undefined
@@ -260,7 +292,7 @@ export function CompensationForm({
             label="Horas a compensar (min)"
             type="number"
             min={5}
-            max={kind === "deficit" && getCapacity ? Math.max(5, getCapacity(form.targetDate).available) : 720}
+            max={cap ? Math.max(5, cap.available) : 720}
             step={5}
             value={form.minutes}
             onChange={(e) => setForm({ ...form, minutes: Number(e.target.value) })}

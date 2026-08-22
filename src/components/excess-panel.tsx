@@ -17,22 +17,25 @@ import {
   totalsOf,
 } from "@/lib/debt";
 import { formatDateShortBR, formatMinutes, todayString, weekdayShort } from "@/lib/time";
-import type { Compensation, TimeEntry, WorkSettings } from "@/lib/types";
+import type { Absence } from "@/lib/absences";
+import type { CompKind, Compensation, TimeEntry, WorkSettings } from "@/lib/types";
 import { Badge, Button, Card, EmptyState, ProgressBar, StatCard } from "@/components/ui";
 import { CompensationForm, type CompFormData } from "@/components/compensation-form";
 
 interface Props {
   entries: TimeEntry[];
   compensations: Compensation[];
+  absences?: Absence[];
   settings: WorkSettings;
   range: { from: string; to: string };
   monthLabel: string;
-  onCreateComp: (payload: CompFormData & { kind?: "excedente" | "deficit" }) => Promise<void>;
+  onCreateComp: (payload: CompFormData & { kind?: CompKind }) => Promise<void>;
 }
 
 export function ExcessPanel({
   entries,
   compensations,
+  absences = [],
   settings,
   range,
   monthLabel,
@@ -40,29 +43,33 @@ export function ExcessPanel({
 }: Props) {
   const today = todayString();
   const [modalOpen, setModalOpen] = useState(false);
-  const [draft, setDraft] = useState<(CompFormData & { kind?: "excedente" | "deficit" }) | undefined>();
+  const [draft, setDraft] = useState<(CompFormData & { kind?: CompKind }) | undefined>();
   const [draftDebt, setDraftDebt] = useState<number | undefined>();
 
-  const { excessDays, deficitDays, excessTotals, deficitTotals } = useMemo(() => {
-    const all = buildDebtDays(entries, compensations, settings, range);
-    const ex = all.filter((d) => d.kind === "excedente");
-    const df = all.filter((d) => d.kind === "deficit");
-    return {
-      excessDays: ex.reverse(),
-      deficitDays: df.reverse(),
-      excessTotals: totalsOf(ex),
-      deficitTotals: totalsOf(df),
-    };
-  }, [entries, compensations, settings, range]);
+  const { excessDays, deficitDays, acordoDays, excessTotals, deficitTotals, acordoTotals } =
+    useMemo(() => {
+      const all = buildDebtDays(entries, compensations, settings, range, absences);
+      const ex = all.filter((d) => d.kind === "excedente");
+      const df = all.filter((d) => d.kind === "deficit");
+      const ac = all.filter((d) => d.kind === "acordo");
+      return {
+        excessDays: ex.reverse(),
+        deficitDays: df.reverse(),
+        acordoDays: ac.reverse(),
+        excessTotals: totalsOf(ex),
+        deficitTotals: totalsOf(df),
+        acordoTotals: totalsOf(ac),
+      };
+    }, [entries, compensations, absences, settings, range]);
 
-  const openFor = (date: string, kind: "excedente" | "deficit") => {
+  const openFor = (date: string, kind: CompKind) => {
     const minutes = openDebtFor(entries, compensations, settings, date, kind);
     // Para hora extra o destino é um dia de trabalho futuro/hoje (não um dia com déficit);
     // para excedente sugerimos dias recentes com saldo negativo (sair mais cedo).
     const target =
-      kind === "deficit"
-        ? today
-        : suggestTargets(entries, compensations, settings, date, today)[0]?.date ?? today;
+      kind === "excedente"
+        ? suggestTargets(entries, compensations, settings, date, today)[0]?.date ?? today
+        : today;
     // Pré-preenche respeitando a capacidade real do dia de destino
     const cap = extraCapacityForDate(target, entries, compensations, settings);
     const prefill =
@@ -150,8 +157,8 @@ export function ExcessPanel({
           {excessOpen.length === 0 ? (
             <EmptyState
               icon={<CheckCircle2 size={24} />}
-              title="Nenhum excedente deste mês em aberto"
-              description={`Nenhum excedente originado em ${monthLabel} está pendente. Compensações de outros meses permanecem visíveis na página Compensações.`}
+              title="Nenhum excedente deste período em aberto"
+              description={`Nenhum excedente originado no período ${monthLabel} está pendente. Compensações de outros períodos/ciclos permanecem visíveis na página Compensações.`}
             />
           ) : (
             <ul className="space-y-3">
@@ -246,13 +253,61 @@ export function ExcessPanel({
         </Card>
       </div>
 
+      {/* Acordo a compensar (afastamento acordado — compensar posteriormente) */}
+      {(acordoDays.length > 0 || acordoTotals.debtTotal > 0) && (
+        <Card
+          title="Acordo a compensar"
+          subtitle="Horas de afastamento acordado — pendência própria, distinta do déficit comum"
+        >
+          {acordoDays.filter((d) => d.remainingMinutes > 0 || d.pendingMinutes > 0).length === 0 ? (
+            <p className="text-xs text-slate-400">Todos os acordos deste período já foram quitados. ✔</p>
+          ) : (
+            <ul className="space-y-3">
+              {acordoDays
+                .filter((d) => d.remainingMinutes > 0 || d.pendingMinutes > 0)
+                .map((d) => (
+                  <li key={d.date} className="rounded-xl border border-violet-100 bg-violet-50/50 p-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-sm font-extrabold text-slate-900">
+                        {weekdayShort(d.date).replace(".", "")}
+                        <span className="ml-1.5 font-medium text-slate-400">
+                          {formatDateShortBR(d.date)}
+                        </span>
+                      </span>
+                      <Badge tone="indigo">acordo {formatMinutes(d.debtMinutes)}</Badge>
+                      {d.remainingMinutes > 0 ? (
+                        <Badge tone="amber">restam {formatMinutes(d.remainingMinutes)}</Badge>
+                      ) : (
+                        <Badge tone="sky">{formatMinutes(d.pendingMinutes)} planejado</Badge>
+                      )}
+                      <div className="ml-auto">
+                        <Button size="sm" variant="subtle" onClick={() => openFor(d.date, "acordo")}>
+                          <Zap size={13} /> Compensar com hora extra
+                        </Button>
+                      </div>
+                    </div>
+                    <div className="mt-2">
+                      <ProgressBar
+                        concluded={d.concludedMinutes}
+                        pending={d.pendingMinutes}
+                        total={d.debtMinutes}
+                        height={6}
+                      />
+                    </div>
+                  </li>
+                ))}
+            </ul>
+          )}
+        </Card>
+      )}
+
       <CompensationForm
         open={modalOpen}
         onClose={() => setModalOpen(false)}
         initial={draft}
         kind={draft?.kind ?? "excedente"}
         suggestions={
-          draft && draft.kind !== "deficit"
+          draft && draft.kind === "excedente"
             ? suggestTargets(entries, compensations, settings, draft.sourceDate, today)
             : []
         }

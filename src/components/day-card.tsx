@@ -22,6 +22,7 @@ import { Badge, Button, Input, Select } from "@/components/ui";
 import { CompensationForm, type CompFormData } from "@/components/compensation-form";
 import { SmartExit } from "@/components/smart-exit";
 import { allocatedForSource, overflowForSource } from "@/lib/debt";
+import { absenceLabel, type Absence } from "@/lib/absences";
 import type { CompKind } from "@/lib/types";
 
 export function statusBadge(d: DayResult) {
@@ -45,6 +46,10 @@ interface Props {
   onCompleteComp: (id: number) => Promise<void>;
   onCreateComp: (data: CompFormData) => Promise<void>;
   onCapComp?: (date: string, kind: CompKind, maxMinutes: number) => void | Promise<void>;
+  /** Ausência (férias/afastamento) que cobre o dia, se houver. */
+  absence?: Absence;
+  /** Jornada esperada efetiva do dia (com ausência descontada). */
+  effectiveExpected?: number;
 }
 
 export function DayCard({
@@ -60,8 +65,11 @@ export function DayCard({
   onCompleteComp,
   onCreateComp,
   onCapComp,
+  absence,
+  effectiveExpected,
 }: Props) {
-  const [expanded, setExpanded] = useState(result.open || result.status === "excess");
+  // Regra: todos os dias iniciam RECOLHIDOS — o usuário expande apenas o dia desejado.
+  const [expanded, setExpanded] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState<{ type: EntryType; time: string; note: string }>({
@@ -159,7 +167,11 @@ export function DayCard({
             <span className="ml-2 font-medium text-slate-400">{formatDateShortBR(d.date)}</span>
           </p>
           <div className="mt-1 flex flex-wrap items-center gap-2">
-            {statusBadge(d)}
+            {absence ? (
+              <Badge tone={absence.kind === "ferias" ? "sky" : "indigo"}>{absenceLabel(absence)}</Badge>
+            ) : (
+              statusBadge(d)
+            )}
             {d.open && <span className="inline-flex items-center gap-1 text-[11px] font-bold text-indigo-500"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-indigo-500" /> em andamento</span>}
             {d.lunchDeductedMinutes > 0 && (
               <span className="text-[11px] font-medium text-slate-400">
@@ -192,14 +204,40 @@ export function DayCard({
                 onSmartExit={smartExit}
                 onConfirmComps={confirmComps}
                 isToday={isToday}
+                effectiveExpected={effectiveExpected}
               />
+            </div>
+          )}
+
+          {/* Ausência cobrindo o dia */}
+          {absence && (
+            <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2.5 text-xs font-medium text-sky-800">
+              <span className="font-bold">{absenceLabel(absence)}</span>
+              {absence.duration === "parcial" ? (
+                <span>parcial {absence.partialStart}–{absence.partialEnd}</span>
+              ) : (
+                <span>dia integral</span>
+              )}
+              {absence.kind === "saude" && (
+                <span>· atestado {absence.medicalCert ? "apresentado" : "não apresentado"}</span>
+              )}
+              {absence.note && <span className="text-sky-600">· {absence.note}</span>}
+              {effectiveExpected !== undefined && effectiveExpected < d.expectedMinutes && (
+                <span className="text-sky-600">
+                  · jornada esperada reduzida para {formatMinutes(effectiveExpected)}
+                </span>
+              )}
             </div>
           )}
 
           {/* Métricas */}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <MiniStat label="Trabalhado" value={formatMinutes(d.workedMinutes)} tone="text-slate-900" />
-            <MiniStat label="Base diária" value={formatMinutes(d.expectedMinutes)} tone="text-slate-500" />
+            <MiniStat
+              label="Base diária"
+              value={formatMinutes(effectiveExpected ?? d.expectedMinutes)}
+              tone="text-slate-500"
+            />
             <MiniStat label="Saldo" value={`${d.balanceMinutes >= 0 ? "+" : ""}${formatMinutes(d.balanceMinutes)}`} tone={balanceTone} />
             <MiniStat
               label="No ponto*"

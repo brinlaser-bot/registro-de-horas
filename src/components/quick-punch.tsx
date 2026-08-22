@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Coffee, LogIn, LogOut, Timer, Trash2, Zap } from "lucide-react";
+import { Coffee, LogIn, LogOut, RotateCcw, Timer, Trash2, Zap } from "lucide-react";
 import type { DayResult, WorkSettings } from "@/lib/types";
 import type { EntryType } from "@/lib/time";
 import { formatMinutes, nowTimeString } from "@/lib/time";
@@ -24,8 +24,11 @@ interface Props {
 
 export function QuickPunch({ today, todayStr, settings, onAddEntry, onDeleteEntry }: Props) {
   const toast = useToast();
+  // Modo Agora (padrão): a batida usa a hora real do clique.
+  // Modo Manual: o usuário editou o campo e a batida usa exatamente o horário digitado.
+  const [mode, setMode] = useState<"now" | "manual">("now");
+  const [manualTime, setManualTime] = useState("");
   const [clock, setClock] = useState(nowTimeString());
-  const [time, setTime] = useState(nowTimeString());
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
 
@@ -38,16 +41,30 @@ export function QuickPunch({ today, todayStr, settings, onAddEntry, onDeleteEntr
 
   const punch = async (type: EntryType, t?: string) => {
     if (busy) return;
-    setBusy(type + (t ?? ""));
+    // Modo Agora: captura a hora REAL do momento do clique (não a hora exibida)
+    const time = t ?? (mode === "now" ? nowTimeString() : manualTime);
+    if (!time) {
+      toast.show("Informe o horário ou use a hora atual.", "error");
+      return;
+    }
+    setBusy(type + time);
     try {
-      await onAddEntry({ date: todayStr, time: t ?? time, type, note: note.trim() || null });
+      await onAddEntry({ date: todayStr, time, type, note: note.trim() || null });
       setNote("");
-      toast.show(type === "entrada" ? "Entrada registrada!" : "Saída registrada!");
+      toast.show(
+        `${type === "entrada" ? "Entrada" : "Saída"} registrada às ${time}${mode === "now" ? " (hora atual)" : " (manual)"}.`,
+      );
     } catch {
       toast.show("Não foi possível registrar. Tente novamente.", "error");
     } finally {
       setBusy(null);
     }
+  };
+
+  const useNow = () => {
+    setMode("now");
+    setClock(nowTimeString());
+    toast.show("Modo Agora ativado: a próxima batida usará a hora real do clique.");
   };
 
   const remove = async (id: number) => {
@@ -67,11 +84,25 @@ export function QuickPunch({ today, todayStr, settings, onAddEntry, onDeleteEntr
       subtitle={`${today.entries.length === 0 ? "Nenhuma batida hoje ainda" : `${today.entries.length} batida(s) hoje`} · agora são ${clock}`}
       actions={
         <div className="flex items-center gap-2">
+          {mode === "manual" && (
+            <button
+              onClick={useNow}
+              title="Usar hora atual — volta ao Modo Agora"
+              className="inline-flex items-center gap-1 rounded-lg border border-emerald-300 bg-emerald-50 px-2 py-1 text-[11px] font-bold text-emerald-700 hover:bg-emerald-100 cursor-pointer"
+            >
+              <RotateCcw size={12} /> Usar hora atual
+            </button>
+          )}
           <input
             type="time"
-            value={time}
-            onChange={(e) => setTime(e.target.value)}
-            className="h-8 rounded-lg border border-slate-300 px-2 text-xs font-semibold text-slate-700 outline-none focus:border-emerald-500"
+            value={mode === "now" ? clock : manualTime}
+            onChange={(e) => {
+              setMode("manual");
+              setManualTime(e.target.value);
+            }}
+            className={`h-8 rounded-lg border px-2 text-xs font-semibold text-slate-700 outline-none focus:border-emerald-500 ${
+              mode === "manual" ? "border-amber-400 bg-amber-50" : "border-slate-300"
+            }`}
             aria-label="Horário do registro"
           />
           <input
@@ -108,7 +139,7 @@ export function QuickPunch({ today, todayStr, settings, onAddEntry, onDeleteEntr
             <Button
               variant="primary"
               size="lg"
-              loading={busy === "entrada"}
+              loading={busy !== null && busy.startsWith("entrada")}
               onClick={() => punch("entrada")}
               className="w-full"
             >
@@ -117,7 +148,7 @@ export function QuickPunch({ today, todayStr, settings, onAddEntry, onDeleteEntr
             <Button
               variant="secondary"
               size="lg"
-              loading={busy === "saida"}
+              loading={busy !== null && busy.startsWith("saida")}
               onClick={() => punch("saida")}
               className="w-full border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100"
             >
@@ -125,9 +156,9 @@ export function QuickPunch({ today, todayStr, settings, onAddEntry, onDeleteEntr
             </Button>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-              Atalhos:
-            </span>
+            <Badge tone={mode === "now" ? "emerald" : "amber"}>
+              {mode === "now" ? "Modo Agora — hora real do clique" : `Modo Manual — ${manualTime || "--:--"}`}
+            </Badge>
             <Button variant="ghost" size="sm" onClick={() => punch("saida", settings.lunchStart)}>
               <Coffee size={13} /> Almoço {settings.lunchStart}
             </Button>

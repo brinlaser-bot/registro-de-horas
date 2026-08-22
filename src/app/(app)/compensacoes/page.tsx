@@ -186,12 +186,16 @@ export default function CompensacoesPage() {
                       className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${
                         (c.kind ?? "excedente") === "deficit"
                           ? "bg-emerald-50 text-emerald-700"
-                          : "bg-sky-50 text-sky-700"
+                          : (c.kind ?? "excedente") === "acordo"
+                            ? "bg-violet-50 text-violet-700"
+                            : "bg-sky-50 text-sky-700"
                       }`}
                     >
                       {(c.kind ?? "excedente") === "deficit"
                         ? "↗ hora extra"
-                        : "↘ sair mais cedo"}
+                        : (c.kind ?? "excedente") === "acordo"
+                          ? "⇄ acordo a compensar"
+                          : "↘ sair mais cedo"}
                     </span>
                   </div>
                 </div>

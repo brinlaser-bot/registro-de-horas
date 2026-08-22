@@ -18,13 +18,13 @@ import {
   expectedMinutesOf,
   formatDateShortBR,
   formatMinutes,
-  monthBounds,
-  monthKey,
   nowMinutesLocal,
   todayString,
   weekdayShort,
   type EntryType,
 } from "@/lib/time";
+import { dayContext } from "@/lib/absences";
+import { getPointPeriod, periodLabel, sameAnnualCycle } from "@/lib/periods";
 import type { CompKind, DayResult, DaySummary } from "@/lib/types";
 import { Badge, Button, Card, EmptyState, Skeleton, StatCard } from "@/components/ui";
 import { QuickPunch } from "@/components/quick-punch";
@@ -51,10 +51,10 @@ function toSummary(d: DayResult, date?: string): DaySummary {
 export default function DashboardPage() {
   const toast = useToast();
   const mounted = useIsClient();
-  const { user, entries, compensations } = useAppData();
+  const { user, entries, compensations, absences } = useAppData();
   const settings = settingsOf(user);
-  const month = monthKey(todayString());
   const todayStr = todayString();
+  const period = getPointPeriod(todayStr);
   const [compOpen, setCompOpen] = useState(false);
 
   // Relógio: mantém previsão de saída e horas "em andamento" em tempo real
@@ -65,17 +65,22 @@ export default function DashboardPage() {
   }, []);
   const nowMinutes = nowMinutesLocal();
 
-  const { monthDays, totals, today, recent, pending } = useMemo(() => {
+  const { monthDays, totals, today, todayCtx, recent, pending } = useMemo(() => {
     const byDate = new Map<string, typeof entries>();
     for (const e of entries) {
-      if (e.date.startsWith(month)) {
+      if (e.date >= period.from && e.date <= period.to) {
         byDate.set(e.date, [...(byDate.get(e.date) ?? []), e]);
       }
     }
 
     const days: DaySummary[] = [];
     for (const [date, list] of byDate) {
-      days.push(toSummary(computeDay(list, settings), date));
+      // Saldo do período considera a jornada efetiva (férias/afastamentos)
+      const ctx = dayContext(date, entries, absences, settings);
+      const s = toSummary(computeDay(list, settings), date);
+      s.expectedMinutes = ctx.effectiveExpected;
+      s.balanceMinutes = ctx.adjustedBalance;
+      days.push(s);
     }
     days.sort((a, b) => a.date.localeCompare(b.date));
 
@@ -91,8 +96,8 @@ export default function DashboardPage() {
       { trackedDays: 0, workedTotal: 0, registrableTotal: 0, balanceTotal: 0, excessTotal: 0 },
     );
 
-    const todays = computeDay(byDate.get(todayStr) ?? [], settings, nowMinutes);
-    if (!todays.date) todays.date = todayStr;
+    const tCtx = dayContext(todayStr, entries, absences, settings, nowMinutes);
+    const todays = tCtx.day;
 
     const recents: DaySummary[] = [];
     for (let i = 13; i >= 0; i--) {
@@ -100,15 +105,16 @@ export default function DashboardPage() {
       recents.push(toSummary(computeDay(entries.filter((e) => e.date === d), settings), d));
     }
 
+    // Regra 15: pendências de ciclos encerrados NÃO aparecem como ativas no ciclo atual
     const pend = compensations
-      .filter((c) => c.status === "pendente")
+      .filter((c) => c.status === "pendente" && sameAnnualCycle(c.sourceDate, todayStr))
       .map((c) => enrichComp(c, entries, settings))
       .sort((a, b) => a.targetDate.localeCompare(b.targetDate));
 
-    return { monthDays: days, totals: sum, today: todays, recent: recents, pending: pend };
-  }, [entries, compensations, settings, month, todayStr, nowMinutes]);
+    return { monthDays: days, totals: sum, today: todays, todayCtx: tCtx, recent: recents, pending: pend };
+  }, [entries, compensations, absences, settings, period, todayStr, nowMinutes]);
 
-  const range = useMemo(() => monthBounds(month), [month]);
+  const range = period;
 
   const onAddEntry = async (p: { date: string; time: string; type: EntryType; note: string | null }) => {
     actions.addEntry(p);
@@ -229,14 +235,14 @@ export default function DashboardPage() {
           icon={<Timer size={16} />}
         />
         <StatCard
-          label="Saldo do mês"
+          label="Saldo do período"
           value={`${totals.balanceTotal >= 0 ? "+" : ""}${formatMinutes(totals.balanceTotal)}`}
           sub={totals.balanceTotal >= 0 ? "horas a seu favor (crédito)" : "horas em débito — atenção"}
           tone={balanceTone}
           icon={<Wallet size={16} />}
         />
         <StatCard
-          label="Excedente do mês"
+          label="Excedente do período"
           value={formatMinutes(totals.excessTotal)}
           sub={`acima de ${formatMinutes(settings.maxDailyMinutes)}/dia · ${totals.trackedDays} dia(s) registrados`}
           tone={excessTone}
@@ -265,6 +271,7 @@ export default function DashboardPage() {
         onSmartExit={smartExit}
         onConfirmComps={confirmComps}
         isToday
+        effectiveExpected={todayCtx.effectiveExpected}
       />
 
       <QuickPunch
@@ -284,9 +291,10 @@ export default function DashboardPage() {
           <ExcessPanel
             entries={entries}
             compensations={compensations}
+            absences={absences}
             settings={settings}
             range={range}
-            monthLabel={month}
+            monthLabel={periodLabel(period)}
             onCreateComp={createComp}
           />
         </div>

@@ -1,7 +1,12 @@
 // Import/Export de backup (JSON) com versionamento e validação.
 import type { AppData, Compensation, TimeEntry, User } from "./types";
+import type { Absence } from "./absences";
 
-export const BACKUP_VERSION = 1;
+/**
+ * v1: user + entries + compensations.
+ * v2: + absences (férias/afastamentos). Backups v1 importam com lista vazia.
+ */
+export const BACKUP_VERSION = 2;
 export const INVALID_BACKUP_MSG = "Este arquivo não é um backup válido do Meu Horário.";
 
 export interface BackupPayload {
@@ -10,6 +15,7 @@ export interface BackupPayload {
   user: User;
   entries: TimeEntry[];
   compensations: Compensation[];
+  absences: Absence[];
 }
 
 export interface BackupSummary {
@@ -26,6 +32,7 @@ export interface ParsedBackup {
   user: User;
   entries: TimeEntry[];
   compensations: Compensation[];
+  absences: Absence[];
   version: number;
   summary: BackupSummary;
 }
@@ -80,6 +87,34 @@ function validComp(v: unknown): v is Compensation {
   );
 }
 
+function validAbsence(v: unknown): v is Absence {
+  if (!v || typeof v !== "object") return false;
+  const a = v as Record<string, unknown>;
+  return (
+    isNum(a.id) &&
+    (a.kind === "ferias" || a.kind === "saude" || a.kind === "acordado" || a.kind === "outro") &&
+    isDate(a.startDate) &&
+    isDate(a.endDate) &&
+    (a.duration === "integral" || a.duration === "parcial") &&
+    isNum(a.createdAt)
+  );
+}
+
+/** Comparação de conteúdo para mesclagem de ausências. */
+export function absencesEqual(a: Absence, b: Absence): boolean {
+  return (
+    a.kind === b.kind &&
+    a.startDate === b.startDate &&
+    a.endDate === b.endDate &&
+    a.duration === b.duration &&
+    (a.partialStart ?? null) === (b.partialStart ?? null) &&
+    (a.partialEnd ?? null) === (b.partialEnd ?? null) &&
+    (a.medicalCert ?? null) === (b.medicalCert ?? null) &&
+    (a.treatment ?? null) === (b.treatment ?? null) &&
+    (a.note ?? null) === (b.note ?? null)
+  );
+}
+
 /** Gera o payload do backup com versionamento (usado pelo Exportar). */
 export function buildBackupPayload(data: AppData): BackupPayload {
   return {
@@ -88,6 +123,7 @@ export function buildBackupPayload(data: AppData): BackupPayload {
     user: data.user,
     entries: data.entries,
     compensations: data.compensations,
+    absences: data.absences ?? [],
   };
 }
 
@@ -127,6 +163,14 @@ export function parseBackup(
     ...c,
     kind: c.kind ?? "excedente",
   }));
+  // Retrocompatibilidade: backups v1 não possuem "absences" → lista vazia.
+  // Eventos divididos no fechamento anual permanecem registros independentes
+  // (nunca são recombinados na importação/mesclagem).
+  const rawAbsences = obj.absences;
+  if (rawAbsences !== undefined && (!Array.isArray(rawAbsences) || !rawAbsences.every(validAbsence))) {
+    return { ok: false, error: "bad-absences" };
+  }
+  const absences = (rawAbsences as Absence[] | undefined) ?? [];
 
   const allDates = [
     ...entries.map((e) => e.date),
@@ -145,7 +189,7 @@ export function parseBackup(
     periodTo,
   };
 
-  return { ok: true, backup: { user, entries, compensations, version, summary } };
+  return { ok: true, backup: { user, entries, compensations, absences, version, summary } };
 }
 
 /* ──────────────────────────────────────────────────────────
