@@ -9,7 +9,6 @@ import { absencesEqual, compsEqual, entriesEqual, mergeByIdAndContent } from "./
 import { canCompleteComp, extraCapacityForDate } from "./debt";
 import { validateAbsence, type Absence, type AbsenceSplit } from "./absences";
 import { sameAnnualCycle } from "./periods";
-import type { CompanyCalendar } from "./company-calendar";
 
 /** Resultado estruturado de operações que podem ser rejeitadas por validação. */
 export interface ActionResult {
@@ -57,7 +56,6 @@ const pristine: AppData = {
   entries: [],
   compensations: [],
   absences: [],
-  companyCalendar: undefined,
 };
 
 let data: AppData = pristine;
@@ -445,7 +443,7 @@ export const actions = {
    * Mescla o backup com os dados atuais, preservando eventos distintos.
    * Deduplicação segura via ID + conteúdo completo (nunca apenas dias/minutos).
    */
-  mergeBackup(p: { entries: TimeEntry[]; compensations: Compensation[]; absences?: Absence[]; companyCalendar?: CompanyCalendar }) {
+  mergeBackup(p: { entries: TimeEntry[]; compensations: Compensation[]; absences?: Absence[] }) {
     mutate((d) => {
       const entryMerge = mergeByIdAndContent(d.entries, p.entries, entriesEqual);
       const compMerge = mergeByIdAndContent(d.compensations, p.compensations, compsEqual);
@@ -460,19 +458,8 @@ export const actions = {
         entries: entryMerge.merged,
         compensations: compMerge.merged,
         absences: absenceMerge.merged,
-        companyCalendar: d.companyCalendar ?? p.companyCalendar,
       };
     });
-  },
-
-  setCompanyCalendar(calendar: CompanyCalendar): ActionResult {
-    mutate((d) => ({ ...d, companyCalendar: calendar }));
-    return OK;
-  },
-
-  clearCompanyCalendar(): ActionResult {
-    mutate((d) => ({ ...d, companyCalendar: undefined }));
-    return OK;
   },
 };
 

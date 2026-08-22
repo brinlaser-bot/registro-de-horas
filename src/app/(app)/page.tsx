@@ -23,7 +23,7 @@ import {
   weekdayShort,
   type EntryType,
 } from "@/lib/time";
-import { dayContext } from "@/lib/absences";
+import { companyDayContext, dayContext } from "@/lib/absences";
 import {
   annualCycleBounds,
   getAnnualPointCycle,
@@ -58,7 +58,7 @@ function toSummary(d: DayResult, date?: string): DaySummary {
 export default function DashboardPage() {
   const toast = useToast();
   const mounted = useIsClient();
-  const { user, entries, compensations, absences, companyCalendar } = useAppData();
+  const { user, entries, compensations, absences } = useAppData();
   const settings = settingsOf(user);
   const todayStr = todayString();
   const period = getPointPeriod(todayStr);
@@ -104,8 +104,8 @@ export default function DashboardPage() {
       { trackedDays: 0, workedTotal: 0, registrableTotal: 0, balanceTotal: 0, excessTotal: 0 },
     );
 
-    const tCtx = dayContext(todayStr, entries, absences, settings, nowMinutes);
-    const todays = tCtx.day;
+    const tCtx = companyDayContext(todayStr, entries, absences, settings, nowMinutes);
+    const todays = tCtx.displayDay;
 
     const recents: DaySummary[] = [];
     for (let i = 13; i >= 0; i--) {
@@ -240,11 +240,15 @@ export default function DashboardPage() {
             Olá, {firstName}! 👋
           </h2>
           <p className="text-sm text-slate-500">
-            {t.empty
-              ? "Você ainda não bateu o ponto hoje. Registre sua entrada abaixo."
-              : t.open
-                ? "Seu ponto de hoje está em andamento."
-                : "Seu ponto de hoje está fechado."}
+            {todayCtx.type === "folga"
+              ? "Folga hoje. Se você registrar trabalho, as horas serão contabilizadas como trabalho em folga."
+              : todayCtx.type === "trabalho-folga"
+                ? "Trabalho em folga registrado hoje."
+                : t.empty
+                  ? "Você ainda não bateu o ponto hoje. Registre sua entrada abaixo."
+                  : t.open
+                    ? "Seu ponto de hoje está em andamento."
+                    : "Seu ponto de hoje está fechado."}
           </p>
         </div>
         <Link href="/registros">
@@ -261,7 +265,9 @@ export default function DashboardPage() {
           value={formatMinutes(t.workedMinutes)}
           sub={
             <>
-              base {formatMinutes(t.expectedMinutes || expectedMinutesOf(settings))} ·{" "}
+              {todayCtx.type === "folga" || todayCtx.type === "trabalho-folga"
+                ? `${todayCtx.label} · esperado ${formatMinutes(t.expectedMinutes)}`
+                : `base ${formatMinutes(t.expectedMinutes || expectedMinutesOf(settings))}`} ·{" "}
               <span className={t.balanceMinutes >= 0 ? "text-emerald-600" : "text-rose-600"}>
                 {t.balanceMinutes >= 0 ? "+" : ""}
                 {formatMinutes(t.balanceMinutes)}
@@ -315,6 +321,7 @@ export default function DashboardPage() {
         today={t}
         todayStr={todayStr}
         settings={settings}
+        dayLabel={todayCtx.type === "regular" ? undefined : todayCtx.label}
         onAddEntry={onAddEntry}
         onDeleteEntry={onDeleteEntry}
       />
@@ -329,7 +336,6 @@ export default function DashboardPage() {
             entries={entries}
             compensations={compensations}
             absences={absences}
-            companyCalendar={companyCalendar}
             settings={settings}
             range={range}
             monthLabel={periodLabel(period)}

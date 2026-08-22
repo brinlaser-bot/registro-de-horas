@@ -10,7 +10,6 @@ import {
   Zap,
 } from "lucide-react";
 import {
-  acordoViewOf,
   activeAcordos,
   buildDebtDays,
   extraCapacityForDate,
@@ -21,7 +20,6 @@ import {
 import { formatDateShortBR, formatMinutes, todayString, weekdayShort } from "@/lib/time";
 import type { Absence } from "@/lib/absences";
 import { annualCycleBounds, getAnnualPointCycle } from "@/lib/periods";
-import type { CompanyCalendar } from "@/lib/company-calendar";
 import type { CompKind, Compensation, TimeEntry, WorkSettings } from "@/lib/types";
 import { Badge, Button, Card, EmptyState, ProgressBar, StatCard } from "@/components/ui";
 import { CompensationForm, type CompFormData } from "@/components/compensation-form";
@@ -30,7 +28,6 @@ interface Props {
   entries: TimeEntry[];
   compensations: Compensation[];
   absences?: Absence[];
-  companyCalendar?: CompanyCalendar;
   settings: WorkSettings;
   range: { from: string; to: string };
   monthLabel: string;
@@ -41,7 +38,6 @@ export function ExcessPanel({
   entries,
   compensations,
   absences = [],
-  companyCalendar,
   settings,
   range,
   monthLabel,
@@ -53,7 +49,7 @@ export function ExcessPanel({
   const [draftDebt, setDraftDebt] = useState<number | undefined>();
 
   const { excessDays, deficitDays, excessTotals, deficitTotals } = useMemo(() => {
-    const all = buildDebtDays(entries, compensations, settings, range, absences, companyCalendar);
+    const all = buildDebtDays(entries, compensations, settings, range, absences);
     const ex = all.filter((d) => d.kind === "excedente");
     const df = all.filter((d) => d.kind === "deficit");
     return {
@@ -70,15 +66,6 @@ export function ExcessPanel({
     const bounds = annualCycleBounds(getAnnualPointCycle(today));
     return activeAcordos(entries, compensations, settings, bounds, absences);
   }, [entries, compensations, absences, settings, today]);
-
-  const calendarioDays = useMemo(() => {
-    const bounds = annualCycleBounds(getAnnualPointCycle(today));
-    return buildDebtDays(entries, compensations, settings, bounds, absences, companyCalendar)
-      .filter((d) => d.kind === "calendario")
-      .map(acordoViewOf)
-      .filter((d) => d.remainingMinutes > 0)
-      .reverse();
-  }, [entries, compensations, absences, companyCalendar, settings, today]);
 
   const openFor = (date: string, kind: CompKind) => {
     const minutes = openDebtFor(entries, compensations, settings, date, kind);
@@ -271,34 +258,7 @@ export function ExcessPanel({
         </Card>
       </div>
 
-      {/* Calendário a compensar */}
-      {calendarioDays.length > 0 && (
-        <Card
-          title="Calendário a compensar"
-          subtitle={`Obrigações ativas do calendário da empresa no ciclo anual ${getAnnualPointCycle(today)}`}
-        >
-          <ul className="space-y-3">
-            {calendarioDays.map((d) => (
-              <li key={d.date} className="rounded-xl border border-amber-100 bg-amber-50/50 p-3">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-sm font-extrabold text-slate-900">{formatDateShortBR(d.date)}</span>
-                  <Badge tone="amber">calendário {formatMinutes(d.originalMinutes)}</Badge>
-                  <Badge tone="slate">compensado {formatMinutes(d.compensatedMinutes)}</Badge>
-                  {d.plannedMinutes > 0 && <Badge tone="sky">planejado {formatMinutes(d.plannedMinutes)}</Badge>}
-                  <Badge tone="rose">restam {formatMinutes(d.remainingMinutes)}</Badge>
-                  <div className="ml-auto">
-                    <Button size="sm" variant="subtle" onClick={() => openFor(d.date, "calendario")}>
-                      <Zap size={13} /> Compensar com hora extra
-                    </Button>
-                  </div>
-                </div>
-              </li>
-            ))}
-          </ul>
-        </Card>
-      )}
-
-      {/* Acordo a compensar (folga/abono acordado — compensar posteriormente) */}
+      {/* Acordo a compensar (afastamento acordado — compensar posteriormente) */}
       {acordoDays.length > 0 && (
         <Card
           title="Acordo a compensar"

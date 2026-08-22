@@ -1,7 +1,6 @@
 // Matemática de dívida de horas: abatimento fracionado + sugestões inteligentes.
 import { computeDay, expectedMinutesOf, formatDateBR, formatMinutes } from "./time";
 import { dayContext, type Absence } from "./absences";
-import { companyDayContext, type CompanyCalendar } from "./company-calendar";
 import { sameAnnualCycle } from "./periods";
 import type {
   CompKind,
@@ -64,7 +63,6 @@ export function buildDebtDays(
   settings: WorkSettings,
   range?: { from: string; to: string },
   absences: Absence[] = [],
-  companyCalendar?: CompanyCalendar,
 ): DebtDay[] {
   // Datas relevantes: com batidas OU cobertas por ausência (acordo sem batidas conta)
   const dates = new Set<string>();
@@ -79,17 +77,11 @@ export function buildDebtDays(
       cur = addOneDay(cur);
     }
   }
-  for (const e of companyCalendar?.entries ?? []) {
-    if (!range || (e.date >= range.from && e.date <= range.to)) dates.add(e.date);
-  }
 
   const out: DebtDay[] = [];
 
   for (const date of dates) {
-    const cctx = companyCalendar
-      ? companyDayContext(date, entries, absences, companyCalendar, settings)
-      : null;
-    const ctx = cctx?.ctx ?? dayContext(date, entries, absences, settings);
+    const ctx = dayContext(date, entries, absences, settings);
     const day = ctx.day;
 
     const excess = day.excessMinutes;
@@ -122,7 +114,6 @@ export function buildDebtDays(
     push("excedente", excess);
     push("deficit", deficit);
     push("acordo", ctx.acordoMinutes);
-    push("calendario", cctx?.calendarioACompensar ?? 0);
   }
 
   return out.sort((a, b) => a.date.localeCompare(b.date));
@@ -263,7 +254,7 @@ export function extraCapacityForDate(
     comps.filter(
       (c) =>
         c.targetDate === date &&
-        (kindOf(c) === "deficit" || kindOf(c) === "acordo" || kindOf(c) === "calendario") &&
+        (kindOf(c) === "deficit" || kindOf(c) === "acordo") &&
         isActive(c) &&
         c.id !== opts?.excludeCompId,
     ),
@@ -374,7 +365,7 @@ export function canCompleteComp(
         c.id !== comp.id &&
         c.targetDate === comp.targetDate &&
         c.status === "concluida" &&
-        (kindOf(c) === "deficit" || kindOf(c) === "acordo" || kindOf(c) === "calendario"),
+        (kindOf(c) === "deficit" || kindOf(c) === "acordo"),
     ),
   );
   const available = Math.max(0, actualExtra - committed);

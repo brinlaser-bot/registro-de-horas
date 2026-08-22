@@ -17,7 +17,6 @@ import {
   regularBalanceContribution,
   type Absence,
 } from "@/lib/absences";
-import { companyDayContext } from "@/lib/company-calendar";
 import {
   getAnnualPointCycle,
   getNextPointPeriod,
@@ -56,7 +55,7 @@ interface RangeSummary {
 export default function RegistrosPage() {
   const toast = useToast();
   const mounted = useIsClient();
-  const { user, entries, compensations, absences, companyCalendar } = useAppData();
+  const { user, entries, compensations, absences } = useAppData();
   const todayStr = todayString();
 
   const settings: WorkSettings = settingsOf(user);
@@ -89,21 +88,14 @@ export default function RegistrosPage() {
         if (d >= range.from && d <= range.to) dates.add(d);
       }
     }
-    for (const e of companyCalendar?.entries ?? []) {
-      if (e.date >= range.from && e.date <= range.to) dates.add(e.date);
-    }
     return [...dates]
       .sort((a, b) => b.localeCompare(a))
-      .map((date) => {
-        const cctx = companyDayContext(date, entries, absences, companyCalendar, settings, date === todayStr ? nowMinutes : undefined);
-        return {
-          date,
-          ctx: cctx.ctx,
-          calendarLabel: cctx.label,
-          absence: absenceOnDate(absences, date),
-        };
-      });
-  }, [entries, absences, companyCalendar, settings, range, todayStr, nowMinutes]);
+      .map((date) => ({
+        date,
+        ctx: dayContext(date, entries, absences, settings, date === todayStr ? nowMinutes : undefined),
+        absence: absenceOnDate(absences, date),
+      }));
+  }, [entries, absences, settings, range, todayStr, nowMinutes]);
 
   // Resumo do intervalo, AGRUPADO POR CICLO ANUAL (nunca mistura pendências)
   const summaries = useMemo(() => {
@@ -404,7 +396,7 @@ export default function RegistrosPage() {
         />
       ) : (
         <div className="space-y-4">
-          {days.map(({ date, ctx, absence, calendarLabel }) => (
+          {days.map(({ date, ctx, absence }) => (
             <DayCard
               key={date}
               result={ctx.day}
@@ -414,7 +406,6 @@ export default function RegistrosPage() {
               nowMinutes={nowMinutes}
               isToday={date === todayStr}
               absence={absence}
-              calendarLabel={calendarLabel}
               effectiveExpected={ctx.effectiveExpected}
               balanceView={ctx}
               shortcuts={shortcutsByDate.get(date)}

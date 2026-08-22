@@ -158,15 +158,24 @@ export function SmartExit({
 
   /* ── Estado: sem batidas ─────────────────────────────── */
   if (plan.state === "no-punch") {
+    const base = effectiveExpected ?? day.expectedMinutes ?? expectedMinutesOf(settings);
     return (
       <Card title="Previsão de saída" subtitle="Assistente de jornada">
         <div className="flex items-start gap-3 rounded-xl bg-slate-50 px-4 py-3">
           <Compass size={18} className="mt-0.5 shrink-0 text-slate-400" />
           <p className="text-sm text-slate-600">
-            Registre sua <b>entrada</b> para o app calcular a previsão de saída
-            {isToday ? " de hoje" : ""}. Com base na jornada de{" "}
-            <b>{formatMinutes(day.expectedMinutes || expectedMinutesOf(settings))}</b>, a saída
-            prevista é <b>{plan.plannedExit}</b>.
+            {base <= 0 ? (
+              <>
+                Hoje é <b>folga</b>. Se você registrar trabalho, as horas realizadas serão
+                contabilizadas como <b>trabalho em folga</b>.
+              </>
+            ) : (
+              <>
+                Registre sua <b>entrada</b> para o app calcular a previsão de saída
+                {isToday ? " de hoje" : ""}. Com base na jornada de{" "}
+                <b>{formatMinutes(base)}</b>, a saída prevista é <b>{plan.plannedExit}</b>.
+              </>
+            )}
           </p>
         </div>
       </Card>

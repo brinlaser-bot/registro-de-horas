@@ -149,14 +149,7 @@ export type ChartAbsenceMarker =
   | "saude"
   | "acordado-dispensado"
   | "acordado-compensar"
-  | "outro"
-  | "folga"
-  | "trabalho-folga"
-  | "feriado"
-  | "trabalho-feriado"
-  | "abono"
-  | "calendario-compensar"
-  | "recesso";
+  | "outro";
 
 export interface StackedDatum {
   date: string;
@@ -183,13 +176,6 @@ const MARKER_ICON: Record<ChartAbsenceMarker, typeof Umbrella> = {
   "acordado-dispensado": Handshake,
   "acordado-compensar": Handshake,
   outro: CalendarDays,
-  folga: CalendarDays,
-  "trabalho-folga": CalendarDays,
-  feriado: CalendarDays,
-  "trabalho-feriado": CalendarDays,
-  abono: CalendarDays,
-  "calendario-compensar": CalendarDays,
-  recesso: CalendarDays,
 };
 
 const MARKER_TONE: Record<ChartAbsenceMarker, string> = {
@@ -198,25 +184,13 @@ const MARKER_TONE: Record<ChartAbsenceMarker, string> = {
   "acordado-dispensado": "text-emerald-600",
   "acordado-compensar": "text-violet-600",
   outro: "text-slate-500",
-  folga: "text-slate-400",
-  "trabalho-folga": "text-emerald-600",
-  feriado: "text-indigo-600",
-  "trabalho-feriado": "text-emerald-600",
-  abono: "text-teal-600",
-  "calendario-compensar": "text-amber-600",
-  recesso: "text-amber-600",
 };
 
 const MARKER_LEGEND: Array<{ marker: ChartAbsenceMarker; label: string }> = [
   { marker: "ferias", label: "Férias" },
   { marker: "saude", label: "Saúde" },
-  { marker: "acordado-dispensado", label: "Folga/abono acordado" },
-  { marker: "acordado-compensar", label: "Folga a compensar" },
-  { marker: "folga", label: "Folga" },
-  { marker: "feriado", label: "Feriado" },
-  { marker: "abono", label: "Abono" },
-  { marker: "calendario-compensar", label: "Calendário a compensar" },
-  { marker: "recesso", label: "Recesso" },
+  { marker: "acordado-dispensado", label: "Afast. acordado (dispensado)" },
+  { marker: "acordado-compensar", label: "Afast. acordado (a compensar)" },
   { marker: "outro", label: "Outro afastamento" },
 ];
 

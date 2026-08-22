@@ -18,11 +18,13 @@ interface Props {
   today: DayResult;
   todayStr: string;
   settings: WorkSettings;
+  /** Ex.: "Folga hoje" ou "Trabalho em folga" — apenas apresentação. */
+  dayLabel?: string;
   onAddEntry: (p: { date: string; time: string; type: EntryType; note: string | null }) => Promise<void>;
   onDeleteEntry: (id: number) => Promise<void>;
 }
 
-export function QuickPunch({ today, todayStr, settings, onAddEntry, onDeleteEntry }: Props) {
+export function QuickPunch({ today, todayStr, settings, dayLabel, onAddEntry, onDeleteEntry }: Props) {
   const toast = useToast();
   // Modo Agora (padrão): a batida usa a hora real do clique.
   // Modo Manual: o usuário editou o campo e a batida usa exatamente o horário digitado.
@@ -81,7 +83,7 @@ export function QuickPunch({ today, todayStr, settings, onAddEntry, onDeleteEntr
   return (
     <Card
       title="Registro rápido"
-      subtitle={`${today.entries.length === 0 ? "Nenhuma batida hoje ainda" : `${today.entries.length} batida(s) hoje`} · agora são ${clock}`}
+      subtitle={`${dayLabel ? `${dayLabel} · ` : ""}${today.entries.length === 0 ? "Nenhuma batida hoje ainda" : `${today.entries.length} batida(s) hoje`} · agora são ${clock}`}
       actions={
         <div className="flex items-center gap-2">
           {mode === "manual" && (
