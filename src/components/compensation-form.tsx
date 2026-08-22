@@ -57,12 +57,20 @@ const COPY = {
     cta: "Criar compensação por hora extra",
   },
   acordo: {
-    sourceLabel: "Dia do acordo (afastamento acordado)",
+    sourceLabel: "Dia do acordo (folga/abono acordado)",
     targetLabel: "Dia em que vai fazer hora extra",
     minutesHint: "Quanto de hora extra você fará para quitar o acordo (respeitando o teto de 10h)",
     explain:
       "As horas do afastamento acordado devem ser compensadas com hora extra em outro dia do MESMO ciclo anual, sem ultrapassar o limite diário de 10h.",
     cta: "Criar compensação do acordo",
+  },
+  calendario: {
+    sourceLabel: "Dia da obrigação do calendário",
+    targetLabel: "Dia em que vai fazer hora extra",
+    minutesHint: "Quanto de hora extra você fará para quitar a obrigação de calendário",
+    explain:
+      "Obrigações do calendário da empresa devem ser compensadas com hora extra no mesmo ciclo anual, respeitando o teto diário de 10h.",
+    cta: "Criar compensação do calendário",
   },
 } as const;
 

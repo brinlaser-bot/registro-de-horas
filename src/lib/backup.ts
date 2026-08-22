@@ -1,6 +1,7 @@
 // Import/Export de backup (JSON) com versionamento e validação.
 import type { AppData, Compensation, TimeEntry, User } from "./types";
 import type { Absence } from "./absences";
+import type { CompanyCalendar } from "./company-calendar";
 
 /**
  * v1: user + entries + compensations.
@@ -16,6 +17,7 @@ export interface BackupPayload {
   entries: TimeEntry[];
   compensations: Compensation[];
   absences: Absence[];
+  companyCalendar?: CompanyCalendar;
 }
 
 export interface BackupSummary {
@@ -33,6 +35,7 @@ export interface ParsedBackup {
   entries: TimeEntry[];
   compensations: Compensation[];
   absences: Absence[];
+  companyCalendar?: CompanyCalendar;
   version: number;
   summary: BackupSummary;
 }
@@ -124,6 +127,7 @@ export function buildBackupPayload(data: AppData): BackupPayload {
     entries: data.entries,
     compensations: data.compensations,
     absences: data.absences ?? [],
+    companyCalendar: data.companyCalendar,
   };
 }
 
@@ -171,6 +175,7 @@ export function parseBackup(
     return { ok: false, error: "bad-absences" };
   }
   const absences = (rawAbsences as Absence[] | undefined) ?? [];
+  const companyCalendar = obj.companyCalendar as CompanyCalendar | undefined;
 
   const allDates = [
     ...entries.map((e) => e.date),
@@ -189,7 +194,7 @@ export function parseBackup(
     periodTo,
   };
 
-  return { ok: true, backup: { user, entries, compensations, absences, version, summary } };
+  return { ok: true, backup: { user, entries, compensations, absences, companyCalendar, version, summary } };
 }
 
 /* ──────────────────────────────────────────────────────────

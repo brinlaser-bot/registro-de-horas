@@ -58,7 +58,7 @@ function toSummary(d: DayResult, date?: string): DaySummary {
 export default function DashboardPage() {
   const toast = useToast();
   const mounted = useIsClient();
-  const { user, entries, compensations, absences } = useAppData();
+  const { user, entries, compensations, absences, companyCalendar } = useAppData();
   const settings = settingsOf(user);
   const todayStr = todayString();
   const period = getPointPeriod(todayStr);
@@ -329,6 +329,7 @@ export default function DashboardPage() {
             entries={entries}
             compensations={compensations}
             absences={absences}
+            companyCalendar={companyCalendar}
             settings={settings}
             range={range}
             monthLabel={periodLabel(period)}

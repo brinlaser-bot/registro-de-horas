@@ -19,6 +19,7 @@ import {
   type PointPeriod,
 } from "@/lib/periods";
 import { acordoViewOf, appliedOnDate, buildDebtDays } from "@/lib/debt";
+import { companyDayContext } from "@/lib/company-calendar";
 import { stackedSegments } from "@/lib/time";
 import { Badge, Button, Card, EmptyState, Skeleton, StatCard } from "@/components/ui";
 import {
@@ -52,34 +53,36 @@ interface DayRow {
   /** Contribuição central deste dia ao Saldo do período. */
   balanceContribution: number;
   absence: Absence | undefined;
+  calendarMarker: ChartAbsenceMarker | undefined;
   acordo: AcordoView | null;
 }
 
 export default function ResumoPage() {
   const mounted = useIsClient();
-  const { user, entries, compensations, absences } = useAppData();
+  const { user, entries, compensations, absences, companyCalendar } = useAppData();
   const settings = settingsOf(user);
   const [period, setPeriod] = useState<PointPeriod>(() => getPointPeriod(new Date().toISOString().slice(0, 10)));
 
   // Visão central dos acordos do período (original/compensado/planejado/restante)
   const acordoByDate = useMemo(() => {
     const map = new Map<string, AcordoView>();
-    for (const d of buildDebtDays(entries, compensations, settings, period, absences)) {
+    for (const d of buildDebtDays(entries, compensations, settings, period, absences, companyCalendar)) {
       if (d.kind === "acordo") map.set(d.date, acordoViewOf(d));
     }
     return map;
-  }, [entries, compensations, absences, settings, period]);
+  }, [entries, compensations, absences, companyCalendar, settings, period]);
 
   const allDays: DayRow[] = useMemo(() => {
     return listDaysBetween(period.from, period.to)
       .map((date) => {
-        const ctx = dayContext(date, entries, absences, settings);
+        const cctx = companyDayContext(date, entries, absences, companyCalendar, settings);
+        const ctx = cctx.ctx;
         const absence = absenceOnDate(absences, date);
         return {
           date,
           workedMinutes: ctx.day.workedMinutes,
-          expectedMinutes: ctx.effectiveExpected,
-          balanceMinutes: ctx.adjustedBalance,
+          expectedMinutes: cctx.expectedRegular,
+          balanceMinutes: cctx.regularBalance,
           excessMinutes: ctx.day.excessMinutes,
           registrableMinutes: ctx.day.registrableMinutes,
           status: absence
@@ -96,9 +99,10 @@ export default function ResumoPage() {
                     ? "ok"
                     : "empty",
           entryCount: ctx.day.entries.length,
-          eventLabel: absence ? absenceLabel(absence) : null,
-          balanceContribution: regularBalanceContribution(ctx),
+          eventLabel: cctx.label ?? (absence ? absenceLabel(absence) : null),
+          balanceContribution: cctx.calendarEntry || cctx.isWeekend ? cctx.regularBalance : regularBalanceContribution(ctx),
           absence,
+          calendarMarker: absence ? markerOf(absence) : cctx.marker ?? undefined,
           acordo: acordoByDate.get(date) ?? null,
         };
       })
@@ -141,6 +145,8 @@ export default function ResumoPage() {
           d.absence.medicalCert ? "Atestado apresentado" : "Atestado não apresentado",
         );
       }
+    } else if (d.eventLabel) {
+      lines.push(d.eventLabel);
     }
     if (d.acordo && d.acordo.originalMinutes > 0) {
       lines.push(
@@ -162,7 +168,7 @@ export default function ResumoPage() {
       extra: seg.extra,
       excess: seg.excess,
       compensated: Math.max(0, Math.min(used, Math.max(0, d.expectedMinutes - d.workedMinutes))),
-      marker: d.absence ? markerOf(d.absence) : undefined,
+      marker: d.calendarMarker,
       markerLabel: d.eventLabel ?? undefined,
       markerLines: lines.length > 0 ? lines : undefined,
       regularBalance: d.balanceMinutes,

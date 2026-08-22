@@ -1,0 +1,38 @@
+data;descricao;categoria;tratamento;horas_a_compensar;jornada_esperada_horas;observacao
+2025-05-01;Dia do Trabalho;Feriado Nacional;ABONADO;0;0;
+2025-05-02;Compensado;Compensação 8 Horas;COMPENSAR;8;0;Folga com 8h a compensar.
+2025-05-10;Aniversário do SEBRAE/PA;Aniversário do SEBRAE/PA;ABONADO;0;0;
+2025-06-19;Corpus Christi;Feriado Nacional;ABONADO;0;0;
+2025-06-20;Compensado;Compensação 8 Horas;COMPENSAR;8;0;Folga com 8h a compensar.
+2025-07-04;Compensado;Compensação 8 Horas;COMPENSAR;8;0;Folga com 8h a compensar.
+2025-07-11;Compensado;Compensação 8 Horas;COMPENSAR;8;0;Folga com 8h a compensar.
+2025-07-18;Compensado;Compensação 8 Horas;COMPENSAR;8;0;Folga com 8h a compensar.
+2025-07-25;Compensado;Compensação 8 Horas;COMPENSAR;8;0;Folga com 8h a compensar.
+2025-08-01;Compensado;Compensação 8 Horas;COMPENSAR;8;0;Folga com 8h a compensar.
+2025-08-15;Adesão do Pará;Feriado Estadual/Municipal;ABONADO;0;0;
+2025-09-07;Independência do Brasil;Feriado Nacional;ABONADO;0;0;
+2025-10-12;N. Sra. Aparecida;Feriado Nacional;ABONADO;0;0;
+2025-11-02;Finados;Feriado Nacional;ABONADO;0;0;
+2025-11-15;Proclamação da República;Feriado Nacional;ABONADO;0;0;
+2025-11-20;Dia da Consciência Negra e o Dia Nacional de Zumbi dos Palmares;Feriado Nacional;ABONADO;0;0;
+2025-11-21;Compensado;Compensação 8 Horas;COMPENSAR;8;0;Folga com 8h a compensar.
+2025-12-22;Recesso Fim de Ano;Recesso Final de Ano;COMPENSAR;8;0;Recesso de final de ano: 8h a compensar.
+2025-12-23;Recesso Fim de Ano;Recesso Final de Ano;COMPENSAR;8;0;Recesso de final de ano: 8h a compensar.
+2025-12-24;Abonado;Abono;ABONADO;0;0;
+2025-12-25;Natal;Feriado Nacional;ABONADO;0;0;
+2025-12-26;Recesso Fim de Ano;Recesso Final de Ano;COMPENSAR;8;0;Recesso de final de ano: 8h a compensar.
+2025-12-29;Recesso Fim de Ano;Recesso Final de Ano;COMPENSAR;8;0;Recesso de final de ano: 8h a compensar.
+2025-12-30;Recesso Fim de Ano;Recesso Final de Ano;COMPENSAR;8;0;Recesso de final de ano: 8h a compensar.
+2025-12-31;Abonado;Abono;ABONADO;0;0;
+2026-01-01;Confraternização Universal;Feriado Nacional;ABONADO;0;0;
+2026-01-02;Recesso Fim de Ano;Recesso Final de Ano;COMPENSAR;8;0;Recesso de final de ano: 8h a compensar.
+2026-01-19;Compensado;Compensação 8 Horas;COMPENSAR;8;0;Folga com 8h a compensar.
+2026-01-20;São Sebastião;Feriado Estadual/Municipal;ABONADO;0;0;
+2026-02-16;Compensado;Compensação 8 Horas;COMPENSAR;8;0;Folga com 8h a compensar.
+2026-02-17;Carnaval;Feriado Nacional;ABONADO;0;0;
+2026-02-18;Cinzas;Compensação 4 Horas;COMPENSAR;4;4;"Compensação parcial de 4h; jornada esperada no dia: 4h."
+2026-04-02;Compensado;Compensação 8 Horas;COMPENSAR;8;0;Folga com 8h a compensar.
+2026-04-03;Paixão de Cristo;Feriado Nacional;ABONADO;0;0;
+2026-04-05;Páscoa;Feriado Nacional;ABONADO;0;0;
+2026-04-20;Compensado;Compensação 8 Horas;COMPENSAR;8;0;Folga com 8h a compensar.
+2026-04-21;Tiradentes;Feriado Nacional;ABONADO;0;0;
