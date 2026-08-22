@@ -22,7 +22,7 @@ import {
   sameAnnualCycle,
   type PointPeriod,
 } from "@/lib/periods";
-import { buildDebtDays, checkSourceOverflow, extraCapacityForDate } from "@/lib/debt";
+import { acordoViewOf, buildDebtDays, checkSourceOverflow, extraCapacityForDate } from "@/lib/debt";
 import type { CompKind, DayResult, WorkSettings } from "@/lib/types";
 import { DayCard } from "@/components/day-card";
 import { ManualEntryModal, type ManualPairData } from "@/components/manual-entry-modal";
@@ -208,8 +208,9 @@ export default function RegistrosPage() {
       };
       if (dd.kind === "deficit") cur.deficitRemaining = dd.remainingMinutes;
       if (dd.kind === "acordo") {
-        cur.acordoMinutes = dd.debtMinutes;
-        cur.acordoRemaining = dd.remainingMinutes;
+        const acordo = acordoViewOf(dd);
+        cur.acordoMinutes = acordo.originalMinutes;
+        cur.acordoRemaining = acordo.remainingMinutes;
       }
       map.set(dd.date, cur);
     }
@@ -388,6 +389,7 @@ export default function RegistrosPage() {
               isToday={date === todayStr}
               absence={absence}
               effectiveExpected={ctx.effectiveExpected}
+              balanceView={ctx}
               shortcuts={shortcutsByDate.get(date)}
               getCapacity={(targetDate) =>
                 extraCapacityForDate(targetDate, entries, compensations, settings)

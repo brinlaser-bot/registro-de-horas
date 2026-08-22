@@ -82,16 +82,25 @@ export function absenceJustifiedMinutes(a: Absence, s: WorkSettings): number {
 /** Minutos efetivamente trabalhados DENTRO da janela da ausência. */
 export function workedWithinAbsence(day: DayResult, a: Absence, s: WorkSettings): number {
   if (a.duration !== "parcial") {
-    // Integral: qualquer trabalho no dia está dentro da ausência
+    // Integral: todo trabalho do dia fica dentro da ausência e é histórico,
+    // mas não vira saldo regular positivo automaticamente.
     return day.workedMinutes;
   }
   const p1 = toMinutes(a.partialStart ?? "");
   const p2 = toMinutes(a.partialEnd ?? "");
-  return day.segments.reduce(
-    (sum, seg) => sum + overlap(toMinutes(seg.start), toMinutes(seg.end), p1, p2),
-    0,
-  );
-  void s;
+  if (p2 <= p1) return 0;
+  // Parcial: considera somente a interseção da ausência com as janelas reais de trabalho.
+  // Assim, almoço e períodos fora da jornada não contam como dispensa/abatimento.
+  const windows = workWindows(s);
+  return day.segments.reduce((sum, seg) => {
+    const s1 = toMinutes(seg.start);
+    const s2 = toMinutes(seg.end);
+    const insideWorkWindows = windows.reduce(
+      (acc, [w1, w2]) => acc + overlap(s1, s2, Math.max(p1, w1), Math.min(p2, w2)),
+      0,
+    );
+    return sum + insideWorkWindows;
+  }, 0);
 }
 
 export interface DayContext {
@@ -145,36 +154,56 @@ export function dayContext(
   }
 
   const justified = absenceJustifiedMinutes(absence, settings);
+  const workedInsideAbsence = workedWithinAbsence(day, absence, settings);
+  const regularWorked = Math.max(0, day.workedMinutes - workedInsideAbsence);
+  const regularExpected = Math.max(0, expected - justified);
 
   if (absence.kind === "acordado" && absence.treatment === "compensar") {
-    // Horas NÃO dispensadas: viram "Acordo a compensar", nunca déficit comum
-    const within = workedWithinAbsence(day, absence, settings);
-    const acordo = Math.max(0, justified - within);
-    const deficit = day.open ? 0 : Math.max(0, expected - day.workedMinutes - acordo);
+    // Horas do acordo NÃO são déficit comum. O que não foi trabalhado dentro da janela
+    // do acordo vira obrigação própria: "Acordo a compensar".
+    const acordo = Math.max(0, justified - workedInsideAbsence);
     return {
       day,
       absence,
-      effectiveExpected: expected,
-      adjustedBalance: day.workedMinutes - expected + acordo,
-      adjustedDeficit: deficit,
+      effectiveExpected: regularExpected,
+      adjustedBalance: regularWorked - regularExpected,
+      adjustedDeficit: day.open ? 0 : Math.max(0, regularExpected - regularWorked),
       acordoMinutes: acordo,
       justifiedMinutes: justified,
       isVacation: false,
     };
   }
 
-  // Férias / saúde / acordado-dispensado / outro: horas justificadas
-  const effectiveExpected = Math.max(0, expected - justified);
+  // Férias / saúde / acordado-dispensado / outro: horas justificadas são neutras
+  // para o saldo regular. Batidas existentes continuam históricas (worked/no ponto),
+  // mas trabalho dentro do período justificado não vira crédito automático.
   return {
     day,
     absence,
-    effectiveExpected,
-    adjustedBalance: day.workedMinutes - effectiveExpected,
-    adjustedDeficit: day.open ? 0 : Math.max(0, effectiveExpected - day.workedMinutes),
+    effectiveExpected: regularExpected,
+    adjustedBalance: regularWorked - regularExpected,
+    adjustedDeficit: day.open ? 0 : Math.max(0, regularExpected - regularWorked),
     acordoMinutes: 0,
     justifiedMinutes: justified,
     isVacation: absence.kind === "ferias" && justified >= expected,
   };
+}
+
+export type DayBalanceView = DayContext;
+
+/**
+ * FUNÇÃO CENTRAL para apresentação do saldo do dia.
+ * É um alias semântico de dayContext para deixar claro que DayCard/Resumo/Dashboard
+ * devem consumir a mesma visão de saldo regular, déficit comum e acordo a compensar.
+ */
+export function getDayBalanceView(
+  date: string,
+  entries: TimeEntry[],
+  absences: Absence[],
+  settings: WorkSettings,
+  nowMinutes?: number,
+): DayBalanceView {
+  return dayContext(date, entries, absences, settings, nowMinutes);
 }
 
 /* ── Validação central de férias/afastamentos ────────────── */

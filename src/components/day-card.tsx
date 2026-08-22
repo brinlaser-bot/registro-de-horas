@@ -3,16 +3,20 @@
 import { useState } from "react";
 import {
   ArrowLeftRight,
+  CalendarCheck,
   CheckCircle2,
   ChevronDown,
   ChevronUp,
   Coffee,
+  Handshake,
+  HeartPulse,
   LogIn,
   LogOut,
   Pencil,
   Plus,
   Trash2,
   TriangleAlert,
+  Umbrella,
   Zap,
 } from "lucide-react";
 import type { Compensation, DayResult, WorkSettings } from "@/lib/types";
@@ -22,7 +26,7 @@ import { Badge, Button, Input, Select } from "@/components/ui";
 import { CompensationForm, type CompFormData } from "@/components/compensation-form";
 import { SmartExit } from "@/components/smart-exit";
 import { allocatedForSource, overflowForSource, type ExtraCapacity } from "@/lib/debt";
-import { absenceLabel, type Absence } from "@/lib/absences";
+import { absenceLabel, type Absence, type DayBalanceView } from "@/lib/absences";
 import type { CompKind } from "@/lib/types";
 
 export function statusBadge(d: DayResult) {
@@ -31,6 +35,23 @@ export function statusBadge(d: DayResult) {
   if (d.status === "in-progress") return <Badge tone="indigo">Em andamento</Badge>;
   if (d.status === "empty") return <Badge tone="slate">Sem registros</Badge>;
   return <Badge tone="emerald">Dia ok</Badge>;
+}
+
+function absenceBadge(absence: Absence, acordoMinutes = 0) {
+  const iconProps = { size: 12, "aria-hidden": true } as const;
+  if (absence.kind === "ferias") {
+    return <Badge tone="sky"><Umbrella {...iconProps} /> Férias</Badge>;
+  }
+  if (absence.kind === "saude") {
+    return <Badge tone="rose"><HeartPulse {...iconProps} /> Afastamento por saúde</Badge>;
+  }
+  if (absence.kind === "acordado" && absence.treatment === "compensar") {
+    return <Badge tone="indigo"><Handshake {...iconProps} /> Acordo a compensar{acordoMinutes > 0 ? ` — ${formatMinutes(acordoMinutes)}` : ""}</Badge>;
+  }
+  if (absence.kind === "acordado") {
+    return <Badge tone="emerald"><Handshake {...iconProps} /> Afastamento acordado — horas dispensadas</Badge>;
+  }
+  return <Badge tone="slate"><CalendarCheck {...iconProps} /> Outro afastamento justificado</Badge>;
 }
 
 interface Props {
@@ -50,6 +71,8 @@ interface Props {
   absence?: Absence;
   /** Jornada esperada efetiva do dia (com ausência descontada). */
   effectiveExpected?: number;
+  /** Visão central de saldo regular / déficit / acordo a compensar. */
+  balanceView?: DayBalanceView;
   /** Atalhos de compensação do dia (calculados pela página com as funções centrais). */
   shortcuts?: {
     deficitRemaining: number;
@@ -76,6 +99,7 @@ export function DayCard({
   onCapComp,
   absence,
   effectiveExpected,
+  balanceView,
   shortcuts,
   getCapacity,
 }: Props) {
@@ -168,8 +192,14 @@ export function DayCard({
     : 0;
   const remainingExcess = Math.max(0, d.excessMinutes - allocatedHere);
 
+  // Visão central de apresentação do saldo regular do dia.
+  const regularExpected = balanceView?.effectiveExpected ?? effectiveExpected ?? d.expectedMinutes;
+  const regularBalance = balanceView?.adjustedBalance ?? d.balanceMinutes;
+  const commonDeficit = balanceView?.adjustedDeficit ?? Math.max(0, d.expectedMinutes - d.workedMinutes);
+  const acordoMinutes = balanceView?.acordoMinutes ?? shortcuts?.acordoMinutes ?? 0;
+
   // Detecção de overflow: compensação vinculada acima da dívida atual (após correção)
-  const deficitHere = Math.max(0, d.expectedMinutes - d.workedMinutes);
+  const deficitHere = commonDeficit;
   const excessOverflow = allComps ? overflowForSource(allComps, d.date, "excedente", d.excessMinutes) : 0;
   const deficitOverflow = allComps ? overflowForSource(allComps, d.date, "deficit", deficitHere) : 0;
 
@@ -178,7 +208,7 @@ export function DayCard({
     await onCapComp?.(d.date, kind, max);
   };
 
-  const balanceTone = d.balanceMinutes > 0 ? "text-emerald-600" : d.balanceMinutes < 0 ? "text-rose-600" : "text-slate-500";
+  const balanceTone = regularBalance > 0 ? "text-emerald-600" : regularBalance < 0 ? "text-rose-600" : "text-slate-500";
 
   return (
     <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -209,8 +239,8 @@ export function DayCard({
         <div className="text-right">
           <p className="text-lg font-extrabold tabular-nums text-slate-900">{formatMinutes(d.workedMinutes)}</p>
           <p className={`text-xs font-bold tabular-nums ${balanceTone}`}>
-            {d.balanceMinutes >= 0 ? "+" : ""}
-            {formatMinutes(d.balanceMinutes)}
+            {regularBalance >= 0 ? "+" : ""}
+            {formatMinutes(regularBalance)}
           </p>
         </div>
         {expanded ? <ChevronUp size={18} className="text-slate-400" /> : <ChevronDown size={18} className="text-slate-400" />}
@@ -260,11 +290,11 @@ export function DayCard({
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <MiniStat label="Trabalhado" value={formatMinutes(d.workedMinutes)} tone="text-slate-900" />
             <MiniStat
-              label="Base diária"
-              value={formatMinutes(effectiveExpected ?? d.expectedMinutes)}
+              label="Base regular"
+              value={formatMinutes(regularExpected)}
               tone="text-slate-500"
             />
-            <MiniStat label="Saldo" value={`${d.balanceMinutes >= 0 ? "+" : ""}${formatMinutes(d.balanceMinutes)}`} tone={balanceTone} />
+            <MiniStat label="Saldo regular" value={`${regularBalance >= 0 ? "+" : ""}${formatMinutes(regularBalance)}`} tone={balanceTone} />
             <MiniStat
               label="No ponto*"
               value={formatMinutes(d.registrableMinutes)}
