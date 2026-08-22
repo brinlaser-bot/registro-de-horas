@@ -197,19 +197,31 @@ export default function RegistrosPage() {
     const debts = buildDebtDays(entries, compensations, settings, range, absences);
     const map = new Map<
       string,
-      { deficitRemaining: number; acordoMinutes: number; acordoRemaining: number; canCompensate: boolean }
+      {
+        deficitRemaining: number;
+        acordoMinutes: number;
+        acordoCompensated: number;
+        acordoPlanned: number;
+        acordoRemaining: number;
+        canCompensate: boolean;
+      }
     >();
     for (const dd of debts) {
       const cur = map.get(dd.date) ?? {
         deficitRemaining: 0,
         acordoMinutes: 0,
+        acordoCompensated: 0,
+        acordoPlanned: 0,
         acordoRemaining: 0,
         canCompensate: sameAnnualCycle(dd.date, todayStr),
       };
       if (dd.kind === "deficit") cur.deficitRemaining = dd.remainingMinutes;
       if (dd.kind === "acordo") {
+        // Valores vindos da função central acordoViewOf (sem recalcular aqui)
         const acordo = acordoViewOf(dd);
         cur.acordoMinutes = acordo.originalMinutes;
+        cur.acordoCompensated = acordo.compensatedMinutes;
+        cur.acordoPlanned = acordo.plannedMinutes;
         cur.acordoRemaining = acordo.remainingMinutes;
       }
       map.set(dd.date, cur);

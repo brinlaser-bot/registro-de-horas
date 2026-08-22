@@ -13,10 +13,26 @@ import {
   periodLabel,
   type PointPeriod,
 } from "@/lib/periods";
-import { appliedOnDate } from "@/lib/debt";
+import { acordoViewOf, appliedOnDate, buildDebtDays } from "@/lib/debt";
 import { stackedSegments } from "@/lib/time";
 import { Badge, Button, Card, EmptyState, Skeleton, StatCard } from "@/components/ui";
-import { StackedBarsChart, type StackedDatum } from "@/components/charts";
+import {
+  StackedBarsChart,
+  type ChartAbsenceMarker,
+  type StackedDatum,
+} from "@/components/charts";
+import type { Absence } from "@/lib/absences";
+import type { AcordoView } from "@/lib/debt";
+
+/** Marcador visual do dia (férias/afastamentos) — apenas informativo. */
+function markerOf(a: Absence): ChartAbsenceMarker {
+  if (a.kind === "ferias") return "ferias";
+  if (a.kind === "saude") return "saude";
+  if (a.kind === "acordado") {
+    return a.treatment === "compensar" ? "acordado-compensar" : "acordado-dispensado";
+  }
+  return "outro";
+}
 
 interface DayRow {
   date: string;
@@ -28,6 +44,8 @@ interface DayRow {
   status: string;
   entryCount: number;
   eventLabel: string | null;
+  absence: Absence | undefined;
+  acordo: AcordoView | null;
 }
 
 export default function ResumoPage() {
@@ -35,6 +53,15 @@ export default function ResumoPage() {
   const { user, entries, compensations, absences } = useAppData();
   const settings = settingsOf(user);
   const [period, setPeriod] = useState<PointPeriod>(() => getPointPeriod(new Date().toISOString().slice(0, 10)));
+
+  // Visão central dos acordos do período (original/compensado/planejado/restante)
+  const acordoByDate = useMemo(() => {
+    const map = new Map<string, AcordoView>();
+    for (const d of buildDebtDays(entries, compensations, settings, period, absences)) {
+      if (d.kind === "acordo") map.set(d.date, acordoViewOf(d));
+    }
+    return map;
+  }, [entries, compensations, absences, settings, period]);
 
   const allDays: DayRow[] = useMemo(() => {
     return listDaysBetween(period.from, period.to)
@@ -63,10 +90,12 @@ export default function ResumoPage() {
                     : "empty",
           entryCount: ctx.day.entries.length,
           eventLabel: absence ? absenceLabel(absence) : null,
+          absence,
+          acordo: acordoByDate.get(date) ?? null,
         };
       })
       .filter((d) => d.entryCount > 0 || d.eventLabel || !isWeekend(d.date));
-  }, [entries, absences, settings, period]);
+  }, [entries, absences, settings, period, acordoByDate]);
 
   const totals = useMemo(
     () =>
@@ -84,10 +113,37 @@ export default function ResumoPage() {
     [allDays],
   );
 
-  // Gráfico empilhado: blocos sobre a jornada EFETIVA + compensação aplicada
+  // Gráfico empilhado: blocos sobre a jornada EFETIVA + compensação aplicada.
+  // Os valores das barras permanecem exatamente os já aprovados — o marcador de
+  // férias/afastamento é apenas informativo (não soma horas à barra).
   const chartData: StackedDatum[] = allDays.map((d) => {
     const seg = stackedSegments(d.workedMinutes, d.expectedMinutes, settings.maxDailyMinutes);
     const used = appliedOnDate(compensations, d.date);
+
+    const lines: string[] = [];
+    if (d.absence) {
+      lines.push(
+        d.absence.duration === "parcial"
+          ? `Período: ${d.absence.partialStart}–${d.absence.partialEnd}`
+          : "Dia integral",
+      );
+      if (d.absence.kind === "saude") {
+        lines.push(
+          d.absence.medicalCert ? "Atestado apresentado" : "Atestado não apresentado",
+        );
+      }
+    }
+    if (d.acordo && d.acordo.originalMinutes > 0) {
+      lines.push(
+        `Acordo original: ${formatMinutes(d.acordo.originalMinutes)}`,
+        `Compensado: ${formatMinutes(d.acordo.compensatedMinutes)}`,
+      );
+      if (d.acordo.plannedMinutes > 0) {
+        lines.push(`Planejado: ${formatMinutes(d.acordo.plannedMinutes)}`);
+      }
+      lines.push(`Restante: ${formatMinutes(d.acordo.remainingMinutes)}`);
+    }
+
     return {
       date: d.date,
       label: d.date.slice(8),
@@ -97,6 +153,10 @@ export default function ResumoPage() {
       extra: seg.extra,
       excess: seg.excess,
       compensated: Math.max(0, Math.min(used, Math.max(0, d.expectedMinutes - d.workedMinutes))),
+      marker: d.absence ? markerOf(d.absence) : undefined,
+      markerLabel: d.eventLabel ?? undefined,
+      markerLines: lines.length > 0 ? lines : undefined,
+      regularBalance: d.balanceMinutes,
     };
   });
 

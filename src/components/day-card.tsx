@@ -3,7 +3,7 @@
 import { useState } from "react";
 import {
   ArrowLeftRight,
-  CalendarCheck,
+  CalendarDays,
   CheckCircle2,
   ChevronDown,
   ChevronUp,
@@ -37,21 +37,59 @@ export function statusBadge(d: DayResult) {
   return <Badge tone="emerald">Dia ok</Badge>;
 }
 
-function absenceBadge(absence: Absence, acordoMinutes = 0) {
-  const iconProps = { size: 12, "aria-hidden": true } as const;
+/**
+ * Ícone da situação do dia. O `shrink-0` é essencial: sem ele o <svg> é um
+ * flex-item que pode colapsar para largura 0 dentro do badge, tornando o
+ * ícone invisível mesmo presente no DOM.
+ */
+function absenceIcon(absence: Absence, size: number) {
+  const cls = "shrink-0";
+  if (absence.kind === "ferias") return <Umbrella size={size} className={cls} aria-hidden />;
+  if (absence.kind === "saude") return <HeartPulse size={size} className={cls} aria-hidden />;
+  if (absence.kind === "acordado") return <Handshake size={size} className={cls} aria-hidden />;
+  return <CalendarDays size={size} className={cls} aria-hidden />;
+}
+
+/** Badge do card recolhido: ícone perceptível + texto completo. */
+function absenceBadge(absence: Absence) {
   if (absence.kind === "ferias") {
-    return <Badge tone="sky"><Umbrella {...iconProps} /> Férias</Badge>;
+    return (
+      <Badge tone="sky" className="shrink-0 gap-1.5 py-1">
+        {absenceIcon(absence, 14)}
+        <span>Férias</span>
+      </Badge>
+    );
   }
   if (absence.kind === "saude") {
-    return <Badge tone="rose"><HeartPulse {...iconProps} /> Afastamento por saúde</Badge>;
+    return (
+      <Badge tone="rose" className="shrink-0 gap-1.5 py-1">
+        {absenceIcon(absence, 14)}
+        <span>Afastamento por saúde</span>
+      </Badge>
+    );
   }
   if (absence.kind === "acordado" && absence.treatment === "compensar") {
-    return <Badge tone="indigo"><Handshake {...iconProps} /> Acordo a compensar{acordoMinutes > 0 ? ` — ${formatMinutes(acordoMinutes)}` : ""}</Badge>;
+    return (
+      <Badge tone="indigo" className="shrink-0 gap-1.5 py-1">
+        {absenceIcon(absence, 14)}
+        <span>Afastamento acordado — compensar posteriormente</span>
+      </Badge>
+    );
   }
   if (absence.kind === "acordado") {
-    return <Badge tone="emerald"><Handshake {...iconProps} /> Afastamento acordado — horas dispensadas</Badge>;
+    return (
+      <Badge tone="emerald" className="shrink-0 gap-1.5 py-1">
+        {absenceIcon(absence, 14)}
+        <span>Afastamento acordado — horas dispensadas</span>
+      </Badge>
+    );
   }
-  return <Badge tone="slate"><CalendarCheck {...iconProps} /> Outro afastamento justificado</Badge>;
+  return (
+    <Badge tone="slate" className="shrink-0 gap-1.5 py-1">
+      {absenceIcon(absence, 14)}
+      <span>Outro afastamento justificado</span>
+    </Badge>
+  );
 }
 
 interface Props {
@@ -76,7 +114,13 @@ interface Props {
   /** Atalhos de compensação do dia (calculados pela página com as funções centrais). */
   shortcuts?: {
     deficitRemaining: number;
+    /** Original do acordo. */
     acordoMinutes: number;
+    /** Já concluído (compensado). */
+    acordoCompensated: number;
+    /** Planejado e ainda não concluído. */
+    acordoPlanned: number;
+    /** Original − Compensado. */
     acordoRemaining: number;
     canCompensate: boolean; // ciclo anual ainda ativo
   };
@@ -223,11 +267,18 @@ export function DayCard({
             <span className="ml-2 font-medium text-slate-400">{formatDateShortBR(d.date)}</span>
           </p>
           <div className="mt-1 flex flex-wrap items-center gap-2">
-            {absence ? (
-              <Badge tone={absence.kind === "ferias" ? "sky" : "indigo"}>{absenceLabel(absence)}</Badge>
-            ) : (
-              statusBadge(d)
-            )}
+            {absence ? absenceBadge(absence) : statusBadge(d)}
+            {/* Acordo: indicação curta do que ainda falta (sem duplicar no badge) */}
+            {absence?.kind === "acordado" &&
+              absence.treatment === "compensar" &&
+              (shortcuts?.acordoRemaining ?? 0) > 0 && (
+                <span
+                  className="inline-flex shrink-0 items-center rounded-full bg-violet-100 px-2.5 py-1 text-[11px] font-bold text-violet-700"
+                  title={`Acordo original ${formatMinutes(shortcuts?.acordoMinutes ?? 0)} · compensado ${formatMinutes(shortcuts?.acordoCompensated ?? 0)}`}
+                >
+                  Restante: {formatMinutes(shortcuts?.acordoRemaining ?? 0)}
+                </span>
+              )}
             {d.open && <span className="inline-flex items-center gap-1 text-[11px] font-bold text-indigo-500"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-indigo-500" /> em andamento</span>}
             {d.lunchDeductedMinutes > 0 && (
               <span className="text-[11px] font-medium text-slate-400">
@@ -265,24 +316,59 @@ export function DayCard({
             </div>
           )}
 
-          {/* Ausência cobrindo o dia */}
+          {/* Ausência cobrindo o dia: ícone + tipo + detalhamento do acordo */}
           {absence && (
-            <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2.5 text-xs font-medium text-sky-800">
-              <span className="font-bold">{absenceLabel(absence)}</span>
-              {absence.duration === "parcial" ? (
-                <span>parcial {absence.partialStart}–{absence.partialEnd}</span>
-              ) : (
-                <span>dia integral</span>
-              )}
-              {absence.kind === "saude" && (
-                <span>· atestado {absence.medicalCert ? "apresentado" : "não apresentado"}</span>
-              )}
-              {absence.note && <span className="text-sky-600">· {absence.note}</span>}
-              {effectiveExpected !== undefined && effectiveExpected < d.expectedMinutes && (
-                <span className="text-sky-600">
-                  · jornada esperada reduzida para {formatMinutes(effectiveExpected)}
+            <div className="mb-3 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2.5 text-xs font-medium text-sky-800">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="inline-flex shrink-0 text-sky-600" aria-hidden>
+                  {absenceIcon(absence, 16)}
                 </span>
-              )}
+                <span className="font-bold">{absenceLabel(absence)}</span>
+                {absence.duration === "parcial" ? (
+                  <span>· parcial {absence.partialStart}–{absence.partialEnd}</span>
+                ) : (
+                  <span>· dia integral</span>
+                )}
+                {absence.kind === "saude" && (
+                  <span>· atestado {absence.medicalCert ? "apresentado" : "não apresentado"}</span>
+                )}
+                {absence.note && <span className="text-sky-600">· {absence.note}</span>}
+                {regularExpected < d.expectedMinutes && (
+                  <span className="text-sky-600">
+                    · jornada regular exigida reduzida para {formatMinutes(regularExpected)}
+                  </span>
+                )}
+              </div>
+
+              {/* Detalhamento do acordo — valores vindos das funções centrais */}
+              {absence.kind === "acordado" &&
+                absence.treatment === "compensar" &&
+                (shortcuts?.acordoMinutes ?? 0) > 0 && (
+                  <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg bg-white/70 px-2.5 py-1.5 text-[11px] font-semibold text-violet-800">
+                    <span>
+                      Acordo original:{" "}
+                      <b>{formatMinutes(shortcuts?.acordoMinutes ?? 0)}</b>
+                    </span>
+                    <span>
+                      · Compensado:{" "}
+                      <b className="text-emerald-700">
+                        {formatMinutes(shortcuts?.acordoCompensated ?? 0)}
+                      </b>
+                    </span>
+                    {(shortcuts?.acordoPlanned ?? 0) > 0 && (
+                      <span>
+                        · Planejado:{" "}
+                        <b className="text-sky-700">{formatMinutes(shortcuts?.acordoPlanned ?? 0)}</b>
+                      </span>
+                    )}
+                    <span>
+                      · Restante:{" "}
+                      <b className="text-amber-700">
+                        {formatMinutes(shortcuts?.acordoRemaining ?? 0)}
+                      </b>
+                    </span>
+                  </div>
+                )}
             </div>
           )}
 
@@ -374,13 +460,10 @@ export function DayCard({
           {/* Atalho: Acordo a compensar (afastamento acordado — compensar posteriormente) */}
           {shortcuts?.canCompensate && shortcuts.acordoRemaining > 0 && (
             <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2.5">
+              {/* Detalhamento completo fica no banner acima — aqui só o convite à ação */}
               <p className="flex-1 text-xs font-medium text-violet-800">
-                Acordo a compensar: <b>{formatMinutes(shortcuts.acordoMinutes)}</b>
-                {shortcuts.acordoRemaining < shortcuts.acordoMinutes && (
-                  <>
-                    {" "}· ainda pendentes: <b>{formatMinutes(shortcuts.acordoRemaining)}</b>
-                  </>
-                )}
+                Há <b>{formatMinutes(shortcuts.acordoRemaining)}</b> do acordo ainda a compensar com
+                hora extra.
               </p>
               <Button
                 size="sm"

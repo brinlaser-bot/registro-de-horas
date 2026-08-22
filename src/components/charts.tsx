@@ -1,5 +1,6 @@
 "use client";
 
+import { CalendarDays, Handshake, HeartPulse, Umbrella } from "lucide-react";
 import { formatMinutes, weekdayShort } from "@/lib/time";
 
 /* ── Anel de progresso (SVG) ────────────────────────────── */
@@ -142,6 +143,14 @@ export function BarsChart({ data, height = 140 }: { data: BarDatum[]; height?: n
 
 /* ── Barras EMPILHADAS (base / extra / excedente / compensado) ── */
 
+/** Marcador de situação especial do dia (férias/afastamentos). */
+export type ChartAbsenceMarker =
+  | "ferias"
+  | "saude"
+  | "acordado-dispensado"
+  | "acordado-compensar"
+  | "outro";
+
 export interface StackedDatum {
   date: string;
   label: string;
@@ -151,7 +160,39 @@ export interface StackedDatum {
   extra: number;
   excess: number;
   compensated: number;
+  /** Situação especial do dia (opcional) — apenas informativa, não altera as barras. */
+  marker?: ChartAbsenceMarker;
+  /** Rótulo textual do marcador (ex.: "Afastamento por saúde"). */
+  markerLabel?: string;
+  /** Linhas extras do tooltip, já calculadas pelas funções centrais. */
+  markerLines?: string[];
+  /** Saldo regular do dia (para o tooltip). */
+  regularBalance?: number;
 }
+
+const MARKER_ICON: Record<ChartAbsenceMarker, typeof Umbrella> = {
+  ferias: Umbrella,
+  saude: HeartPulse,
+  "acordado-dispensado": Handshake,
+  "acordado-compensar": Handshake,
+  outro: CalendarDays,
+};
+
+const MARKER_TONE: Record<ChartAbsenceMarker, string> = {
+  ferias: "text-sky-600",
+  saude: "text-rose-600",
+  "acordado-dispensado": "text-emerald-600",
+  "acordado-compensar": "text-violet-600",
+  outro: "text-slate-500",
+};
+
+const MARKER_LEGEND: Array<{ marker: ChartAbsenceMarker; label: string }> = [
+  { marker: "ferias", label: "Férias" },
+  { marker: "saude", label: "Saúde" },
+  { marker: "acordado-dispensado", label: "Afast. acordado (dispensado)" },
+  { marker: "acordado-compensar", label: "Afast. acordado (a compensar)" },
+  { marker: "outro", label: "Outro afastamento" },
+];
 
 const hatch = {
   backgroundImage:
@@ -202,10 +243,27 @@ export function StackedBarsChart({
 
         {data.map((d) => {
           const total = d.base + d.extra + d.excess + d.compensated;
-          const tooltip = `${weekdayShort(d.date).replace(".", "")} ${d.date.slice(8)}/${d.date.slice(5, 7)} · ${formatMinutes(d.workedMinutes)}` +
-            (d.compensated > 0 ? ` (+${formatMinutes(d.compensated)} compensado)` : "");
+          const MarkerIcon = d.marker ? MARKER_ICON[d.marker] : null;
           return (
-            <div key={d.date} className="group relative flex h-full flex-1 items-end justify-center">
+            <div
+              key={d.date}
+              className="group relative flex h-full flex-1 items-end justify-center"
+              tabIndex={0}
+              aria-label={
+                d.marker
+                  ? `${d.date} — ${d.markerLabel ?? "situação especial"} — trabalhado ${formatMinutes(d.workedMinutes)}`
+                  : `${d.date} — trabalhado ${formatMinutes(d.workedMinutes)}`
+              }
+            >
+              {/* Marcador de férias/afastamento: visível mesmo com 0h trabalhadas */}
+              {MarkerIcon && (
+                <span
+                  className={`pointer-events-none absolute left-1/2 top-0 z-20 -translate-x-1/2 ${MARKER_TONE[d.marker!]}`}
+                  aria-hidden
+                >
+                  <MarkerIcon size={14} className="shrink-0" />
+                </span>
+              )}
               {total === 0 ? (
                 <div className="h-1 w-full max-w-[22px] rounded bg-slate-200" />
               ) : (
@@ -227,20 +285,60 @@ export function StackedBarsChart({
                   )}
                 </div>
               )}
-              <div className="pointer-events-none absolute bottom-full left-1/2 z-30 mb-1 hidden -translate-x-1/2 whitespace-nowrap rounded-lg bg-slate-900 px-2 py-1 text-[10px] font-semibold text-white shadow-lg group-hover:block">
-                {tooltip}
+              {/* Tooltip detalhado (hover / foco / toque) */}
+              <div className="pointer-events-none absolute bottom-full left-1/2 z-30 mb-1 hidden -translate-x-1/2 whitespace-nowrap rounded-lg bg-slate-900 px-2.5 py-2 text-[10px] font-semibold text-white shadow-lg group-hover:block group-focus-within:block">
+                <span className="block font-extrabold">
+                  {weekdayShort(d.date).replace(".", "")} {d.date.slice(8)}/{d.date.slice(5, 7)}/
+                  {d.date.slice(0, 4)}
+                </span>
+                {d.marker && (
+                  <span className="mt-0.5 block text-sky-200">{d.markerLabel}</span>
+                )}
+                <span className="mt-0.5 block text-slate-300">
+                  Trabalhado: {formatMinutes(d.workedMinutes)}
+                </span>
+                {d.regularBalance !== undefined && (
+                  <span className="block text-slate-300">
+                    Saldo regular: {d.regularBalance >= 0 ? "+" : ""}
+                    {formatMinutes(d.regularBalance)}
+                  </span>
+                )}
+                {d.compensated > 0 && (
+                  <span className="block text-slate-300">
+                    Compensado no dia: {formatMinutes(d.compensated)}
+                  </span>
+                )}
+                {d.markerLines?.map((line) => (
+                  <span key={line} className="block text-violet-200">
+                    {line}
+                  </span>
+                ))}
               </div>
             </div>
           );
         })}
       </div>
 
+      {/* Datas + ícone da situação do dia */}
       <div className="mt-2 flex justify-between gap-[3px]">
-        {data.map((d) => (
-          <span key={d.date} className="flex-1 text-center text-[9px] font-semibold text-slate-400">
-            {d.label}
-          </span>
-        ))}
+        {data.map((d) => {
+          const MiniIcon = d.marker ? MARKER_ICON[d.marker] : null;
+          return (
+            <span
+              key={d.date}
+              className="flex flex-1 flex-col items-center gap-0.5 text-center text-[9px] font-semibold text-slate-400"
+            >
+              {MiniIcon && (
+                <MiniIcon
+                  size={11}
+                  className={`shrink-0 ${MARKER_TONE[d.marker!]}`}
+                  aria-hidden
+                />
+              )}
+              {d.label}
+            </span>
+          );
+        })}
       </div>
 
       {/* Legenda */}
@@ -261,6 +359,22 @@ export function StackedBarsChart({
           /> Horas compensadas
         </span>
       </div>
+
+      {/* Legenda das situações do dia (férias/afastamentos) — não depende só de cor */}
+      {data.some((d) => d.marker) && (
+        <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-slate-100 pt-3 text-[11px] font-medium text-slate-500">
+          <span className="font-bold uppercase tracking-wide text-slate-400">Situações do dia:</span>
+          {MARKER_LEGEND.map(({ marker, label }) => {
+            const Icon = MARKER_ICON[marker];
+            return (
+              <span key={marker} className="inline-flex items-center gap-1.5" title={label}>
+                <Icon size={13} className={`shrink-0 ${MARKER_TONE[marker]}`} aria-hidden />
+                {label}
+              </span>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
