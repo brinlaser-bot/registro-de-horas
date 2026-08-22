@@ -162,7 +162,9 @@ export function CompensationForm({
       subtitle={
         kind === "excedente"
           ? "Regra da empresa: excedente acima do limite diário deve ser compensado em outro dia."
-          : "Quitação de saldo negativo com hora extra, respeitando o teto diário."
+          : kind === "acordo"
+            ? "Compensação de horas de afastamento acordado, respeitando o teto diário."
+            : "Quitação de saldo negativo com hora extra, respeitando o teto diário."
       }
       footer={
         <>
@@ -254,7 +256,8 @@ export function CompensationForm({
               <div className="grid gap-1 sm:grid-cols-2">
                 {pendingDebtMinutes !== undefined && (
                   <p>
-                    <b>Déficit pendente:</b> {formatMinutes(pendingDebtMinutes)}
+                    <b>{kind === "acordo" ? "Acordo pendente:" : "Déficit pendente:"}</b>{" "}
+                    {formatMinutes(pendingDebtMinutes)}
                   </p>
                 )}
                 <p>

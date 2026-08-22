@@ -383,3 +383,48 @@ export function canCompleteComp(
 
   return { ok: true, actualExtra, committed, available };
 }
+
+/* ── Visão do "Acordo a compensar" (escopo exclusivo do fluxo de acordo) ── */
+
+export interface AcordoView {
+  date: string;
+  /** Total gerado pelo afastamento acordado. */
+  originalMinutes: number;
+  /** Soma SOMENTE das compensações de acordo concluídas. */
+  compensatedMinutes: number;
+  /** Soma das compensações de acordo apenas planejadas (pendentes). */
+  plannedMinutes: number;
+  /** Original − Compensado (planejado NÃO abate). */
+  remainingMinutes: number;
+}
+
+/**
+ * Deriva Original / Compensado / Planejado / Restante de um dia de acordo.
+ * Regra do acordo: apenas compensações CONCLUÍDAS abatem o restante —
+ * uma compensação somente planejada não reduz o saldo devido.
+ * Não altera a semântica de excedente/déficit em `buildDebtDays`.
+ */
+export function acordoViewOf(day: DebtDay): AcordoView {
+  return {
+    date: day.date,
+    originalMinutes: day.debtMinutes,
+    compensatedMinutes: day.concludedMinutes,
+    plannedMinutes: day.pendingMinutes,
+    remainingMinutes: Math.max(0, day.debtMinutes - day.concludedMinutes),
+  };
+}
+
+/** Acordos ativos (com saldo a compensar) de um intervalo — normalmente o ciclo anual. */
+export function activeAcordos(
+  entries: TimeEntry[],
+  comps: Compensation[],
+  settings: WorkSettings,
+  range: { from: string; to: string },
+  absences: Absence[] = [],
+): AcordoView[] {
+  return buildDebtDays(entries, comps, settings, range, absences)
+    .filter((d) => d.kind === "acordo")
+    .map(acordoViewOf)
+    .filter((a) => a.remainingMinutes > 0)
+    .reverse();
+}

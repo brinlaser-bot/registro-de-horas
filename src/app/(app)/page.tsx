@@ -31,7 +31,7 @@ import {
   periodLabel,
   sameAnnualCycle,
 } from "@/lib/periods";
-import { buildDebtDays, canCompleteComp, extraCapacityForDate } from "@/lib/debt";
+import { activeAcordos, canCompleteComp, extraCapacityForDate } from "@/lib/debt";
 import type { CompKind, DayResult, DaySummary } from "@/lib/types";
 import { Badge, Button, Card, EmptyState, Skeleton, StatCard } from "@/components/ui";
 import { QuickPunch } from "@/components/quick-punch";
@@ -182,9 +182,7 @@ export default function DashboardPage() {
   /** Acordos a compensar ativos do ciclo anual atual (independe do período 21→20). */
   const acordos = useMemo(() => {
     const bounds = annualCycleBounds(getAnnualPointCycle(todayStr));
-    return buildDebtDays(entries, compensations, settings, bounds, absences)
-      .filter((d) => d.kind === "acordo" && (d.remainingMinutes > 0 || d.pendingMinutes > 0))
-      .reverse();
+    return activeAcordos(entries, compensations, settings, bounds, absences);
   }, [entries, compensations, absences, settings, todayStr]);
 
   /** Abre o formulário central já preenchido para quitar um acordo/déficit. */
@@ -354,13 +352,16 @@ export default function DashboardPage() {
               <li key={d.date} className="flex flex-wrap items-center gap-3 rounded-xl border border-violet-100 bg-violet-50/50 p-3">
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-bold text-slate-800">
-                    Acordo a compensar — {formatMinutes(d.debtMinutes)}
+                    Acordo a compensar — {formatMinutes(d.originalMinutes)}
                   </p>
                   <p className="mt-0.5 text-xs text-slate-500">
                     Origem: {formatDateShortBR(d.date)} · Ciclo anual:{" "}
                     {getAnnualPointCycle(d.date)} · Compensado:{" "}
-                    <b className="text-emerald-600">{formatMinutes(d.concludedMinutes)}</b> ·
+                    <b className="text-emerald-600">{formatMinutes(d.compensatedMinutes)}</b> ·
                     Restante: <b className="text-amber-600">{formatMinutes(d.remainingMinutes)}</b>
+                    {d.plannedMinutes > 0 && (
+                      <> · Planejado: <b className="text-sky-600">{formatMinutes(d.plannedMinutes)}</b></>
+                    )}
                   </p>
                 </div>
                 {d.remainingMinutes > 0 && (
@@ -423,7 +424,7 @@ export default function DashboardPage() {
                     {(c.kind ?? "excedente") === "deficit"
                       ? "hora extra"
                       : (c.kind ?? "excedente") === "acordo"
-                        ? "acordo"
+                        ? "hora extra · acordo"
                         : "sair cedo"}
                   </Badge>
                   {(() => {

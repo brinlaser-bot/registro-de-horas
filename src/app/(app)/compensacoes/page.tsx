@@ -13,7 +13,7 @@ import { actions, enrichComp, settingsOf, useAppData, useIsClient } from "@/lib/
 import { formatDateBR, formatDateShortBR, formatMinutes, todayString } from "@/lib/time";
 import type { CompKind } from "@/lib/types";
 import type { CompFormData } from "@/components/compensation-form";
-import { buildDebtDays, canCompleteComp, extraCapacityForDate } from "@/lib/debt";
+import { activeAcordos, canCompleteComp, extraCapacityForDate } from "@/lib/debt";
 import { annualCycleBounds, getAnnualPointCycle } from "@/lib/periods";
 import { Badge, Button, Card, EmptyState, Skeleton } from "@/components/ui";
 import { CompensationForm } from "@/components/compensation-form";
@@ -43,11 +43,10 @@ export default function CompensacoesPage() {
   const cycleBounds = useMemo(() => annualCycleBounds(cycle), [cycle]);
 
   const { absences } = useAppData();
-  const acordosAtivos = useMemo(() => {
-    return buildDebtDays(entries, compensations, settings, cycleBounds, absences)
-      .filter((d) => d.kind === "acordo" && (d.remainingMinutes > 0 || d.pendingMinutes > 0))
-      .reverse();
-  }, [entries, compensations, absences, settings, cycleBounds]);
+  const acordosAtivos = useMemo(
+    () => activeAcordos(entries, compensations, settings, cycleBounds, absences),
+    [entries, compensations, absences, settings, cycleBounds],
+  );
 
   const [formKind, setFormKind] = useState<CompKind>("excedente");
   const [formInitial, setFormInitial] = useState<CompFormData | undefined>();
@@ -91,11 +90,14 @@ export default function CompensacoesPage() {
       if (!res.ok) throw new Error(res.error); // modal exibe a mensagem e permanece aberto
       toast.show("Compensação atualizada.");
     } else {
+      // CAUSA RAIZ: sem `kind` explícito, addComp assumia "excedente" e a
+      // compensação de acordo deixava de abater o acordo de origem.
       const res = actions.addComp({
         sourceDate: payload.sourceDate,
         targetDate: payload.targetDate,
         minutes: payload.minutes,
         note: payload.note || null,
+        kind: payload.kind ?? formKind,
       });
       if (!res.ok) throw new Error(res.error);
       toast.show("Compensação criada!");
@@ -172,13 +174,16 @@ export default function CompensacoesPage() {
               <li key={d.date} className="flex flex-wrap items-center gap-3 rounded-xl border border-violet-100 bg-violet-50/50 p-3">
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-bold text-slate-800">
-                    Acordo a compensar — {formatMinutes(d.debtMinutes)}
+                    Acordo a compensar — {formatMinutes(d.originalMinutes)}
                   </p>
                   <p className="mt-0.5 text-xs text-slate-500">
                     Origem: {formatDateShortBR(d.date)} · Ciclo anual:{" "}
                     {getAnnualPointCycle(d.date)} · Compensado:{" "}
-                    <b className="text-emerald-600">{formatMinutes(d.concludedMinutes)}</b> ·
+                    <b className="text-emerald-600">{formatMinutes(d.compensatedMinutes)}</b> ·
                     Restante: <b className="text-amber-600">{formatMinutes(d.remainingMinutes)}</b>
+                    {d.plannedMinutes > 0 && (
+                      <> · Planejado: <b className="text-sky-600">{formatMinutes(d.plannedMinutes)}</b></>
+                    )}
                   </p>
                 </div>
                 {d.remainingMinutes > 0 && (
@@ -260,7 +265,7 @@ export default function CompensacoesPage() {
                       {(c.kind ?? "excedente") === "deficit"
                         ? "↗ hora extra"
                         : (c.kind ?? "excedente") === "acordo"
-                          ? "⇄ acordo a compensar"
+                          ? "↗ hora extra · acordo"
                           : "↘ sair mais cedo"}
                     </span>
                   </div>

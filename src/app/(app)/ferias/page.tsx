@@ -8,7 +8,7 @@ import {
   dayContext,
   type Absence,
 } from "@/lib/absences";
-import { buildDebtDays } from "@/lib/debt";
+import { acordoViewOf, buildDebtDays } from "@/lib/debt";
 import { getAnnualPointCycle } from "@/lib/periods";
 import { countWeekdays, } from "@/lib/periods";
 import { formatDateBR, formatMinutes, todayString } from "@/lib/time";
@@ -31,10 +31,12 @@ export default function FeriasPage() {
     const map = new Map<string, { total: number; done: number; remaining: number }>();
     for (const d of debts) {
       if (d.kind !== "acordo") continue;
+      // Regra do acordo: apenas compensações concluídas abatem o restante
+      const view = acordoViewOf(d);
       map.set(d.date, {
-        total: d.debtMinutes,
-        done: d.concludedMinutes,
-        remaining: d.remainingMinutes,
+        total: view.originalMinutes,
+        done: view.compensatedMinutes,
+        remaining: view.remainingMinutes,
       });
     }
     return map;

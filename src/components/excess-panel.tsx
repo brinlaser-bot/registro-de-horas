@@ -10,6 +10,7 @@ import {
   Zap,
 } from "lucide-react";
 import {
+  activeAcordos,
   buildDebtDays,
   extraCapacityForDate,
   openDebtFor,
@@ -61,12 +62,9 @@ export function ExcessPanel({
 
   // Acordos a compensar: escopo = CICLO ANUAL (não o período 21→20).
   // Um acordo continua ativo até ser quitado, cancelado ou chegar o fechamento anual.
-  const { acordoDays, acordoTotals } = useMemo(() => {
+  const acordoDays = useMemo(() => {
     const bounds = annualCycleBounds(getAnnualPointCycle(today));
-    const ac = buildDebtDays(entries, compensations, settings, bounds, absences).filter(
-      (d) => d.kind === "acordo",
-    );
-    return { acordoDays: ac.reverse(), acordoTotals: totalsOf(ac) };
+    return activeAcordos(entries, compensations, settings, bounds, absences);
   }, [entries, compensations, absences, settings, today]);
 
   const openFor = (date: string, kind: CompKind) => {
@@ -261,17 +259,16 @@ export function ExcessPanel({
       </div>
 
       {/* Acordo a compensar (afastamento acordado — compensar posteriormente) */}
-      {(acordoDays.length > 0 || acordoTotals.debtTotal > 0) && (
+      {acordoDays.length > 0 && (
         <Card
           title="Acordo a compensar"
           subtitle={`Pendências ativas do ciclo anual ${getAnnualPointCycle(today)} — permanecem até quitação ou fechamento anual (30/04), independentemente do período 21→20`}
         >
-          {acordoDays.filter((d) => d.remainingMinutes > 0 || d.pendingMinutes > 0).length === 0 ? (
-            <p className="text-xs text-slate-400">Todos os acordos deste período já foram quitados. ✔</p>
+          {acordoDays.length === 0 ? (
+            <p className="text-xs text-slate-400">Todos os acordos deste ciclo já foram quitados. ✔</p>
           ) : (
             <ul className="space-y-3">
               {acordoDays
-                .filter((d) => d.remainingMinutes > 0 || d.pendingMinutes > 0)
                 .map((d) => (
                   <li key={d.date} className="rounded-xl border border-violet-100 bg-violet-50/50 p-3">
                     <div className="flex flex-wrap items-center gap-2">
@@ -281,11 +278,10 @@ export function ExcessPanel({
                           {formatDateShortBR(d.date)}
                         </span>
                       </span>
-                      <Badge tone="indigo">acordo {formatMinutes(d.debtMinutes)}</Badge>
-                      {d.remainingMinutes > 0 ? (
-                        <Badge tone="amber">restam {formatMinutes(d.remainingMinutes)}</Badge>
-                      ) : (
-                        <Badge tone="sky">{formatMinutes(d.pendingMinutes)} planejado</Badge>
+                      <Badge tone="indigo">acordo {formatMinutes(d.originalMinutes)}</Badge>
+                      <Badge tone="amber">restam {formatMinutes(d.remainingMinutes)}</Badge>
+                      {d.plannedMinutes > 0 && (
+                        <Badge tone="sky">{formatMinutes(d.plannedMinutes)} planejado</Badge>
                       )}
                       <div className="ml-auto">
                         <Button size="sm" variant="subtle" onClick={() => openFor(d.date, "acordo")}>
@@ -295,9 +291,9 @@ export function ExcessPanel({
                     </div>
                     <div className="mt-2">
                       <ProgressBar
-                        concluded={d.concludedMinutes}
-                        pending={d.pendingMinutes}
-                        total={d.debtMinutes}
+                        concluded={d.compensatedMinutes}
+                        pending={d.plannedMinutes}
+                        total={d.originalMinutes}
                         height={6}
                       />
                     </div>
