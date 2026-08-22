@@ -11,7 +11,12 @@ import {
   todayString,
   type EntryType,
 } from "@/lib/time";
-import { absenceOnDate, dayContext, type Absence } from "@/lib/absences";
+import {
+  absenceOnDate,
+  dayContext,
+  regularBalanceContribution,
+  type Absence,
+} from "@/lib/absences";
 import {
   getAnnualPointCycle,
   getNextPointPeriod,
@@ -117,7 +122,8 @@ export default function RegistrosPage() {
         s.registrableMinutes += ctx.day.registrableMinutes;
         s.excessMinutes += ctx.day.excessMinutes;
       }
-      s.balanceMinutes += ctx.adjustedBalance;
+      // Mesmo agregador central do Resumo: sem dados/jornada aberta não geram saldo artificial.
+      s.balanceMinutes += regularBalanceContribution(ctx);
       s.deficitMinutes += ctx.adjustedDeficit;
       if (absence?.kind === "ferias") s.vacationDays += 1;
       if (absence?.kind === "saude") s.healthDays += 1;

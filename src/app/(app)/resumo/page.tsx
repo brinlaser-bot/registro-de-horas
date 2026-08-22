@@ -4,7 +4,12 @@ import { useMemo, useState } from "react";
 import { BarChart3, ChevronLeft, ChevronRight, Download } from "lucide-react";
 import { settingsOf, useAppData, useIsClient } from "@/lib/store";
 import { expectedMinutesOf, formatMinutes, isWeekend, weekdayShort } from "@/lib/time";
-import { absenceLabel, absenceOnDate, dayContext } from "@/lib/absences";
+import {
+  absenceLabel,
+  absenceOnDate,
+  dayContext,
+  regularBalanceContribution,
+} from "@/lib/absences";
 import {
   getNextPointPeriod,
   getPointPeriod,
@@ -44,6 +49,8 @@ interface DayRow {
   status: string;
   entryCount: number;
   eventLabel: string | null;
+  /** Contribuição central deste dia ao Saldo do período. */
+  balanceContribution: number;
   absence: Absence | undefined;
   acordo: AcordoView | null;
 }
@@ -90,6 +97,7 @@ export default function ResumoPage() {
                     : "empty",
           entryCount: ctx.day.entries.length,
           eventLabel: absence ? absenceLabel(absence) : null,
+          balanceContribution: regularBalanceContribution(ctx),
           absence,
           acordo: acordoByDate.get(date) ?? null,
         };
@@ -104,7 +112,8 @@ export default function ResumoPage() {
           if (d.entryCount > 0) acc.trackedDays += 1;
           acc.workedTotal += d.workedMinutes;
           acc.registrableTotal += d.registrableMinutes;
-          acc.balanceTotal += d.balanceMinutes;
+          // Mesmo agregador central usado em Registros; dias sem dados e jornada aberta = 0.
+          acc.balanceTotal += d.balanceContribution;
           acc.excessTotal += d.excessMinutes;
           return acc;
         },

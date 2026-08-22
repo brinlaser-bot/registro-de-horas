@@ -206,6 +206,20 @@ export function getDayBalanceView(
   return dayContext(date, entries, absences, settings, nowMinutes);
 }
 
+/**
+ * Contribuição de um dia ao Saldo do período.
+ * Usa exclusivamente o saldo regular já calculado por dayContext/getDayBalanceView.
+ *
+ * - sem batidas e sem evento = sem informação → não entra (0);
+ * - jornada aberta = saldo ainda não é definitivo → não entra (0);
+ * - dia encerrado ou evento real = entra com adjustedBalance.
+ */
+export function regularBalanceContribution(view: DayBalanceView): number {
+  const hasRelevantData = view.day.entries.length > 0 || view.absence !== undefined;
+  if (!hasRelevantData || view.day.open) return 0;
+  return view.adjustedBalance;
+}
+
 /* ── Validação central de férias/afastamentos ────────────── */
 
 export interface AbsenceSplit {
