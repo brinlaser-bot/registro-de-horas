@@ -3,9 +3,23 @@
 // Store client-side com persistência em localStorage.
 // Uso pessoal: todos os dados ficam apenas no navegador.
 import { useEffect, useState, useSyncExternalStore } from "react";
-import { computeDay, type EntryType } from "./time";
+import { computeDay, formatMinutes, type EntryType } from "./time";
 import { buildSeedData, DEFAULT_USER } from "./seed-data";
 import { compsEqual, entriesEqual, mergeByIdAndContent } from "./backup";
+import { extraCapacityForDate } from "./debt";
+
+/** Resultado estruturado de operações que podem ser rejeitadas por validação. */
+export interface ActionResult {
+  ok: boolean;
+  /** Mensagem pronta para exibição na interface. */
+  error?: string;
+  code?: "over-capacity" | "invalid" | "not-found";
+  /** Capacidade disponível no dia de destino (quando code = over-capacity). */
+  available?: number;
+  limitMinutes?: number;
+}
+
+const OK: ActionResult = { ok: true };
 import type {
   AppData,
   CompKind,
@@ -124,6 +138,12 @@ export const actions = {
     mutate((d) => ({ ...d, entries: d.entries.filter((e) => e.id !== id) }));
   },
 
+  /**
+   * Cria uma compensação. Para hora extra (deficit), a quantidade NÃO é
+   * ajustada silenciosamente: se ultrapassar a capacidade do dia de destino,
+   * a operação inteira é REJEITADA (nenhum dado é modificado) e um resultado
+   * estruturado é retornado para a interface informar o usuário.
+   */
   addComp(p: {
     sourceDate: string;
     targetDate: string;
@@ -131,30 +151,105 @@ export const actions = {
     note: string | null;
     status?: CompStatus;
     kind?: CompKind;
-  }) {
-    mutate((d) => ({
-      ...d,
-      compensations: [
-        ...d.compensations,
-        {
-          id: nextId(d.compensations),
-          sourceDate: p.sourceDate,
-          targetDate: p.targetDate,
-          minutes: p.minutes,
-          status: p.status ?? "pendente",
-          note: p.note,
-          kind: p.kind ?? "excedente",
-          createdAt: Date.now(),
-        },
-      ],
-    }));
+  }): ActionResult {
+    let result: ActionResult = OK;
+    mutate((d) => {
+      const kind = p.kind ?? "excedente";
+      if (!Number.isFinite(p.minutes) || p.minutes <= 0) {
+        result = { ok: false, code: "invalid", error: "Quantidade de minutos inválida." };
+        return d;
+      }
+      // Regra central: hora extra nunca ultrapassa a capacidade real do dia de destino
+      if (kind === "deficit" && p.status !== "cancelada") {
+        const cap = extraCapacityForDate(
+          p.targetDate,
+          d.entries,
+          d.compensations,
+          settingsOf(d.user),
+        );
+        if (p.minutes > cap.available) {
+          result = {
+            ok: false,
+            code: "over-capacity",
+            available: cap.available,
+            limitMinutes: cap.limitMinutes,
+            error: `Não foi possível criar esta compensação. Neste dia existem apenas ${formatMinutes(cap.available)} disponíveis até o limite diário de ${formatMinutes(cap.limitMinutes)}.`,
+          };
+          return d; // rejeita sem modificar nada
+        }
+      }
+      return {
+        ...d,
+        compensations: [
+          ...d.compensations,
+          {
+            id: nextId(d.compensations),
+            sourceDate: p.sourceDate,
+            targetDate: p.targetDate,
+            minutes: p.minutes,
+            status: p.status ?? "pendente",
+            note: p.note,
+            kind,
+            createdAt: Date.now(),
+          },
+        ],
+      };
+    });
+    return result;
   },
 
-  updateComp(id: number, patch: Partial<Omit<Compensation, "id">>) {
-    mutate((d) => ({
-      ...d,
-      compensations: d.compensations.map((c) => (c.id === id ? { ...c, ...patch } : c)),
-    }));
+  /**
+   * Atualiza uma compensação. Quando a alteração toca minutos/destino/tipo
+   * (ou reativa uma cancelada) e é hora extra, valida contra a capacidade do
+   * dia de destino — rejeitando a operação inteira em vez de ajustar o valor.
+   */
+  updateComp(id: number, patch: Partial<Omit<Compensation, "id">>): ActionResult {
+    let result: ActionResult = OK;
+    mutate((d) => {
+      const target = d.compensations.find((c) => c.id === id);
+      if (!target) {
+        result = { ok: false, code: "not-found", error: "Compensação não encontrada." };
+        return d;
+      }
+      const next = { ...target, ...patch };
+      const kindChanged = (next.kind ?? "excedente") !== (target.kind ?? "excedente");
+      const reactivated =
+        patch.status !== undefined && patch.status !== "cancelada" && target.status === "cancelada";
+      const touchesCapacity =
+        (patch.minutes !== undefined && patch.minutes !== target.minutes) ||
+        (patch.targetDate !== undefined && patch.targetDate !== target.targetDate) ||
+        kindChanged ||
+        reactivated;
+
+      if (
+        touchesCapacity &&
+        (next.kind ?? "excedente") === "deficit" &&
+        next.status !== "cancelada"
+      ) {
+        const cap = extraCapacityForDate(
+          next.targetDate,
+          d.entries,
+          d.compensations,
+          settingsOf(d.user),
+          { excludeCompId: id },
+        );
+        if (next.minutes > cap.available) {
+          result = {
+            ok: false,
+            code: "over-capacity",
+            available: cap.available,
+            limitMinutes: cap.limitMinutes,
+            error: `Não foi possível atualizar esta compensação. Neste dia existem apenas ${formatMinutes(cap.available)} disponíveis até o limite diário de ${formatMinutes(cap.limitMinutes)}.`,
+          };
+          return d; // rejeita preservando o valor original
+        }
+      }
+      return {
+        ...d,
+        compensations: d.compensations.map((c) => (c.id === id ? next : c)),
+      };
+    });
+    return result;
   },
 
   completeComp(id: number) {

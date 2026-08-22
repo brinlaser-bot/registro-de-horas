@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import {
   buildDebtDays,
+  extraCapacityForDate,
   openDebtFor,
   suggestTargets,
   totalsOf,
@@ -40,6 +41,7 @@ export function ExcessPanel({
   const today = todayString();
   const [modalOpen, setModalOpen] = useState(false);
   const [draft, setDraft] = useState<(CompFormData & { kind?: "excedente" | "deficit" }) | undefined>();
+  const [draftDebt, setDraftDebt] = useState<number | undefined>();
 
   const { excessDays, deficitDays, excessTotals, deficitTotals } = useMemo(() => {
     const all = buildDebtDays(entries, compensations, settings, range);
@@ -55,15 +57,24 @@ export function ExcessPanel({
 
   const openFor = (date: string, kind: "excedente" | "deficit") => {
     const minutes = openDebtFor(entries, compensations, settings, date, kind);
-    const suggestions = suggestTargets(entries, compensations, settings, date, today);
-    const target = suggestions[0]?.date ?? today;
+    // Para hora extra o destino é um dia de trabalho futuro/hoje (não um dia com déficit);
+    // para excedente sugerimos dias recentes com saldo negativo (sair mais cedo).
+    const target =
+      kind === "deficit"
+        ? today
+        : suggestTargets(entries, compensations, settings, date, today)[0]?.date ?? today;
+    // Pré-preenche respeitando a capacidade real do dia de destino
+    const cap = extraCapacityForDate(target, entries, compensations, settings);
+    const prefill =
+      kind === "deficit" ? Math.max(5, Math.min(minutes, Math.max(5, cap.available))) : minutes;
     setDraft({
       kind,
       sourceDate: date,
       targetDate: target,
-      minutes: minutes > 0 ? minutes : 30,
+      minutes: prefill > 0 ? prefill : 30,
       note: kind === "excedente" ? `Compensação do dia ${formatDateShortBR(date)}` : "",
     });
+    setDraftDebt(minutes);
     setModalOpen(true);
   };
 
@@ -139,8 +150,8 @@ export function ExcessPanel({
           {excessOpen.length === 0 ? (
             <EmptyState
               icon={<CheckCircle2 size={24} />}
-              title="Nenhum excedente em aberto"
-              description="Todos os dias que passaram do limite já foram totalmente compensados. 🎉"
+              title="Nenhum excedente deste mês em aberto"
+              description={`Nenhum excedente originado em ${monthLabel} está pendente. Compensações de outros meses permanecem visíveis na página Compensações.`}
             />
           ) : (
             <ul className="space-y-3">
@@ -241,10 +252,14 @@ export function ExcessPanel({
         initial={draft}
         kind={draft?.kind ?? "excedente"}
         suggestions={
-          draft
+          draft && draft.kind !== "deficit"
             ? suggestTargets(entries, compensations, settings, draft.sourceDate, today)
             : []
         }
+        getCapacity={(targetDate) =>
+          extraCapacityForDate(targetDate, entries, compensations, settings)
+        }
+        pendingDebtMinutes={draftDebt}
         onSave={async (payload) => {
           await onCreateComp({ ...payload, kind: draft?.kind ?? "excedente" });
           setModalOpen(false);

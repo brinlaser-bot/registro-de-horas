@@ -77,10 +77,11 @@ export function buildDebtDays(
     const coveredByEarlyExit = sumMinutes(
       comps.filter((c) => c.targetDate === date && kindOf(c) === "excedente" && isActive(c)),
     );
-    const deficit = Math.max(
-      0,
-      day.expectedMinutes - day.workedMinutes - coveredByEarlyExit,
-    );
+    // Dia com ponto aberto (entrada sem saída) está "em andamento":
+    // o déficit só é definitivo após a saída final.
+    const deficit = day.open
+      ? 0
+      : Math.max(0, day.expectedMinutes - day.workedMinutes - coveredByEarlyExit);
 
     const push = (kind: CompKind, debtMinutes: number) => {
       if (debtMinutes <= 0) return;
@@ -145,6 +146,8 @@ export function suggestTargets(
     if (date === excludeDate) continue;
     const day = computeDay(list, settings);
     if (day.empty || day.workedMinutes === 0) continue;
+    // Dia em andamento não é candidato: o saldo ainda não está fechado
+    if (day.open) continue;
 
     // Capacidade livre = déficit do dia menos o que já está comprometido
     const deficit = Math.max(0, expectedMinutesOf(settings) - day.workedMinutes);
@@ -184,6 +187,68 @@ export function openDebtFor(
   return kind === "excedente"
     ? day.excessMinutes
     : Math.max(0, day.expectedMinutes - day.workedMinutes);
+}
+
+/* ── Capacidade de hora extra por dia (função central) ────── */
+
+export interface ExtraCapacity {
+  /** Jornada-base configurada (min). */
+  baseMinutes: number;
+  /** Limite diário configurado (min). */
+  limitMinutes: number;
+  /** Minutos de hora extra já vinculados (ativos) à data — exclui `excludeCompId`. */
+  alreadyAllocated: number;
+  /** Dia encerrado: hora extra REAL existente (trabalhado − base). Null se vazio/aberto. */
+  realExtra: number | null;
+  /** Máximo disponível para uma nova compensação de hora extra nesta data. */
+  available: number;
+}
+
+/**
+ * FUNÇÃO CENTRAL de capacidade de hora extra para uma data de destino.
+ * Todos os locais que criam, editam ou sugerem compensações por hora extra
+ * (modal, Dashboard, Compensações, store) devem usar esta função.
+ *
+ * Regras:
+ * - teto diário: base + hora extra ≤ limite (ex.: 8h + 2h = 10h);
+ * - soma de compensações do dia ≤ teto (acumulado);
+ * - dia encerrado: só pode usar a hora extra REAL existente
+ *   (ex.: 8h45 trabalhadas → 45min), descontando o que já está vinculado.
+ */
+export function extraCapacityForDate(
+  date: string,
+  entries: TimeEntry[],
+  comps: Compensation[],
+  settings: WorkSettings,
+  opts?: { excludeCompId?: number },
+): ExtraCapacity {
+  const baseMinutes = expectedMinutesOf(settings);
+  const limitMinutes = settings.maxDailyMinutes;
+  const headroom = Math.max(0, limitMinutes - baseMinutes);
+
+  const alreadyAllocated = sumMinutes(
+    comps.filter(
+      (c) =>
+        c.targetDate === date &&
+        kindOf(c) === "deficit" &&
+        isActive(c) &&
+        c.id !== opts?.excludeCompId,
+    ),
+  );
+
+  const day = computeDay(
+    entries.filter((e) => e.date === date),
+    settings,
+  );
+  const finished = !day.empty && !day.open;
+  const realExtra = finished ? Math.max(0, day.workedMinutes - baseMinutes) : null;
+
+  let available = Math.max(0, headroom - alreadyAllocated);
+  if (realExtra !== null) {
+    available = Math.min(available, Math.max(0, realExtra - alreadyAllocated));
+  }
+
+  return { baseMinutes, limitMinutes, alreadyAllocated, realExtra, available };
 }
 
 /**

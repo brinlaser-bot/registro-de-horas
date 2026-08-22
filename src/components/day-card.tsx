@@ -118,9 +118,14 @@ export function DayCard({
     await onCompleteComp(id);
   };
 
-  // Registro de saída em 1 clique + conclusão automática das compensações do dia
+  // Registro de saída em 1 clique + conclusão das compensações de saída antecipada
   const smartExit = async (time: string, compIds: number[]) => {
     await onAddEntry({ date: d.date, time, type: "saida", note: "Saída sugerida pelo assistente" });
+    for (const id of compIds) await onCompleteComp(id);
+  };
+
+  // Confirmação manual de quitação (hora extra) — sem registrar saída
+  const confirmComps = async (compIds: number[]) => {
     for (const id of compIds) await onCompleteComp(id);
   };
 
@@ -185,6 +190,7 @@ export function DayCard({
                 comps={allComps ?? []}
                 nowMinutes={nowMinutes}
                 onSmartExit={smartExit}
+                onConfirmComps={confirmComps}
                 isToday={isToday}
               />
             </div>
@@ -253,12 +259,12 @@ export function DayCard({
                 </p>
                 {excessOverflow > 0 && (
                   <Button size="sm" variant="secondary" onClick={() => adjustOverflow("excedente")}>
-                    Ajustar excedente
+                    Revisar compensação
                   </Button>
                 )}
                 {deficitOverflow > 0 && (
                   <Button size="sm" variant="secondary" onClick={() => adjustOverflow("deficit")}>
-                    Ajustar déficit
+                    Revisar compensação
                   </Button>
                 )}
               </div>

@@ -249,7 +249,7 @@ export function listDaysInMonth(month: string): string[] {
   return days;
 }
 
-/* ── Assistente de jornada / projeção ─────────────────────── */
+/* ── Assistente de jornada / previsão de saída ────────────── */
 
 const MAX_CLOCK = 23 * 60 + 59;
 
@@ -262,52 +262,63 @@ function lunchLength(s: WorkSettings): number {
 }
 
 /**
- * Projeta o horário de saída somando `remaining` minutos a partir de agora,
- * acrescentando o almoço se o intervalo projetado ainda atravessar o intervalo.
+ * Horário PLANEJADO de saída para atingir `targetMinutes` trabalhados.
+ *
+ * Calculado exclusivamente a partir das batidas do dia (primeira entrada,
+ * pares fechados e almoço) — NUNCA a partir da hora atual. Assim, mesmo que
+ * o horário planejado já tenha passado, ele permanece o mesmo
+ * (ex.: entrada 08:37 + 8h + almoço = 17:37, independentemente de agora serem 22h).
+ *
+ * Retorna null apenas quando o dia já está encerrado (última batida = saída).
  */
-export function projectExitTime(
-  nowMinutes: number,
-  remainingMinutes: number,
-  settings: WorkSettings,
-): string {
-  const ls = toMinutes(settings.lunchStart);
-  const len = lunchLength(settings);
-  let exit = nowMinutes + Math.max(0, remainingMinutes);
-  if (nowMinutes < ls && exit > ls && len > 0) exit += len;
-  return clampClock(exit);
-}
-
-/**
- * Horário de saída sugerido para atingir `targetMinutes` trabalhados.
- * Retorna null quando o dia já está fechado (não há o que projetar).
- * Considera atraso (usa a 1ª entrada real) e o almoço (já descontado ou a descontar).
- */
-export function suggestExitTime(
+export function plannedExitTime(
   entries: TimeEntryLike[],
   settings: WorkSettings,
   targetMinutes: number,
-  nowMinutes: number,
 ): string | null {
+  const ls = toMinutes(settings.lunchStart);
+  const le = toMinutes(settings.lunchEnd);
+  const len = lunchLength(settings);
+
   if (entries.length === 0) {
-    // Dia ainda sem batidas: projeta a partir do início da jornada
+    // Sem batidas: projeta a partir do início da jornada
     const start = toMinutes(settings.workStart);
-    const ls = toMinutes(settings.lunchStart);
-    const len = lunchLength(settings);
-    let exit = start + targetMinutes;
-    if (exit > ls && len > 0) exit += len;
+    let exit = start + Math.max(0, targetMinutes);
+    if (settings.autoDeductLunch && start <= ls && exit > ls && len > 0) exit += len;
     return clampClock(exit);
   }
 
-  const day = computeDay(entries, settings, nowMinutes);
-  if (!day.open) return null;
+  const sorted = [...entries].sort((a, b) => a.time.localeCompare(b.time));
+  const last = sorted[sorted.length - 1];
+  if (last.type !== "entrada") return null; // jornada encerrada
 
-  if (day.workedMinutes >= targetMinutes) {
-    return clampClock(nowMinutes); // meta já batida: pode sair agora
+  // Tempo bruto dos pares fechados + início do trecho aberto
+  let rawClosed = 0;
+  let cur: number | null = null;
+  for (const e of sorted) {
+    const m = toMinutes(e.time);
+    if (e.type === "entrada") {
+      if (cur === null) cur = m;
+    } else if (cur !== null) {
+      rawClosed += Math.max(0, m - cur);
+      cur = null;
+    }
   }
+  const openStart = cur ?? toMinutes(last.time);
+  const firstPunch = toMinutes(sorted[0].time);
 
-  const lastPunch = toMinutes(entries[entries.length - 1].time);
-  const now = Math.max(nowMinutes, lastPunch);
-  return projectExitTime(now, targetMinutes - day.workedMinutes, settings);
+  const hasLunchPunch = sorted.some((e) => {
+    const m = toMinutes(e.time);
+    return m >= ls && m <= le;
+  });
+
+  let exit = openStart + Math.max(0, targetMinutes - rawClosed);
+  // Se o almoço será descontado automaticamente e a saída cruza o intervalo, soma o almoço
+  if (settings.autoDeductLunch && !hasLunchPunch && firstPunch <= ls && exit > ls && len > 0) {
+    exit += len;
+  }
+  void le;
+  return clampClock(exit);
 }
 
 /** Divide as horas de um dia nos 3 blocos usados no gráfico empilhado. */

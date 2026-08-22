@@ -6,6 +6,7 @@ import { Button, Input, Modal, Select } from "@/components/ui";
 import { useToast } from "@/components/toast";
 import { formatDateBR, formatMinutes, todayString, weekdayShort } from "@/lib/time";
 import type { CompKind, TargetSuggestion } from "@/lib/types";
+import type { ExtraCapacity } from "@/lib/debt";
 
 export interface CompFormData {
   sourceDate: string;
@@ -26,6 +27,14 @@ interface Props {
   /** Dias sugeridos para receber a compensação (sugestão inteligente) */
   suggestions?: TargetSuggestion[];
   smartHint?: ReactNode;
+  /**
+   * FUNÇÃO CENTRAL de capacidade (extraCapacityForDate) fornecida pelo chamador,
+   * já vinculada a entries/comps/settings (e excludeCompId ao editar).
+   * Usada para limitar compensações por hora extra ao teto do dia de destino.
+   */
+  getCapacity?: (targetDate: string) => ExtraCapacity;
+  /** Déficit pendente do dia de origem (para exibição informativa). */
+  pendingDebtMinutes?: number;
   onSave: (data: CompFormData) => Promise<void>;
 }
 
@@ -56,6 +65,8 @@ export function CompensationForm({
   kind = "excedente",
   suggestions = [],
   smartHint,
+  getCapacity,
+  pendingDebtMinutes,
   onSave,
 }: Props) {
   const toast = useToast();
@@ -94,12 +105,26 @@ export function CompensationForm({
       toast.show("As horas devem ficar entre 5min e 12h.", "error");
       return;
     }
+    // Regra central: hora extra limitada à capacidade real do dia de destino
+    if (kind === "deficit" && getCapacity) {
+      const cap = getCapacity(form.targetDate);
+      if (form.minutes > cap.available) {
+        toast.show(
+          `Neste dia você pode compensar no máximo ${formatMinutes(cap.available)}, pois o limite diário é de ${formatMinutes(cap.limitMinutes)}. Divida o restante em outro dia.`,
+          "error",
+        );
+        return;
+      }
+    }
     setBusy(true);
     try {
       await onSave({ ...form, minutes: Math.round(form.minutes), kind });
       toast.show(editingId ? "Compensação atualizada." : "Compensação criada!");
-    } catch {
-      toast.show("Não foi possível salvar.", "error");
+    } catch (err) {
+      toast.show(
+        err instanceof Error && err.message ? err.message : "Não foi possível salvar.",
+        "error",
+      );
     } finally {
       setBusy(false);
     }
@@ -185,12 +210,57 @@ export function CompensationForm({
           </div>
         )}
 
+        {/* Capacidade do dia de destino (hora extra) — regra central */}
+        {kind === "deficit" && getCapacity && (() => {
+          const cap = getCapacity(form.targetDate);
+          const restante =
+            pendingDebtMinutes !== undefined
+              ? Math.max(0, pendingDebtMinutes - Math.min(form.minutes, cap.available))
+              : null;
+          return (
+            <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3 text-xs text-slate-600">
+              <div className="grid gap-1 sm:grid-cols-2">
+                {pendingDebtMinutes !== undefined && (
+                  <p>
+                    <b>Déficit pendente:</b> {formatMinutes(pendingDebtMinutes)}
+                  </p>
+                )}
+                <p>
+                  <b>Já planejado neste dia:</b> {formatMinutes(cap.alreadyAllocated)}
+                </p>
+                <p>
+                  <b>Máximo disponível para esta compensação:</b>{" "}
+                  <span className={cap.available < form.minutes ? "font-bold text-rose-600" : "font-bold text-emerald-600"}>
+                    {formatMinutes(cap.available)}
+                  </span>
+                </p>
+                <p>
+                  <b>Capacidade até o limite de {formatMinutes(cap.limitMinutes)}:</b>{" "}
+                  {formatMinutes(Math.max(0, cap.limitMinutes - cap.baseMinutes - cap.alreadyAllocated))}
+                </p>
+                {cap.realExtra !== null && (
+                  <p className="sm:col-span-2">
+                    <b>Dia encerrado:</b> existem {formatMinutes(cap.realExtra)} de hora extra real
+                    nesta data — não é possível alocar mais do que isso.
+                  </p>
+                )}
+                {restante !== null && restante > 0 && (
+                  <p className="sm:col-span-2 text-amber-700">
+                    Restará <b>{formatMinutes(restante)}</b> depois desta compensação — divida em
+                    outro dia.
+                  </p>
+                )}
+              </div>
+            </div>
+          );
+        })()}
+
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Input
             label="Horas a compensar (min)"
             type="number"
             min={5}
-            max={720}
+            max={kind === "deficit" && getCapacity ? Math.max(5, getCapacity(form.targetDate).available) : 720}
             step={5}
             value={form.minutes}
             onChange={(e) => setForm({ ...form, minutes: Number(e.target.value) })}

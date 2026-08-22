@@ -12,6 +12,7 @@ import {
 import { actions, enrichComp, settingsOf, useAppData, useIsClient } from "@/lib/store";
 import { formatDateBR, formatDateShortBR, formatMinutes, todayString } from "@/lib/time";
 import type { CompKind } from "@/lib/types";
+import { extraCapacityForDate } from "@/lib/debt";
 import { Badge, Button, EmptyState, Skeleton } from "@/components/ui";
 import { CompensationForm } from "@/components/compensation-form";
 import { useToast } from "@/components/toast";
@@ -43,7 +44,7 @@ export default function CompensacoesPage() {
     kind?: CompKind;
   }) => {
     if (pendingEditing) {
-      actions.updateComp(pendingEditing.id, {
+      const res = actions.updateComp(pendingEditing.id, {
         sourceDate: payload.sourceDate,
         targetDate: payload.targetDate,
         minutes: payload.minutes,
@@ -51,14 +52,16 @@ export default function CompensacoesPage() {
         kind: payload.kind ?? (pendingEditing.kind ?? "excedente"),
         ...(payload.status ? { status: payload.status as "pendente" | "concluida" | "cancelada" } : {}),
       });
+      if (!res.ok) throw new Error(res.error); // modal exibe a mensagem e permanece aberto
       toast.show("Compensação atualizada.");
     } else {
-      actions.addComp({
+      const res = actions.addComp({
         sourceDate: payload.sourceDate,
         targetDate: payload.targetDate,
         minutes: payload.minutes,
         note: payload.note || null,
       });
+      if (!res.ok) throw new Error(res.error);
       toast.show("Compensação criada!");
     }
     setModalOpen(false);
@@ -66,7 +69,11 @@ export default function CompensacoesPage() {
   };
 
   const setStatus = async (id: number, status: string) => {
-    actions.updateComp(id, { status: status as "pendente" | "concluida" | "cancelada" });
+    const res = actions.updateComp(id, { status: status as "pendente" | "concluida" | "cancelada" });
+    if (!res.ok) {
+      toast.show(res.error ?? "Não foi possível atualizar.", "error");
+      return;
+    }
     toast.show(status === "concluida" ? "Compensação concluída!" : "Compensação cancelada.");
   };
 
@@ -240,6 +247,7 @@ export default function CompensacoesPage() {
           setEditing(null);
         }}
         editingId={editing}
+        kind={pendingEditing?.kind ?? "excedente"}
         initial={
           pendingEditing
             ? {
@@ -248,8 +256,14 @@ export default function CompensacoesPage() {
                 minutes: pendingEditing.minutes,
                 note: pendingEditing.note ?? "",
                 status: pendingEditing.status,
+                kind: pendingEditing.kind,
               }
             : undefined
+        }
+        getCapacity={(targetDate) =>
+          extraCapacityForDate(targetDate, entries, compensations, settings, {
+            excludeCompId: editing ?? undefined,
+          })
         }
         onSave={save}
       />

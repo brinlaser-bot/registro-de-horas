@@ -122,18 +122,19 @@ export default function DashboardPage() {
   };
 
   const createComp = async (payload: CompFormData & { kind?: CompKind }) => {
-    actions.addComp({
+    const res = actions.addComp({
       sourceDate: payload.sourceDate,
       targetDate: payload.targetDate,
       minutes: payload.minutes,
       note: payload.note || null,
       kind: payload.kind ?? "excedente",
     });
+    if (!res.ok) throw new Error(res.error); // modal exibe a mensagem e permanece aberto
     setCompOpen(false);
     toast.show("Compensação criada!");
   };
 
-  /** Saída em 1 clique: registra a saída e quita as compensações do dia. */
+  /** Saída em 1 clique: registra a saída (hora atual) e quita compensações de saída antecipada. */
   const smartExit = async (time: string, compIds: number[]) => {
     actions.addEntry({
       date: todayStr,
@@ -147,6 +148,12 @@ export default function DashboardPage() {
         ? `Saída registrada às ${time} e compensação concluída!`
         : `Saída registrada às ${time}!`,
     );
+  };
+
+  /** Confirmação manual de quitação por hora extra (sem registrar saída). */
+  const confirmComps = async (compIds: number[]) => {
+    for (const id of compIds) actions.completeComp(id);
+    toast.show("Quitação confirmada — déficit abatido!");
   };
 
   if (!mounted) {
@@ -256,6 +263,7 @@ export default function DashboardPage() {
         comps={compensations}
         nowMinutes={nowMinutes}
         onSmartExit={smartExit}
+        onConfirmComps={confirmComps}
         isToday
       />
 

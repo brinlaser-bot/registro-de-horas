@@ -115,7 +115,8 @@ export default function RegistrosPage() {
   };
 
   const createComp = async (payload: { sourceDate: string; targetDate: string; minutes: number; note: string }) => {
-    actions.addComp({ ...payload, note: payload.note || null });
+    const res = actions.addComp({ ...payload, note: payload.note || null });
+    if (!res.ok) throw new Error(res.error); // modal exibe a mensagem e permanece aberto
   };
 
   const capComp = async (date: string, kind: CompKind, maxMinutes: number) => {
