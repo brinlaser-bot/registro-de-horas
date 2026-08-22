@@ -12,8 +12,10 @@ import {
 import { actions, enrichComp, settingsOf, useAppData, useIsClient } from "@/lib/store";
 import { formatDateBR, formatDateShortBR, formatMinutes, todayString } from "@/lib/time";
 import type { CompKind } from "@/lib/types";
-import { canCompleteComp, extraCapacityForDate } from "@/lib/debt";
-import { Badge, Button, EmptyState, Skeleton } from "@/components/ui";
+import type { CompFormData } from "@/components/compensation-form";
+import { buildDebtDays, canCompleteComp, extraCapacityForDate } from "@/lib/debt";
+import { annualCycleBounds, getAnnualPointCycle } from "@/lib/periods";
+import { Badge, Button, Card, EmptyState, Skeleton } from "@/components/ui";
 import { CompensationForm } from "@/components/compensation-form";
 import { useToast } from "@/components/toast";
 
@@ -34,6 +36,40 @@ export default function CompensacoesPage() {
   );
 
   const pendingEditing = editing !== null ? compensations.find((c) => c.id === editing) : null;
+
+  // Acordos a compensar ativos do ciclo anual atual
+  const todayStr = todayString();
+  const cycle = getAnnualPointCycle(todayStr);
+  const cycleBounds = useMemo(() => annualCycleBounds(cycle), [cycle]);
+
+  const { absences } = useAppData();
+  const acordosAtivos = useMemo(() => {
+    return buildDebtDays(entries, compensations, settings, cycleBounds, absences)
+      .filter((d) => d.kind === "acordo" && (d.remainingMinutes > 0 || d.pendingMinutes > 0))
+      .reverse();
+  }, [entries, compensations, absences, settings, cycleBounds]);
+
+  const [formKind, setFormKind] = useState<CompKind>("excedente");
+  const [formInitial, setFormInitial] = useState<CompFormData | undefined>();
+
+  /** Abre o modal de compensação pré-preenchido para um acordo */
+  const openAcordoForm = (sourceDate: string, remainingMinutes: number) => {
+    setFormKind("acordo");
+    setFormInitial({
+      sourceDate,
+      targetDate: todayStr,
+      minutes: remainingMinutes,
+      note: `Acordo de ${formatDateShortBR(sourceDate)}`,
+    });
+    setModalOpen(true);
+  };
+
+  const openNewCompForm = () => {
+    setEditing(null);
+    setFormKind("excedente");
+    setFormInitial(undefined);
+    setModalOpen(true);
+  };
 
   const save = async (payload: {
     sourceDate: string;
@@ -67,8 +103,6 @@ export default function CompensacoesPage() {
     setModalOpen(false);
     setEditing(null);
   };
-
-  const today = todayString();
 
   const setStatus = async (id: number, status: string) => {
     // Conclusão passa pela validação central (hora extra real + data alcançada)
@@ -107,15 +141,10 @@ export default function CompensacoesPage() {
         <div>
           <h2 className="text-lg font-extrabold tracking-tight text-slate-900">Compensações de horas</h2>
           <p className="text-sm text-slate-500">
-            Excedentes acima do limite diário devem ser compensados em outros dias.
+            Gerencie excedentes, quitações por hora extra e acordos a compensar.
           </p>
         </div>
-        <Button
-          onClick={() => {
-            setEditing(null);
-            setModalOpen(true);
-          }}
-        >
+        <Button onClick={openNewCompForm}>
           <PlusCircle size={15} /> Nova compensação
         </Button>
       </div>
@@ -130,6 +159,37 @@ export default function CompensacoesPage() {
           <span>·</span>
           <span className="text-indigo-500">{concluidas.length} já concluída(s)</span>
         </div>
+      )}
+
+      {/* Seção de Acordos a compensar ativos (origem do ciclo anual atual) */}
+      {acordosAtivos.length > 0 && (
+        <Card
+          title="Acordos a compensar"
+          subtitle={`Pendências ativas do ciclo anual ${cycle} — permanecem visíveis até quitação ou fechamento anual (30/04), independentemente do período 21→20`}
+        >
+          <ul className="space-y-3">
+            {acordosAtivos.map((d) => (
+              <li key={d.date} className="flex flex-wrap items-center gap-3 rounded-xl border border-violet-100 bg-violet-50/50 p-3">
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-bold text-slate-800">
+                    Acordo a compensar — {formatMinutes(d.debtMinutes)}
+                  </p>
+                  <p className="mt-0.5 text-xs text-slate-500">
+                    Origem: {formatDateShortBR(d.date)} · Ciclo anual:{" "}
+                    {getAnnualPointCycle(d.date)} · Compensado:{" "}
+                    <b className="text-emerald-600">{formatMinutes(d.concludedMinutes)}</b> ·
+                    Restante: <b className="text-amber-600">{formatMinutes(d.remainingMinutes)}</b>
+                  </p>
+                </div>
+                {d.remainingMinutes > 0 && (
+                  <Button size="sm" variant="subtle" onClick={() => openAcordoForm(d.date, d.remainingMinutes)}>
+                    Compensar com hora extra
+                  </Button>
+                )}
+              </li>
+            ))}
+          </ul>
+        </Card>
       )}
 
       {list.length === 0 ? (
@@ -214,14 +274,14 @@ export default function CompensacoesPage() {
                 {c.status === "cancelada" && <Badge tone="slate">Cancelada</Badge>}
                 {c.status === "pendente" &&
                   (c.kind === "deficit" || c.kind === "acordo") &&
-                  canCompleteComp(c, entries, compensations, settings, today).ok && (
+                  canCompleteComp(c, entries, compensations, settings, todayStr).ok && (
                     <Badge tone="emerald">Meta de compensação atingida ✓</Badge>
                   )}
                 <div className="flex items-center gap-1">
                   {c.status === "pendente" && (() => {
                     const isExtra = c.kind === "deficit" || c.kind === "acordo";
                     const check = isExtra
-                      ? canCompleteComp(c, entries, compensations, settings, today)
+                      ? canCompleteComp(c, entries, compensations, settings, todayStr)
                       : { ok: true };
                     return (
                       <>
@@ -277,26 +337,30 @@ export default function CompensacoesPage() {
         onClose={() => {
           setModalOpen(false);
           setEditing(null);
+          setFormInitial(undefined);
         }}
         editingId={editing}
-        kind={pendingEditing?.kind ?? "excedente"}
+        kind={editing !== null ? (pendingEditing?.kind ?? "excedente") : formKind}
         initial={
-          pendingEditing
-            ? {
-                sourceDate: pendingEditing.sourceDate,
-                targetDate: pendingEditing.targetDate,
-                minutes: pendingEditing.minutes,
-                note: pendingEditing.note ?? "",
-                status: pendingEditing.status,
-                kind: pendingEditing.kind,
-              }
-            : undefined
+          editing !== null
+            ? pendingEditing
+              ? {
+                  sourceDate: pendingEditing.sourceDate,
+                  targetDate: pendingEditing.targetDate,
+                  minutes: pendingEditing.minutes,
+                  note: pendingEditing.note ?? "",
+                  status: pendingEditing.status,
+                  kind: pendingEditing.kind,
+                }
+              : undefined
+            : formInitial
         }
         getCapacity={(targetDate) =>
           extraCapacityForDate(targetDate, entries, compensations, settings, {
             excludeCompId: editing ?? undefined,
           })
         }
+        pendingDebtMinutes={editing === null && formInitial ? formInitial.minutes : undefined}
         onSave={save}
       />
     </div>
