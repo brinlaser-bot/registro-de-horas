@@ -19,9 +19,10 @@ import {
   getPreviousPointPeriod,
   listDaysBetween,
   periodLabel,
+  sameAnnualCycle,
   type PointPeriod,
 } from "@/lib/periods";
-import { buildDebtDays, checkSourceOverflow } from "@/lib/debt";
+import { buildDebtDays, checkSourceOverflow, extraCapacityForDate } from "@/lib/debt";
 import type { CompKind, DayResult, WorkSettings } from "@/lib/types";
 import { DayCard } from "@/components/day-card";
 import { ManualEntryModal, type ManualPairData } from "@/components/manual-entry-modal";
@@ -183,9 +184,37 @@ export default function RegistrosPage() {
   };
 
   const completeComp = async (id: number) => {
-    actions.completeComp(id);
+    const res = actions.completeComp(id);
+    if (!res.ok) {
+      toast.show(res.error ?? "Não foi possível concluir.", "error");
+      return;
+    }
     toast.show("Compensação concluída!");
   };
+
+  /** Atalhos de compensação por dia (déficit comum / acordo), via funções centrais. */
+  const shortcutsByDate = useMemo(() => {
+    const debts = buildDebtDays(entries, compensations, settings, range, absences);
+    const map = new Map<
+      string,
+      { deficitRemaining: number; acordoMinutes: number; acordoRemaining: number; canCompensate: boolean }
+    >();
+    for (const dd of debts) {
+      const cur = map.get(dd.date) ?? {
+        deficitRemaining: 0,
+        acordoMinutes: 0,
+        acordoRemaining: 0,
+        canCompensate: sameAnnualCycle(dd.date, todayStr),
+      };
+      if (dd.kind === "deficit") cur.deficitRemaining = dd.remainingMinutes;
+      if (dd.kind === "acordo") {
+        cur.acordoMinutes = dd.debtMinutes;
+        cur.acordoRemaining = dd.remainingMinutes;
+      }
+      map.set(dd.date, cur);
+    }
+    return map;
+  }, [entries, compensations, absences, settings, range, todayStr]);
 
   const createComp = async (payload: { sourceDate: string; targetDate: string; minutes: number; note: string; kind?: CompKind }) => {
     const res = actions.addComp({ ...payload, note: payload.note || null, kind: payload.kind ?? "excedente" });
@@ -359,6 +388,10 @@ export default function RegistrosPage() {
               isToday={date === todayStr}
               absence={absence}
               effectiveExpected={ctx.effectiveExpected}
+              shortcuts={shortcutsByDate.get(date)}
+              getCapacity={(targetDate) =>
+                extraCapacityForDate(targetDate, entries, compensations, settings)
+              }
               onAddEntry={addEntry}
               onUpdateEntry={updateEntry}
               onDeleteEntry={deleteEntry}

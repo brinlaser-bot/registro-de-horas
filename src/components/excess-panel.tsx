@@ -18,6 +18,7 @@ import {
 } from "@/lib/debt";
 import { formatDateShortBR, formatMinutes, todayString, weekdayShort } from "@/lib/time";
 import type { Absence } from "@/lib/absences";
+import { annualCycleBounds, getAnnualPointCycle } from "@/lib/periods";
 import type { CompKind, Compensation, TimeEntry, WorkSettings } from "@/lib/types";
 import { Badge, Button, Card, EmptyState, ProgressBar, StatCard } from "@/components/ui";
 import { CompensationForm, type CompFormData } from "@/components/compensation-form";
@@ -46,21 +47,27 @@ export function ExcessPanel({
   const [draft, setDraft] = useState<(CompFormData & { kind?: CompKind }) | undefined>();
   const [draftDebt, setDraftDebt] = useState<number | undefined>();
 
-  const { excessDays, deficitDays, acordoDays, excessTotals, deficitTotals, acordoTotals } =
-    useMemo(() => {
-      const all = buildDebtDays(entries, compensations, settings, range, absences);
-      const ex = all.filter((d) => d.kind === "excedente");
-      const df = all.filter((d) => d.kind === "deficit");
-      const ac = all.filter((d) => d.kind === "acordo");
-      return {
-        excessDays: ex.reverse(),
-        deficitDays: df.reverse(),
-        acordoDays: ac.reverse(),
-        excessTotals: totalsOf(ex),
-        deficitTotals: totalsOf(df),
-        acordoTotals: totalsOf(ac),
-      };
-    }, [entries, compensations, absences, settings, range]);
+  const { excessDays, deficitDays, excessTotals, deficitTotals } = useMemo(() => {
+    const all = buildDebtDays(entries, compensations, settings, range, absences);
+    const ex = all.filter((d) => d.kind === "excedente");
+    const df = all.filter((d) => d.kind === "deficit");
+    return {
+      excessDays: ex.reverse(),
+      deficitDays: df.reverse(),
+      excessTotals: totalsOf(ex),
+      deficitTotals: totalsOf(df),
+    };
+  }, [entries, compensations, absences, settings, range]);
+
+  // Acordos a compensar: escopo = CICLO ANUAL (não o período 21→20).
+  // Um acordo continua ativo até ser quitado, cancelado ou chegar o fechamento anual.
+  const { acordoDays, acordoTotals } = useMemo(() => {
+    const bounds = annualCycleBounds(getAnnualPointCycle(today));
+    const ac = buildDebtDays(entries, compensations, settings, bounds, absences).filter(
+      (d) => d.kind === "acordo",
+    );
+    return { acordoDays: ac.reverse(), acordoTotals: totalsOf(ac) };
+  }, [entries, compensations, absences, settings, today]);
 
   const openFor = (date: string, kind: CompKind) => {
     const minutes = openDebtFor(entries, compensations, settings, date, kind);
@@ -257,7 +264,7 @@ export function ExcessPanel({
       {(acordoDays.length > 0 || acordoTotals.debtTotal > 0) && (
         <Card
           title="Acordo a compensar"
-          subtitle="Horas de afastamento acordado — pendência própria, distinta do déficit comum"
+          subtitle={`Pendências ativas do ciclo anual ${getAnnualPointCycle(today)} — permanecem até quitação ou fechamento anual (30/04), independentemente do período 21→20`}
         >
           {acordoDays.filter((d) => d.remainingMinutes > 0 || d.pendingMinutes > 0).length === 0 ? (
             <p className="text-xs text-slate-400">Todos os acordos deste período já foram quitados. ✔</p>

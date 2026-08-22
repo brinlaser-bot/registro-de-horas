@@ -24,7 +24,14 @@ import {
   type EntryType,
 } from "@/lib/time";
 import { dayContext } from "@/lib/absences";
-import { getPointPeriod, periodLabel, sameAnnualCycle } from "@/lib/periods";
+import {
+  annualCycleBounds,
+  getAnnualPointCycle,
+  getPointPeriod,
+  periodLabel,
+  sameAnnualCycle,
+} from "@/lib/periods";
+import { buildDebtDays, canCompleteComp, extraCapacityForDate } from "@/lib/debt";
 import type { CompKind, DayResult, DaySummary } from "@/lib/types";
 import { Badge, Button, Card, EmptyState, Skeleton, StatCard } from "@/components/ui";
 import { QuickPunch } from "@/components/quick-punch";
@@ -56,6 +63,7 @@ export default function DashboardPage() {
   const todayStr = todayString();
   const period = getPointPeriod(todayStr);
   const [compOpen, setCompOpen] = useState(false);
+  const [compDraft, setCompDraft] = useState<{ kind: CompKind; initial: CompFormData } | null>(null);
 
   // Relógio: mantém previsão de saída e horas "em andamento" em tempo real
   const [, setTick] = useState(0);
@@ -123,7 +131,11 @@ export default function DashboardPage() {
   const onDeleteEntry = async (id: number) => actions.deleteEntry(id);
 
   const completeComp = async (id: number) => {
-    actions.completeComp(id);
+    const res = actions.completeComp(id);
+    if (!res.ok) {
+      toast.show(res.error ?? "Não foi possível concluir.", "error");
+      return;
+    }
     toast.show("Compensação concluída. Bom descanso!");
   };
 
@@ -158,8 +170,35 @@ export default function DashboardPage() {
 
   /** Confirmação manual de quitação por hora extra (sem registrar saída). */
   const confirmComps = async (compIds: number[]) => {
-    for (const id of compIds) actions.completeComp(id);
-    toast.show("Quitação confirmada — déficit abatido!");
+    let done = 0;
+    for (const id of compIds) {
+      const res = actions.completeComp(id);
+      if (!res.ok) toast.show(res.error ?? "Não foi possível concluir.", "error");
+      else done += 1;
+    }
+    if (done > 0) toast.show("Quitação confirmada — déficit abatido!");
+  };
+
+  /** Acordos a compensar ativos do ciclo anual atual (independe do período 21→20). */
+  const acordos = useMemo(() => {
+    const bounds = annualCycleBounds(getAnnualPointCycle(todayStr));
+    return buildDebtDays(entries, compensations, settings, bounds, absences)
+      .filter((d) => d.kind === "acordo" && (d.remainingMinutes > 0 || d.pendingMinutes > 0))
+      .reverse();
+  }, [entries, compensations, absences, settings, todayStr]);
+
+  /** Abre o formulário central já preenchido para quitar um acordo/déficit. */
+  const openExtraForm = (kind: CompKind, sourceDate: string, minutes: number) => {
+    setCompDraft({
+      kind,
+      initial: {
+        sourceDate,
+        targetDate: todayStr,
+        minutes,
+        note: kind === "acordo" ? `Acordo de ${formatDateShortBR(sourceDate)}` : `Déficit de ${formatDateShortBR(sourceDate)}`,
+      },
+    });
+    setCompOpen(true);
   };
 
   if (!mounted) {
@@ -300,13 +339,48 @@ export default function DashboardPage() {
         </div>
       </div>
 
+      {/* Acordos a compensar — ativos no ciclo anual, independentemente do período */}
+      <Card
+        title="Acordos a compensar"
+        subtitle={`Pendências ativas do ciclo anual ${getAnnualPointCycle(todayStr)} — visíveis até quitação ou fechamento anual (30/04)`}
+      >
+        {acordos.length === 0 ? (
+          <p className="text-xs text-slate-400">
+            Nenhum acordo pendente neste ciclo anual.
+          </p>
+        ) : (
+          <ul className="space-y-3">
+            {acordos.map((d) => (
+              <li key={d.date} className="flex flex-wrap items-center gap-3 rounded-xl border border-violet-100 bg-violet-50/50 p-3">
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-bold text-slate-800">
+                    Acordo a compensar — {formatMinutes(d.debtMinutes)}
+                  </p>
+                  <p className="mt-0.5 text-xs text-slate-500">
+                    Origem: {formatDateShortBR(d.date)} · Ciclo anual:{" "}
+                    {getAnnualPointCycle(d.date)} · Compensado:{" "}
+                    <b className="text-emerald-600">{formatMinutes(d.concludedMinutes)}</b> ·
+                    Restante: <b className="text-amber-600">{formatMinutes(d.remainingMinutes)}</b>
+                  </p>
+                </div>
+                {d.remainingMinutes > 0 && (
+                  <Button size="sm" variant="subtle" onClick={() => openExtraForm("acordo", d.date, d.remainingMinutes)}>
+                    Compensar com hora extra
+                  </Button>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
+
       <div className="grid gap-6 lg:grid-cols-2">
         {/* Compensações pendentes */}
         <Card
           title="Compensações pendentes"
           subtitle="Horas excedentes que precisam ser compensadas"
           actions={
-            <Button size="sm" variant="subtle" onClick={() => setCompOpen(true)}>
+            <Button size="sm" variant="subtle" onClick={() => { setCompDraft(null); setCompOpen(true); }}>
               <PlusCircle size={13} /> Nova
             </Button>
           }
@@ -337,12 +411,38 @@ export default function DashboardPage() {
                       {c.note ? ` · ${c.note}` : ""}
                     </p>
                   </div>
-                  <Badge tone={(c.kind ?? "excedente") === "deficit" ? "emerald" : "indigo"}>
-                    {(c.kind ?? "excedente") === "deficit" ? "hora extra" : "sair cedo"}
+                  <Badge
+                    tone={
+                      (c.kind ?? "excedente") === "deficit"
+                        ? "emerald"
+                        : (c.kind ?? "excedente") === "acordo"
+                          ? "indigo"
+                          : "indigo"
+                    }
+                  >
+                    {(c.kind ?? "excedente") === "deficit"
+                      ? "hora extra"
+                      : (c.kind ?? "excedente") === "acordo"
+                        ? "acordo"
+                        : "sair cedo"}
                   </Badge>
-                  <Button size="sm" variant="secondary" onClick={() => completeComp(c.id)}>
-                    Concluir
-                  </Button>
+                  {(() => {
+                    const isExtra = c.kind === "deficit" || c.kind === "acordo";
+                    const check = isExtra
+                      ? canCompleteComp(c, entries, compensations, settings, todayStr)
+                      : { ok: true };
+                    return (
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        disabled={!check.ok}
+                        title={check.ok ? undefined : check.error}
+                        onClick={() => completeComp(c.id)}
+                      >
+                        {isExtra && check.ok ? "Confirmar quitação" : "Concluir"}
+                      </Button>
+                    );
+                  })()}
                 </li>
               ))}
             </ul>
@@ -390,7 +490,19 @@ export default function DashboardPage() {
         )}
       </Card>
 
-      <CompensationForm open={compOpen} onClose={() => setCompOpen(false)} onSave={createComp} />
+      <CompensationForm
+        open={compOpen}
+        onClose={() => {
+          setCompOpen(false);
+          setCompDraft(null);
+        }}
+        kind={compDraft?.kind ?? "excedente"}
+        initial={compDraft?.initial}
+        getCapacity={(targetDate) =>
+          extraCapacityForDate(targetDate, entries, compensations, settings)
+        }
+        onSave={createComp}
+      />
     </div>
   );
 }

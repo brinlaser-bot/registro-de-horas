@@ -17,11 +17,11 @@ import {
 } from "lucide-react";
 import type { Compensation, DayResult, WorkSettings } from "@/lib/types";
 import type { EntryType, TimeEntryLike } from "@/lib/time";
-import { formatDateShortBR, formatMinutes, nextWorkday, nowTimeString, weekdayLong } from "@/lib/time";
+import { formatDateShortBR, formatMinutes, nextWorkday, nowTimeString, todayString, weekdayLong } from "@/lib/time";
 import { Badge, Button, Input, Select } from "@/components/ui";
 import { CompensationForm, type CompFormData } from "@/components/compensation-form";
 import { SmartExit } from "@/components/smart-exit";
-import { allocatedForSource, overflowForSource } from "@/lib/debt";
+import { allocatedForSource, overflowForSource, type ExtraCapacity } from "@/lib/debt";
 import { absenceLabel, type Absence } from "@/lib/absences";
 import type { CompKind } from "@/lib/types";
 
@@ -50,6 +50,15 @@ interface Props {
   absence?: Absence;
   /** Jornada esperada efetiva do dia (com ausência descontada). */
   effectiveExpected?: number;
+  /** Atalhos de compensação do dia (calculados pela página com as funções centrais). */
+  shortcuts?: {
+    deficitRemaining: number;
+    acordoMinutes: number;
+    acordoRemaining: number;
+    canCompensate: boolean; // ciclo anual ainda ativo
+  };
+  /** Capacidade de hora extra por dia de destino (função central). */
+  getCapacity?: (targetDate: string) => ExtraCapacity;
 }
 
 export function DayCard({
@@ -67,9 +76,13 @@ export function DayCard({
   onCapComp,
   absence,
   effectiveExpected,
+  shortcuts,
+  getCapacity,
 }: Props) {
   // Regra: todos os dias iniciam RECOLHIDOS — o usuário expande apenas o dia desejado.
   const [expanded, setExpanded] = useState(false);
+  const [compKind, setCompKind] = useState<CompKind>("excedente");
+  const [compInitial, setCompInitial] = useState<CompFormData | undefined>();
   const [showAdd, setShowAdd] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState<{ type: EntryType; time: string; note: string }>({
@@ -124,6 +137,19 @@ export function DayCard({
   const finishComp = async (id: number) => {
     if (!window.confirm("Marcar esta compensação como concluída?")) return;
     await onCompleteComp(id);
+  };
+
+  /** Abre o formulário central de compensação já preenchido (atalho do card). */
+  const openComp = (kind: CompKind, minutes: number, note: string) => {
+    setCompKind(kind);
+    setCompInitial({
+      sourceDate: d.date,
+      // excedente → sair mais cedo (próximo dia útil); hora extra → usuário escolhe o dia
+      targetDate: kind === "excedente" ? nextWorkday(d.date) : todayString(),
+      minutes,
+      note,
+    });
+    setCompOpen(true);
   };
 
   // Registro de saída em 1 clique + conclusão das compensações de saída antecipada
@@ -269,7 +295,13 @@ export function DayCard({
                   </span>
                 )}
               </p>
-              <Button variant="danger" size="sm" onClick={() => setCompOpen(true)}>
+              <Button
+                variant="danger"
+                size="sm"
+                onClick={() =>
+                  openComp("excedente", d.excessMinutes, `Compensação do dia ${formatDateShortBR(d.date)}`)
+                }
+              >
                 <ArrowLeftRight size={13} /> Compensar horas
               </Button>
             </div>
@@ -306,6 +338,47 @@ export function DayCard({
                   </Button>
                 )}
               </div>
+            </div>
+          )}
+
+          {/* Atalho: Acordo a compensar (afastamento acordado — compensar posteriormente) */}
+          {shortcuts?.canCompensate && shortcuts.acordoRemaining > 0 && (
+            <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2.5">
+              <p className="flex-1 text-xs font-medium text-violet-800">
+                Acordo a compensar: <b>{formatMinutes(shortcuts.acordoMinutes)}</b>
+                {shortcuts.acordoRemaining < shortcuts.acordoMinutes && (
+                  <>
+                    {" "}· ainda pendentes: <b>{formatMinutes(shortcuts.acordoRemaining)}</b>
+                  </>
+                )}
+              </p>
+              <Button
+                size="sm"
+                variant="subtle"
+                onClick={() =>
+                  openComp("acordo", shortcuts.acordoRemaining, `Acordo de ${formatDateShortBR(d.date)}`)
+                }
+              >
+                <ArrowLeftRight size={13} /> Compensar acordo
+              </Button>
+            </div>
+          )}
+
+          {/* Atalho: déficit comum pendente → quitar com hora extra */}
+          {shortcuts?.canCompensate && shortcuts.acordoMinutes === 0 && shortcuts.deficitRemaining > 0 && (
+            <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5">
+              <p className="flex-1 text-xs font-medium text-amber-800">
+                Déficit pendente: <b>{formatMinutes(shortcuts.deficitRemaining)}</b> ainda pendentes
+              </p>
+              <Button
+                size="sm"
+                variant="subtle"
+                onClick={() =>
+                  openComp("deficit", shortcuts.deficitRemaining, `Déficit de ${formatDateShortBR(d.date)}`)
+                }
+              >
+                <Zap size={13} /> Quitar com hora extra
+              </Button>
             </div>
           )}
 
@@ -431,12 +504,13 @@ export function DayCard({
       <CompensationForm
         open={compOpen}
         onClose={() => setCompOpen(false)}
-        initial={
-          d.excessMinutes > 0
-            ? { sourceDate: d.date, targetDate: nextWorkday(d.date), minutes: d.excessMinutes, note: `Compensação do dia ${formatDateShortBR(d.date)}` }
-            : undefined
-        }
-        onSave={onCreateComp}
+        kind={compKind}
+        initial={compInitial}
+        getCapacity={getCapacity}
+        pendingDebtMinutes={compInitial?.minutes}
+        onSave={async (payload) => {
+          await onCreateComp({ ...payload, kind: compKind });
+        }}
       />
     </section>
   );

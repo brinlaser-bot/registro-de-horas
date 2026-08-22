@@ -1,5 +1,5 @@
 // Matemática de dívida de horas: abatimento fracionado + sugestões inteligentes.
-import { computeDay, expectedMinutesOf } from "./time";
+import { computeDay, expectedMinutesOf, formatDateBR, formatMinutes } from "./time";
 import { dayContext, type Absence } from "./absences";
 import { sameAnnualCycle } from "./periods";
 import type {
@@ -300,4 +300,86 @@ export function checkSourceOverflow(
     excessOverflow: overflowForSource(comps, date, "excedente", excessMinutes),
     deficitOverflow: overflowForSource(comps, date, "deficit", deficitMinutes),
   };
+}
+
+/* ── Validação central de conclusão de compensação por hora extra ── */
+
+/**
+ * Hora extra REAL existente em uma data (mesma lógica central dos dias
+ * encerrados): trabalhado − jornada-base. Usa as batidas reais do dia.
+ */
+export function actualExtraForDate(
+  date: string,
+  entries: TimeEntry[],
+  settings: WorkSettings,
+): number {
+  const day = computeDay(
+    entries.filter((e) => e.date === date),
+    settings,
+  );
+  return Math.max(0, day.workedMinutes - day.expectedMinutes);
+}
+
+export interface CompletionCheck {
+  ok: boolean;
+  reason?: "future-date" | "insufficient-extra";
+  error?: string;
+  /** Hora extra real no dia de destino. */
+  actualExtra?: number;
+  /** Já consumido por outras compensações CONCLUÍDAS no mesmo destino. */
+  committed?: number;
+  /** Disponível para esta compensação. */
+  available?: number;
+}
+
+/**
+ * FUNÇÃO CENTRAL: uma compensação por hora extra (deficit/acordo) só pode ser
+ * concluída quando a hora extra realmente existir no dia de destino:
+ *  1. today >= targetDate (não concluir antes da data);
+ *  2. hora extra real >= minutos da compensação, descontando o que outras
+ *     compensações já concluídas no mesmo dia já consumiram.
+ * Compensações de excedente (sair mais cedo) mantêm o fluxo manual existente.
+ */
+export function canCompleteComp(
+  comp: Compensation,
+  entries: TimeEntry[],
+  comps: Compensation[],
+  settings: WorkSettings,
+  today: string,
+): CompletionCheck {
+  const kind = kindOf(comp);
+  if (kind === "excedente") return { ok: true };
+
+  if (today < comp.targetDate) {
+    return {
+      ok: false,
+      reason: "future-date",
+      error: `Aguardando realização da hora extra em ${formatDateBR(comp.targetDate)}.`,
+    };
+  }
+
+  const actualExtra = actualExtraForDate(comp.targetDate, entries, settings);
+  const committed = sumMinutes(
+    comps.filter(
+      (c) =>
+        c.id !== comp.id &&
+        c.targetDate === comp.targetDate &&
+        c.status === "concluida" &&
+        (kindOf(c) === "deficit" || kindOf(c) === "acordo"),
+    ),
+  );
+  const available = Math.max(0, actualExtra - committed);
+
+  if (comp.minutes > available) {
+    return {
+      ok: false,
+      reason: "insufficient-extra",
+      actualExtra,
+      committed,
+      available,
+      error: `Hora extra realizada: ${formatMinutes(available)} de ${formatMinutes(comp.minutes)}. A compensação ainda não pode ser concluída.`,
+    };
+  }
+
+  return { ok: true, actualExtra, committed, available };
 }

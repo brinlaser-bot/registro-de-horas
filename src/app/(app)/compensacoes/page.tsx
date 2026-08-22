@@ -12,7 +12,7 @@ import {
 import { actions, enrichComp, settingsOf, useAppData, useIsClient } from "@/lib/store";
 import { formatDateBR, formatDateShortBR, formatMinutes, todayString } from "@/lib/time";
 import type { CompKind } from "@/lib/types";
-import { extraCapacityForDate } from "@/lib/debt";
+import { canCompleteComp, extraCapacityForDate } from "@/lib/debt";
 import { Badge, Button, EmptyState, Skeleton } from "@/components/ui";
 import { CompensationForm } from "@/components/compensation-form";
 import { useToast } from "@/components/toast";
@@ -68,8 +68,14 @@ export default function CompensacoesPage() {
     setEditing(null);
   };
 
+  const today = todayString();
+
   const setStatus = async (id: number, status: string) => {
-    const res = actions.updateComp(id, { status: status as "pendente" | "concluida" | "cancelada" });
+    // Conclusão passa pela validação central (hora extra real + data alcançada)
+    const res =
+      status === "concluida"
+        ? actions.completeComp(id)
+        : actions.updateComp(id, { status: status as "pendente" | "concluida" | "cancelada" });
     if (!res.ok) {
       toast.show(res.error ?? "Não foi possível atualizar.", "error");
       return;
@@ -206,17 +212,39 @@ export default function CompensacoesPage() {
                   </Badge>
                 )}
                 {c.status === "cancelada" && <Badge tone="slate">Cancelada</Badge>}
-                <div className="flex items-center gap-1">
-                  {c.status === "pendente" && (
-                    <>
-                      <Button size="sm" variant="subtle" onClick={() => setStatus(c.id, "concluida")}>
-                        <CheckCircle2 size={13} /> Concluir
-                      </Button>
-                      <Button size="sm" variant="ghost" onClick={() => setStatus(c.id, "cancelada")}>
-                        <XCircle size={13} /> Cancelar
-                      </Button>
-                    </>
+                {c.status === "pendente" &&
+                  (c.kind === "deficit" || c.kind === "acordo") &&
+                  canCompleteComp(c, entries, compensations, settings, today).ok && (
+                    <Badge tone="emerald">Meta de compensação atingida ✓</Badge>
                   )}
+                <div className="flex items-center gap-1">
+                  {c.status === "pendente" && (() => {
+                    const isExtra = c.kind === "deficit" || c.kind === "acordo";
+                    const check = isExtra
+                      ? canCompleteComp(c, entries, compensations, settings, today)
+                      : { ok: true };
+                    return (
+                      <>
+                        {isExtra && !check.ok && (
+                          <span className="mr-1 max-w-[240px] text-[11px] font-semibold text-amber-600">
+                            {check.error}
+                          </span>
+                        )}
+                        <Button
+                          size="sm"
+                          variant="subtle"
+                          disabled={!check.ok}
+                          onClick={() => setStatus(c.id, "concluida")}
+                        >
+                          <CheckCircle2 size={13} />
+                          {isExtra && check.ok ? "Confirmar quitação" : "Concluir"}
+                        </Button>
+                        <Button size="sm" variant="ghost" onClick={() => setStatus(c.id, "cancelada")}>
+                          <XCircle size={13} /> Cancelar
+                        </Button>
+                      </>
+                    );
+                  })()}
                   <Button
                     size="sm"
                     variant="ghost"

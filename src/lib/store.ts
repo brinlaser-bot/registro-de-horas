@@ -3,10 +3,10 @@
 // Store client-side com persistência em localStorage.
 // Uso pessoal: todos os dados ficam apenas no navegador.
 import { useEffect, useState, useSyncExternalStore } from "react";
-import { computeDay, formatMinutes, type EntryType } from "./time";
+import { computeDay, formatMinutes, todayString, type EntryType } from "./time";
 import { buildSeedData, DEFAULT_USER } from "./seed-data";
 import { absencesEqual, compsEqual, entriesEqual, mergeByIdAndContent } from "./backup";
-import { extraCapacityForDate } from "./debt";
+import { canCompleteComp, extraCapacityForDate } from "./debt";
 import { validateAbsence, type Absence, type AbsenceSplit } from "./absences";
 import { sameAnnualCycle } from "./periods";
 
@@ -283,8 +283,29 @@ export const actions = {
     return result;
   },
 
-  completeComp(id: number) {
-    actions.updateComp(id, { status: "concluida" });
+  /**
+   * Conclui uma compensação (sempre manualmente). Para hora extra
+   * (deficit/acordo) valida novamente pela função central: data de destino
+   * alcançada + hora extra REAL existente (descontando outras concluídas no
+   * mesmo dia). Se inválido: rejeita integralmente, sem clamp e sem alterar.
+   */
+  completeComp(id: number): ActionResult {
+    load();
+    const comp = data.compensations.find((c) => c.id === id);
+    if (!comp) {
+      return { ok: false, code: "not-found", error: "Compensação não encontrada." };
+    }
+    const check = canCompleteComp(
+      comp,
+      data.entries,
+      data.compensations,
+      settingsOf(data.user),
+      todayString(),
+    );
+    if (!check.ok) {
+      return { ok: false, code: "invalid", error: check.error };
+    }
+    return actions.updateComp(id, { status: "concluida" });
   },
 
   deleteComp(id: number) {
