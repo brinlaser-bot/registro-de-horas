@@ -147,3 +147,89 @@ export function parseBackup(
 
   return { ok: true, backup: { user, entries, compensations, version, summary } };
 }
+
+/* ──────────────────────────────────────────────────────────
+   Mesclagem segura (importar backup sem perder eventos distintos)
+   ────────────────────────────────────────────────────────── */
+
+/** Compara todo o conteúdo relevante de dois registros de ponto. */
+export function entriesEqual(a: TimeEntry, b: TimeEntry): boolean {
+  return (
+    a.date === b.date &&
+    a.time === b.time &&
+    a.type === b.type &&
+    (a.note ?? null) === (b.note ?? null)
+  );
+}
+
+/** Compara todo o conteúdo relevante de duas compensações. */
+export function compsEqual(a: Compensation, b: Compensation): boolean {
+  return (
+    a.sourceDate === b.sourceDate &&
+    a.targetDate === b.targetDate &&
+    a.minutes === b.minutes &&
+    a.status === b.status &&
+    (a.note ?? null) === (b.note ?? null) &&
+    (a.kind ?? "excedente") === (b.kind ?? "excedente")
+  );
+}
+
+export interface MergeOutcome<T> {
+  merged: T[];
+  added: number;
+  skipped: number;
+}
+
+/**
+ * Mescla itens importados nos existentes com estratégia segura:
+ * - mesmo ID + mesmo conteúdo  → duplicado (ignorado);
+ * - mesmo ID + conteúdo diferente → preserva ambos, gerando novo ID p/ o importado;
+ * - sem correspondência de ID → novo registro (mantém o ID se livre, senão gera outro).
+ *
+ * NUNCA descarta um registro apenas por compartilhar dias/minutos com outro:
+ * a deduplicação só ocorre quando ID e conteúdo coincidem por completo.
+ */
+export function mergeByIdAndContent<T extends { id: number }>(
+  existing: T[],
+  imported: T[],
+  isEqual: (a: T, b: T) => boolean,
+): MergeOutcome<T> {
+  const merged: T[] = [...existing];
+  const usedIds = new Set<number>(existing.map((x) => x.id));
+  let cursor = existing.reduce((max, x) => Math.max(max, x.id), 0) + 1;
+
+  const alloc = (): number => {
+    let id = cursor;
+    while (usedIds.has(id)) id += 1;
+    usedIds.add(id);
+    cursor = id + 1;
+    return id;
+  };
+
+  let added = 0;
+  let skipped = 0;
+
+  for (const item of imported) {
+    const sameId = existing.filter((x) => x.id === item.id);
+    const identical = sameId.some((x) => isEqual(x, item));
+
+    if (identical) {
+      skipped += 1;
+      continue;
+    }
+
+    if (sameId.length > 0) {
+      merged.push({ ...item, id: alloc() } as T);
+      added += 1;
+      continue;
+    }
+
+    const id = usedIds.has(item.id) ? alloc() : item.id;
+    usedIds.add(id);
+    if (id >= cursor) cursor = id + 1;
+    merged.push({ ...item, id } as T);
+    added += 1;
+  }
+
+  return { merged, added, skipped };
+}

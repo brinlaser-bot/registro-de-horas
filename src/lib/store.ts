@@ -5,6 +5,7 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { computeDay, type EntryType } from "./time";
 import { buildSeedData, DEFAULT_USER } from "./seed-data";
+import { compsEqual, entriesEqual, mergeByIdAndContent } from "./backup";
 import type {
   AppData,
   CompKind,
@@ -218,37 +219,18 @@ export const actions = {
     mutate(() => ({ user: p.user, entries: p.entries, compensations: p.compensations }));
   },
 
-  /** Mescla o backup com os dados atuais, evitando duplicação. */
+  /**
+   * Mescla o backup com os dados atuais, preservando eventos distintos.
+   * Deduplicação segura via ID + conteúdo completo (nunca apenas dias/minutos).
+   */
   mergeBackup(p: { entries: TimeEntry[]; compensations: Compensation[] }) {
     mutate((d) => {
-      const entryKeys = new Set(d.entries.map((e) => `${e.date}|${e.time}|${e.type}`));
-      const compKeys = new Set(
-        d.compensations.map((c) => `${c.sourceDate}|${c.targetDate}|${c.minutes}|${c.kind ?? "excedente"}`),
-      );
-
-      let entryCursor = d.entries.reduce((m, e) => Math.max(m, e.id), 0) + 1;
-      let compCursor = d.compensations.reduce((m, c) => Math.max(m, c.id), 0) + 1;
-
-      const newEntries: TimeEntry[] = [];
-      for (const e of p.entries) {
-        const key = `${e.date}|${e.time}|${e.type}`;
-        if (entryKeys.has(key)) continue;
-        entryKeys.add(key);
-        newEntries.push({ ...e, id: entryCursor++ });
-      }
-
-      const newComps: Compensation[] = [];
-      for (const c of p.compensations) {
-        const key = `${c.sourceDate}|${c.targetDate}|${c.minutes}|${c.kind ?? "excedente"}`;
-        if (compKeys.has(key)) continue;
-        compKeys.add(key);
-        newComps.push({ ...c, id: compCursor++, kind: c.kind ?? "excedente" });
-      }
-
+      const entryMerge = mergeByIdAndContent(d.entries, p.entries, entriesEqual);
+      const compMerge = mergeByIdAndContent(d.compensations, p.compensations, compsEqual);
       return {
         ...d,
-        entries: [...d.entries, ...newEntries],
-        compensations: [...d.compensations, ...newComps],
+        entries: entryMerge.merged,
+        compensations: compMerge.merged,
       };
     });
   },

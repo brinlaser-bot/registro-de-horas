@@ -12,7 +12,14 @@ import {
 import { Button, Modal } from "@/components/ui";
 import { useToast } from "@/components/toast";
 import { actions, getAppData } from "@/lib/store";
-import { INVALID_BACKUP_MSG, parseBackup, type ParsedBackup } from "@/lib/backup";
+import {
+  compsEqual,
+  entriesEqual,
+  INVALID_BACKUP_MSG,
+  mergeByIdAndContent,
+  parseBackup,
+  type ParsedBackup,
+} from "@/lib/backup";
 import { formatDateShortBR } from "@/lib/time";
 
 interface Props {
@@ -47,19 +54,13 @@ export function ImportBackupModal({ open, onClose }: Props) {
 
   const computePreview = (p: ParsedBackup): Preview => {
     const cur = getAppData();
-    const entryKeys = new Set(cur.entries.map((e) => `${e.date}|${e.time}|${e.type}`));
-    const compKeys = new Set(
-      cur.compensations.map((c) => `${c.sourceDate}|${c.targetDate}|${c.minutes}|${c.kind ?? "excedente"}`),
-    );
-    const newEntries = p.entries.filter((e) => !entryKeys.has(`${e.date}|${e.time}|${e.type}`)).length;
-    const newComps = p.compensations.filter(
-      (c) => !compKeys.has(`${c.sourceDate}|${c.targetDate}|${c.minutes}|${c.kind ?? "excedente"}`),
-    ).length;
+    const entryMerge = mergeByIdAndContent(cur.entries, p.entries, entriesEqual);
+    const compMerge = mergeByIdAndContent(cur.compensations, p.compensations, compsEqual);
     return {
-      newEntries,
-      skippedEntries: p.entries.length - newEntries,
-      newComps,
-      skippedComps: p.compensations.length - newComps,
+      newEntries: entryMerge.added,
+      skippedEntries: entryMerge.skipped,
+      newComps: compMerge.added,
+      skippedComps: compMerge.skipped,
     };
   };
 
