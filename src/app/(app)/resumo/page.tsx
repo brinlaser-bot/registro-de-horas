@@ -3,11 +3,10 @@
 import { useMemo, useState } from "react";
 import { BarChart3, ChevronLeft, ChevronRight, Download } from "lucide-react";
 import { settingsOf, useAppData, useIsClient } from "@/lib/store";
-import { expectedMinutesOf, formatMinutes, isWeekend, weekdayShort } from "@/lib/time";
+import { formatMinutes, isWeekend, weekdayShort } from "@/lib/time";
 import {
   absenceLabel,
   absenceOnDate,
-  dayContext,
 } from "@/lib/absences";
 import {
   getNextPointPeriod,
@@ -17,27 +16,10 @@ import {
   periodLabel,
   type PointPeriod,
 } from "@/lib/periods";
-import { acordoViewOf, appliedOnDate, buildDebtDays } from "@/lib/debt";
 import { companyBalanceContribution, companyDayContext } from "@/lib/company-calendar";
-import { stackedSegments } from "@/lib/time";
 import { Badge, Button, Card, EmptyState, Skeleton, StatCard } from "@/components/ui";
-import {
-  StackedBarsChart,
-  type ChartAbsenceMarker,
-  type StackedDatum,
-} from "@/components/charts";
+import { StackedPeriodChart } from "@/components/stacked-period-chart";
 import type { Absence } from "@/lib/absences";
-import type { AcordoView } from "@/lib/debt";
-
-/** Marcador visual do dia (férias/afastamentos) — apenas informativo. */
-function markerOf(a: Absence): ChartAbsenceMarker {
-  if (a.kind === "ferias") return "ferias";
-  if (a.kind === "saude") return "saude";
-  if (a.kind === "acordado") {
-    return a.treatment === "compensar" ? "acordado-compensar" : "acordado-dispensado";
-  }
-  return "outro";
-}
 
 interface DayRow {
   date: string;
@@ -52,8 +34,6 @@ interface DayRow {
   /** Contribuição central deste dia ao Saldo do período. */
   balanceContribution: number;
   absence: Absence | undefined;
-  calendarMarker: ChartAbsenceMarker | undefined;
-  acordo: AcordoView | null;
 }
 
 export default function ResumoPage() {
@@ -61,15 +41,6 @@ export default function ResumoPage() {
   const { user, entries, compensations, absences, companyCalendars } = useAppData();
   const settings = settingsOf(user);
   const [period, setPeriod] = useState<PointPeriod>(() => getPointPeriod(new Date().toISOString().slice(0, 10)));
-
-  // Visão central dos acordos do período (original/compensado/planejado/restante)
-  const acordoByDate = useMemo(() => {
-    const map = new Map<string, AcordoView>();
-    for (const d of buildDebtDays(entries, compensations, settings, period, absences, companyCalendars)) {
-      if (d.kind === "acordo") map.set(d.date, acordoViewOf(d));
-    }
-    return map;
-  }, [entries, compensations, absences, companyCalendars, settings, period]);
 
   const allDays: DayRow[] = useMemo(() => {
     return listDaysBetween(period.from, period.to)
@@ -101,12 +72,10 @@ export default function ResumoPage() {
           eventLabel: cctx.label ?? (absence ? absenceLabel(absence) : null),
           balanceContribution: companyBalanceContribution(cctx),
           absence,
-          calendarMarker: absence ? markerOf(absence) : cctx.marker ?? undefined,
-          acordo: acordoByDate.get(date) ?? null,
         };
       })
       .filter((d) => d.entryCount > 0 || d.eventLabel || !isWeekend(d.date));
-  }, [entries, absences, settings, period, acordoByDate]);
+  }, [entries, absences, settings, period]);
 
   const totals = useMemo(
     () =>
@@ -124,55 +93,6 @@ export default function ResumoPage() {
       ),
     [allDays],
   );
-
-  // Gráfico empilhado: blocos sobre a jornada EFETIVA + compensação aplicada.
-  // Os valores das barras permanecem exatamente os já aprovados — o marcador de
-  // férias/afastamento é apenas informativo (não soma horas à barra).
-  const chartData: StackedDatum[] = allDays.map((d) => {
-    const seg = stackedSegments(d.workedMinutes, d.expectedMinutes, settings.maxDailyMinutes);
-    const used = appliedOnDate(compensations, d.date);
-
-    const lines: string[] = [];
-    if (d.absence) {
-      lines.push(
-        d.absence.duration === "parcial"
-          ? `Período: ${d.absence.partialStart}–${d.absence.partialEnd}`
-          : "Dia integral",
-      );
-      if (d.absence.kind === "saude") {
-        lines.push(
-          d.absence.medicalCert ? "Atestado apresentado" : "Atestado não apresentado",
-        );
-      }
-    } else if (d.eventLabel) {
-      lines.push(d.eventLabel);
-    }
-    if (d.acordo && d.acordo.originalMinutes > 0) {
-      lines.push(
-        `Acordo original: ${formatMinutes(d.acordo.originalMinutes)}`,
-        `Compensado: ${formatMinutes(d.acordo.compensatedMinutes)}`,
-      );
-      if (d.acordo.plannedMinutes > 0) {
-        lines.push(`Planejado: ${formatMinutes(d.acordo.plannedMinutes)}`);
-      }
-      lines.push(`Restante: ${formatMinutes(d.acordo.remainingMinutes)}`);
-    }
-
-    return {
-      date: d.date,
-      label: d.date.slice(8),
-      workedMinutes: d.workedMinutes,
-      expectedMinutes: d.expectedMinutes,
-      base: seg.base,
-      extra: seg.extra,
-      excess: seg.excess,
-      compensated: Math.max(0, Math.min(used, Math.max(0, d.expectedMinutes - d.workedMinutes))),
-      marker: d.calendarMarker,
-      markerLabel: d.eventLabel ?? undefined,
-      markerLines: lines.length > 0 ? lines : undefined,
-      regularBalance: d.balanceMinutes,
-    };
-  });
 
   const exportCsv = () => {
     const rows = [
@@ -256,20 +176,17 @@ export default function ResumoPage() {
         title="Barras empilhadas do período"
         subtitle="Base · extra no ponto · excedente (dívida) · horas compensadas — férias/afastamentos reduzem a base"
       >
-        {chartData.length === 0 ? (
-          <EmptyState
-            icon={<BarChart3 size={24} />}
-            title="Sem dados neste período"
-            description="Registre seus horários para ver o gráfico e o resumo."
-          />
-        ) : (
-          <StackedBarsChart
-            data={chartData}
-            expected={expectedMinutesOf(settings)}
-            cap={settings.maxDailyMinutes}
-            height={210}
-          />
-        )}
+        {/* Preparação + componente COMPARTILHADOS (src/components/stacked-period-chart):
+            mesma fonte usada pela Visão geral — dados idênticos para o mesmo período. */}
+        <StackedPeriodChart
+          entries={entries}
+          compensations={compensations}
+          absences={absences}
+          companyCalendars={companyCalendars}
+          settings={settings}
+          period={period}
+          height={210}
+        />
       </Card>
 
       <Card title="Detalhamento diário" subtitle="Clique em um dia na aba Registros para ver as batidas">

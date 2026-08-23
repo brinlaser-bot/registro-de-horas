@@ -40,8 +40,8 @@ import { canRegisterFalta, faltaConfirmText, faltaOnDate } from "@/lib/faltas";
 import type { CompKind, DayResult, DaySummary } from "@/lib/types";
 import { Badge, Button, Card, EmptyState, Skeleton, StatCard } from "@/components/ui";
 import { QuickPunch } from "@/components/quick-punch";
-import { BarsChart, type BarDatum } from "@/components/charts";
 import { ExcessPanel } from "@/components/excess-panel";
+import { StackedPeriodChart } from "@/components/stacked-period-chart";
 import { SmartExit } from "@/components/smart-exit";
 import { CompensationForm, type CompFormData } from "@/components/compensation-form";
 import { useToast } from "@/components/toast";
@@ -308,14 +308,6 @@ export default function DashboardPage() {
     t.status === "excess" ? "rose" : t.status === "deficit" ? "amber" : t.status === "in-progress" ? "indigo" : "slate";
   const firstName = user.name.split(" ")[0];
 
-  const chartData: BarDatum[] = recent.map((d) => ({
-    label: weekdayShort(d.date).replace(".", ""),
-    value: d.workedMinutes,
-    baseline: d.expectedMinutes,
-    cap: settings.maxDailyMinutes,
-    status: d.status,
-  }));
-
   const recentDays = [...recent].filter((d) => d.entryCount > 0).slice(-7).reverse();
 
   return (
@@ -572,9 +564,22 @@ export default function DashboardPage() {
           )}
         </Card>
 
-        {/* Últimos 14 dias */}
-        <Card title="Últimos 14 dias" subtitle="Horas trabalhadas por dia vs. base diária">
-          <BarsChart data={chartData} height={150} />
+        {/* Barras empilhadas do período — MESMA preparação/componente do Resumo
+            (src/components/stacked-period-chart). Período de ponto ATUAL (21→20,
+            resolvido pelo helper central, com os especiais do fechamento anual). */}
+        <Card
+          title="Barras empilhadas do período"
+          subtitle="Base · extra no ponto · excedente (dívida) · horas compensadas"
+        >
+          <StackedPeriodChart
+            entries={entries}
+            compensations={compensations}
+            absences={absences}
+            companyCalendars={companyCalendars}
+            settings={settings}
+            period={period}
+            height={150}
+          />
         </Card>
       </div>
 

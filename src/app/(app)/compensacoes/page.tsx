@@ -4,6 +4,8 @@ import { useMemo, useState } from "react";
 import {
   ArrowLeftRight,
   CheckCircle2,
+  ChevronDown,
+  ChevronUp,
   Pencil,
   PlusCircle,
   Trash2,
@@ -69,6 +71,11 @@ export default function CompensacoesPage() {
       ),
     [entries, compensations, settings, cycleBounds, companyCalendars, todayStr],
   );
+
+  // UX: a seção "Calendário a compensar" inicia RECOLHIDA (são muitas
+  // obrigações) — as compensações do usuário têm prioridade visual. Estado
+  // LOCAL de apresentação (não persiste); a lista expandida é exatamente a atual.
+  const [calOpen, setCalOpen] = useState(false);
 
   const [formKind, setFormKind] = useState<CompKind>("excedente");
   const [formInitial, setFormInitial] = useState<CompFormData | undefined>();
@@ -223,37 +230,69 @@ export default function CompensacoesPage() {
         </div>
       )}
 
-      {/* Seção de obrigações do Calendário da empresa (derivadas; ciclo anual atual) */}
+      {/* Seção de obrigações do Calendário da empresa (derivadas; ciclo anual atual).
+          UX: inicia RECOLHIDA — faixa-resumo compacta + "Ver obrigações" expande
+          exatamente a lista atual (cards, badge Próxima, ações, ordenação). */}
       {calObligations.length > 0 && (
         <Card
           title="Calendário a compensar"
           subtitle={`Obrigações do calendário da empresa no ciclo anual ${cycle} — visíveis antes da data para planejamento; somente compensações concluídas abatem o restante`}
+          actions={
+            <Button
+              size="sm"
+              variant="subtle"
+              onClick={() => setCalOpen((v) => !v)}
+              aria-expanded={calOpen}
+            >
+              {calOpen ? (
+                <>Ocultar <ChevronUp size={14} /></>
+              ) : (
+                <>Ver obrigações <ChevronDown size={14} /></>
+              )}
+            </Button>
+          }
         >
-          <ul className="space-y-3">
-            {calObligations.map((d) => (
-              <li key={d.date} className="flex flex-wrap items-center gap-3 rounded-xl border border-amber-100 bg-amber-50/50 p-3">
-                <div className="min-w-0 flex-1">
-                  <p className="flex flex-wrap items-center gap-2 text-sm font-bold text-slate-800">
-                    Calendário a compensar — {formatMinutes(d.originalMinutes)}
-                    {d.future && <Badge tone="sky">Próxima</Badge>}
-                  </p>
-                  <p className="mt-0.5 text-xs text-slate-500">
-                    Origem: {formatDateShortBR(d.date)} · Ciclo: {d.cycleLabel} · Compensado:{" "}
-                    <b className="text-emerald-600">{formatMinutes(d.compensatedMinutes)}</b> ·
-                    Restante: <b className="text-amber-600">{formatMinutes(d.remainingMinutes)}</b>
-                    {d.plannedMinutes > 0 && (
-                      <> · Planejado: <b className="text-sky-600">{formatMinutes(d.plannedMinutes)}</b></>
-                    )}
-                  </p>
-                </div>
-                {d.remainingMinutes > 0 && (
-                  <Button size="sm" variant="subtle" onClick={() => openCalendarioForm(d.date, d.remainingMinutes)}>
-                    Compensar com hora extra
-                  </Button>
-                )}
-              </li>
-            ))}
-          </ul>
+          {/* Card-resumo compacto — sempre visível, sem recalcular nada */}
+          <p className="mb-3 flex flex-wrap items-center gap-2 text-xs font-medium text-slate-500">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-2.5 py-1 font-bold text-amber-700 ring-1 ring-inset ring-amber-200">
+              {calObligations.length} obrigação(ões)
+            </span>
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-rose-50 px-2.5 py-1 font-bold text-rose-600 ring-1 ring-inset ring-rose-200">
+              {formatMinutes(calObligations.reduce((s, o) => s + o.remainingMinutes, 0))} restantes
+            </span>
+            {!calOpen && (
+              <span>
+                · clique em <b>Ver obrigações</b> para expandir a lista
+              </span>
+            )}
+          </p>
+          {calOpen && (
+            <ul className="space-y-3">
+              {calObligations.map((d) => (
+                <li key={d.date} className="flex flex-wrap items-center gap-3 rounded-xl border border-amber-100 bg-amber-50/50 p-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="flex flex-wrap items-center gap-2 text-sm font-bold text-slate-800">
+                      Calendário a compensar — {formatMinutes(d.originalMinutes)}
+                      {d.future && <Badge tone="sky">Próxima</Badge>}
+                    </p>
+                    <p className="mt-0.5 text-xs text-slate-500">
+                      Origem: {formatDateShortBR(d.date)} · Ciclo: {d.cycleLabel} · Compensado:{" "}
+                      <b className="text-emerald-600">{formatMinutes(d.compensatedMinutes)}</b> ·
+                      Restante: <b className="text-amber-600">{formatMinutes(d.remainingMinutes)}</b>
+                      {d.plannedMinutes > 0 && (
+                        <> · Planejado: <b className="text-sky-600">{formatMinutes(d.plannedMinutes)}</b></>
+                      )}
+                    </p>
+                  </div>
+                  {d.remainingMinutes > 0 && (
+                    <Button size="sm" variant="subtle" onClick={() => openCalendarioForm(d.date, d.remainingMinutes)}>
+                      Compensar com hora extra
+                    </Button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
         </Card>
       )}
 
