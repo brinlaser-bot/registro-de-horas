@@ -1,13 +1,15 @@
 // Import/Export de backup (JSON) com versionamento e validação.
 import type { AppData, Compensation, TimeEntry, User } from "./types";
 import type { Absence } from "./absences";
-import type { CompanyCalendar } from "./company-calendar";
+import { normalizeCompanyCalendars, type CompanyCalendars } from "./company-calendar";
 
 /**
  * v1: user + entries + compensations.
  * v2: + absences (férias/afastamentos). Backups v1 importam com lista vazia.
+ * v3: + companyCalendars (um por ciclo anual). Backups v2 com o campo antigo
+ *     "companyCalendar" (único) importam como coleção com 1 calendário.
  */
-export const BACKUP_VERSION = 2;
+export const BACKUP_VERSION = 3;
 export const INVALID_BACKUP_MSG = "Este arquivo não é um backup válido do Meu Horário.";
 
 export interface BackupPayload {
@@ -17,7 +19,7 @@ export interface BackupPayload {
   entries: TimeEntry[];
   compensations: Compensation[];
   absences: Absence[];
-  companyCalendar?: CompanyCalendar;
+  companyCalendars?: CompanyCalendars;
 }
 
 export interface BackupSummary {
@@ -35,7 +37,7 @@ export interface ParsedBackup {
   entries: TimeEntry[];
   compensations: Compensation[];
   absences: Absence[];
-  companyCalendar?: CompanyCalendar;
+  companyCalendars?: CompanyCalendars;
   version: number;
   summary: BackupSummary;
 }
@@ -127,7 +129,7 @@ export function buildBackupPayload(data: AppData): BackupPayload {
     entries: data.entries,
     compensations: data.compensations,
     absences: data.absences ?? [],
-    companyCalendar: data.companyCalendar,
+    companyCalendars: data.companyCalendars,
   };
 }
 
@@ -175,7 +177,11 @@ export function parseBackup(
     return { ok: false, error: "bad-absences" };
   }
   const absences = (rawAbsences as Absence[] | undefined) ?? [];
-  const companyCalendar = obj.companyCalendar as CompanyCalendar | undefined;
+  // Compatibilidade: v3 lê "companyCalendars" (coleção); v2/antigos trazem
+  // "companyCalendar" (objeto único) — ambos normalizados para a coleção.
+  const companyCalendars =
+    normalizeCompanyCalendars(obj.companyCalendars) ??
+    normalizeCompanyCalendars(obj.companyCalendar);
 
   const allDates = [
     ...entries.map((e) => e.date),
@@ -194,7 +200,7 @@ export function parseBackup(
     periodTo,
   };
 
-  return { ok: true, backup: { user, entries, compensations, absences, companyCalendar, version, summary } };
+  return { ok: true, backup: { user, entries, compensations, absences, companyCalendars, version, summary } };
 }
 
 /* ──────────────────────────────────────────────────────────

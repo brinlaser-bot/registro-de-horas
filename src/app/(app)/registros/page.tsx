@@ -60,7 +60,7 @@ interface RangeSummary {
 export default function RegistrosPage() {
   const toast = useToast();
   const mounted = useIsClient();
-  const { user, entries, compensations, absences, companyCalendar } = useAppData();
+  const { user, entries, compensations, absences, companyCalendars } = useAppData();
   const todayStr = todayString();
 
   const settings: WorkSettings = settingsOf(user);
@@ -93,13 +93,13 @@ export default function RegistrosPage() {
         if (d >= range.from && d <= range.to) dates.add(d);
       }
     }
-    for (const e of companyCalendar?.entries ?? []) {
+    for (const e of (companyCalendars ?? []).flatMap((c) => c.entries)) {
       if (e.date >= range.from && e.date <= range.to) dates.add(e.date);
     }
     return [...dates]
       .sort((a, b) => b.localeCompare(a))
       .map((date) => {
-        const cctx = companyDayContext(date, entries, absences, companyCalendar, settings, date === todayStr ? nowMinutes : undefined);
+        const cctx = companyDayContext(date, entries, absences, companyCalendars, settings, date === todayStr ? nowMinutes : undefined);
         return {
           date,
           ctx: cctx.ctx,
@@ -113,7 +113,7 @@ export default function RegistrosPage() {
           absence: absenceOnDate(absences, date),
         };
       });
-  }, [entries, absences, companyCalendar, settings, range, todayStr, nowMinutes]);
+  }, [entries, absences, companyCalendars, settings, range, todayStr, nowMinutes]);
 
   // Resumo do intervalo, AGRUPADO POR CICLO ANUAL (nunca mistura pendências)
   const summaries = useMemo(() => {

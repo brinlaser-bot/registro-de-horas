@@ -83,7 +83,8 @@ export interface AppData {
   entries: TimeEntry[];
   compensations: Compensation[];
   absences: import("./absences").Absence[];
-  companyCalendar?: import("./company-calendar").CompanyCalendar;
+  /** Calendários da empresa — um por ciclo anual (01/05→30/04). */
+  companyCalendars?: import("./company-calendar").CompanyCalendar[];
 }
 
 export interface CompWithDays extends Compensation {

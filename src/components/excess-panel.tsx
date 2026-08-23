@@ -21,7 +21,7 @@ import {
 import { formatDateShortBR, formatMinutes, todayString, weekdayShort } from "@/lib/time";
 import type { Absence } from "@/lib/absences";
 import { annualCycleBounds, getAnnualPointCycle } from "@/lib/periods";
-import type { CompanyCalendar } from "@/lib/company-calendar";
+import type { CompanyCalendars } from "@/lib/company-calendar";
 import type { CompKind, Compensation, TimeEntry, WorkSettings } from "@/lib/types";
 import { Badge, Button, Card, EmptyState, ProgressBar, StatCard } from "@/components/ui";
 import { CompensationForm, type CompFormData } from "@/components/compensation-form";
@@ -30,7 +30,7 @@ interface Props {
   entries: TimeEntry[];
   compensations: Compensation[];
   absences?: Absence[];
-  companyCalendar?: CompanyCalendar;
+  companyCalendars?: CompanyCalendars;
   settings: WorkSettings;
   range: { from: string; to: string };
   monthLabel: string;
@@ -41,7 +41,7 @@ export function ExcessPanel({
   entries,
   compensations,
   absences = [],
-  companyCalendar,
+  companyCalendars,
   settings,
   range,
   monthLabel,
@@ -53,7 +53,7 @@ export function ExcessPanel({
   const [draftDebt, setDraftDebt] = useState<number | undefined>();
 
   const { excessDays, deficitDays, excessTotals, deficitTotals } = useMemo(() => {
-    const all = buildDebtDays(entries, compensations, settings, range, absences, companyCalendar);
+    const all = buildDebtDays(entries, compensations, settings, range, absences, companyCalendars);
     const ex = all.filter((d) => d.kind === "excedente");
     const df = all.filter((d) => d.kind === "deficit");
     return {
@@ -73,12 +73,12 @@ export function ExcessPanel({
 
   const calendarioDays = useMemo(() => {
     const bounds = annualCycleBounds(getAnnualPointCycle(today));
-    return buildDebtDays(entries, compensations, settings, bounds, absences, companyCalendar)
+    return buildDebtDays(entries, compensations, settings, bounds, absences, companyCalendars)
       .filter((d) => d.kind === "calendario")
       .map(acordoViewOf)
       .filter((d) => d.remainingMinutes > 0)
       .reverse();
-  }, [entries, compensations, absences, companyCalendar, settings, today]);
+  }, [entries, compensations, absences, companyCalendars, settings, today]);
 
   const openFor = (date: string, kind: CompKind) => {
     const minutes = openDebtFor(entries, compensations, settings, date, kind);

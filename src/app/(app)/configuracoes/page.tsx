@@ -14,12 +14,14 @@ import { buildBackupPayload } from "@/lib/backup";
 import {
   buildCompanyCalendar,
   CALENDAR_HEADER,
+  cycleStatusOf,
   exportCompanyCalendarCsv,
   parseCompanyCalendarCsv,
   statsOf,
   type CalendarImportPreview,
+  type CompanyCalendar,
 } from "@/lib/company-calendar";
-import { expectedMinutesOf, formatMinutes } from "@/lib/time";
+import { expectedMinutesOf, formatMinutes, todayString } from "@/lib/time";
 import { Button, Card, Input, Select, Skeleton, Toggle } from "@/components/ui";
 import { ImportBackupModal } from "@/components/import-backup-modal";
 import { useToast } from "@/components/toast";
@@ -27,7 +29,7 @@ import { useToast } from "@/components/toast";
 export default function ConfiguracoesPage() {
   const toast = useToast();
   const mounted = useIsClient();
-  const { user, entries, compensations, companyCalendar } = useAppData();
+  const { user, entries, compensations, companyCalendars } = useAppData();
 
   const [profile, setProfile] = useState({ name: "", email: "" });
   const [schedule, setSchedule] = useState({
@@ -42,7 +44,9 @@ export default function ConfiguracoesPage() {
   const [busySchedule, setBusySchedule] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [calPreview, setCalPreview] = useState<CalendarImportPreview | null>(null);
-  const [showCalendar, setShowCalendar] = useState(false);
+  /** De onde veio o arquivo em prévia: novo ciclo ou substituição de um ciclo específico. */
+  const [importMode, setImportMode] = useState<{ type: "add" } | { type: "replace"; cycleStart: string }>({ type: "add" });
+  const [showCalendarFor, setShowCalendarFor] = useState<string | null>(null);
   const calendarFileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -113,9 +117,18 @@ export default function ConfiguracoesPage() {
     URL.revokeObjectURL(url);
   };
 
-  const exportCalendar = () => {
-    downloadText("calendario-meu-horario.csv", exportCompanyCalendarCsv(companyCalendar));
-    toast.show("Calendário exportado!");
+  /** Exporta SOMENTE o ciclo informado (arquivo reimportável). */
+  const exportCalendar = (calendar: CompanyCalendar) => {
+    downloadText(
+      `calendario-${calendar.cycleLabel}-meu-horario.csv`,
+      exportCompanyCalendarCsv(calendar),
+    );
+    toast.show(`Calendário ${calendar.cycleLabel} exportado!`);
+  };
+
+  const pickCalendarFile = (mode: { type: "add" } | { type: "replace"; cycleStart: string }) => {
+    setImportMode(mode);
+    calendarFileRef.current?.click();
   };
 
   const importCalendarFile = (file: File) => {
@@ -129,18 +142,47 @@ export default function ConfiguracoesPage() {
     reader.readAsText(file);
   };
 
+  const previewCycleExists =
+    calPreview?.ok && calPreview.cycle
+      ? (companyCalendars ?? []).some((c) => c.cycleStart === calPreview.cycle!.start)
+      : false;
+  const previewCycleMismatch =
+    calPreview?.ok && importMode.type === "replace" && calPreview.cycle
+      ? calPreview.cycle.start !== importMode.cycleStart
+      : false;
+
+  /** Confirmar importação de NOVO ciclo (nunca apaga ciclos anteriores). */
   const confirmCalendarImport = () => {
     if (!calPreview?.ok) return;
-    actions.setCompanyCalendar(buildCompanyCalendar(calPreview.entries));
+    const res = actions.addCompanyCalendar(buildCompanyCalendar(calPreview.entries));
+    if (!res.ok) {
+      toast.show(res.error ?? "Não foi possível adicionar.", "error");
+      return;
+    }
     setCalPreview(null);
-    toast.show("Calendário importado com sucesso.");
+    toast.show(`Calendário ${calPreview.cycle?.label ?? ""} importado com sucesso.`);
   };
 
-  const removeCalendar = () => {
-    if (!window.confirm("Excluir o calendário da empresa importado?")) return;
-    actions.clearCompanyCalendar();
-    toast.show("Calendário removido.");
+  /** Substituir SOMENTE o calendário do ciclo detectado no arquivo. */
+  const confirmCalendarReplace = () => {
+    if (!calPreview?.ok) return;
+    actions.replaceCompanyCalendar(buildCompanyCalendar(calPreview.entries));
+    setCalPreview(null);
+    toast.show(`Calendário ${calPreview.cycle?.label ?? ""} substituído com sucesso.`);
   };
+
+  const removeCalendar = (calendar: CompanyCalendar) => {
+    if (
+      !window.confirm(
+        `Excluir o calendário ${calendar.cycleLabel}?\n\nOs registros de ponto não serão apagados, mas as regras históricas de feriados, abonos e compensações desse ciclo deixarão de estar disponíveis.`,
+      )
+    )
+      return;
+    actions.removeCompanyCalendar(calendar.cycleStart);
+    toast.show(`Calendário ${calendar.cycleLabel} removido.`);
+  };
+
+  const formatDateBR = (d: string) => `${d.slice(8, 10)}/${d.slice(5, 7)}/${d.slice(0, 4)}`;
 
   if (!mounted) {
     return (
@@ -223,10 +265,16 @@ export default function ConfiguracoesPage() {
         </div>
       </Card>
 
-      {/* Calendário da empresa */}
+      {/* Calendários da empresa — um por ciclo anual (01/05 → 30/04) */}
       <Card
-        title="Calendário da empresa"
-        subtitle="Importe feriados, abonos, folgas a compensar e recessos por CSV (100% localStorage)"
+        title="Calendários da empresa"
+        subtitle="Um calendário por ciclo anual: importar um novo ciclo NUNCA apaga os anteriores (100% localStorage)"
+        actions={
+          <div className="flex flex-wrap gap-2">
+            <Button variant="secondary" size="sm" onClick={() => downloadText("modelo-calendario-meu-horario.csv", CALENDAR_HEADER + "\n")}>Baixar modelo vazio</Button>
+            <Button size="sm" onClick={() => pickCalendarFile({ type: "add" })}>+ Adicionar calendário</Button>
+          </div>
+        }
       >
         <input
           ref={calendarFileRef}
@@ -240,52 +288,91 @@ export default function ConfiguracoesPage() {
           }}
         />
 
-        {companyCalendar ? (() => {
-          const st = statsOf(companyCalendar.entries);
-          return (
-            <div className="grid gap-3 sm:grid-cols-4">
-              <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
-                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Datas</p>
-                <p className="text-xl font-extrabold text-slate-900">{st.count}</p>
-              </div>
-              <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
-                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">A compensar</p>
-                <p className="text-xl font-extrabold text-amber-600">{formatMinutes(st.totalCompensar)}</p>
-              </div>
-              <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
-                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Abonadas</p>
-                <p className="text-xl font-extrabold text-emerald-600">{formatMinutes(st.totalAbonado)}</p>
-              </div>
-              <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
-                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Importado em</p>
-                <p className="text-xs font-bold text-slate-700">{new Date(companyCalendar.importedAt).toLocaleString("pt-BR")}</p>
-              </div>
-            </div>
-          );
-        })() : (
+        {(companyCalendars ?? []).length === 0 ? (
           <p className="rounded-xl border border-dashed border-slate-300 bg-slate-50/70 p-4 text-sm text-slate-500">
             Nenhum calendário importado ainda.
           </p>
-        )}
+        ) : (
+          <div className="space-y-4">
+            {(companyCalendars ?? []).map((cal) => {
+              const st = statsOf(cal.entries);
+              const status = cycleStatusOf(cal, todayString());
+              return (
+                <div key={cal.cycleStart} className="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-sm font-extrabold uppercase tracking-wide text-slate-800">
+                      Calendário {cal.cycleLabel}
+                    </p>
+                    <span className="text-xs font-medium text-slate-400">
+                      {formatDateBR(cal.cycleStart)} → {formatDateBR(cal.cycleEnd)}
+                    </span>
+                    <span
+                      className={`ml-auto inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-bold ${
+                        status === "atual"
+                          ? "bg-emerald-100 text-emerald-700"
+                          : status === "futuro"
+                            ? "bg-indigo-100 text-indigo-700"
+                            : "bg-slate-200 text-slate-500"
+                      }`}
+                    >
+                      {status === "atual" ? "Ciclo atual" : status === "futuro" ? "Ciclo futuro" : "Ciclo encerrado"}
+                    </span>
+                  </div>
 
-        <div className="mt-4 flex flex-wrap gap-2">
-          <Button variant="secondary" size="sm" onClick={() => downloadText("modelo-calendario-meu-horario.csv", CALENDAR_HEADER + "\n")}>Baixar modelo vazio</Button>
-          <Button size="sm" onClick={() => calendarFileRef.current?.click()}>Importar calendário</Button>
-          <Button variant="secondary" size="sm" disabled={!companyCalendar} onClick={() => setShowCalendar(!showCalendar)}>Ver calendário</Button>
-          <Button variant="secondary" size="sm" disabled={!companyCalendar} onClick={exportCalendar}>Exportar calendário atual</Button>
-          <Button variant="secondary" size="sm" onClick={() => calendarFileRef.current?.click()}>Substituir calendário</Button>
-          <Button variant="danger" size="sm" disabled={!companyCalendar} onClick={removeCalendar}>Excluir calendário</Button>
-        </div>
+                  <div className="mt-3 grid gap-3 sm:grid-cols-4">
+                    <div className="rounded-xl border border-slate-200 bg-white/70 p-3">
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Datas</p>
+                      <p className="text-xl font-extrabold text-slate-900">{st.count}</p>
+                    </div>
+                    <div className="rounded-xl border border-slate-200 bg-white/70 p-3">
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">A compensar</p>
+                      <p className="text-xl font-extrabold text-amber-600">{formatMinutes(st.totalCompensar)}</p>
+                    </div>
+                    <div className="rounded-xl border border-slate-200 bg-white/70 p-3">
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Abonadas</p>
+                      <p className="text-xl font-extrabold text-emerald-600">{formatMinutes(st.totalAbonado)}</p>
+                    </div>
+                    <div className="rounded-xl border border-slate-200 bg-white/70 p-3">
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Importado em</p>
+                      <p className="text-xs font-bold text-slate-700">{new Date(cal.importedAt).toLocaleString("pt-BR")}</p>
+                    </div>
+                  </div>
+
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <Button variant="secondary" size="sm" onClick={() => setShowCalendarFor(showCalendarFor === cal.cycleStart ? null : cal.cycleStart)}>Ver calendário</Button>
+                    <Button variant="secondary" size="sm" onClick={() => exportCalendar(cal)}>Exportar</Button>
+                    <Button variant="secondary" size="sm" onClick={() => pickCalendarFile({ type: "replace", cycleStart: cal.cycleStart })}>Substituir</Button>
+                    <Button variant="danger" size="sm" onClick={() => removeCalendar(cal)}>Excluir</Button>
+                  </div>
+
+                  {showCalendarFor === cal.cycleStart && (
+                    <div className="mt-3 max-h-60 overflow-auto rounded-xl border border-slate-200 bg-white">
+                      <table className="w-full min-w-[720px] text-xs">
+                        <thead className="text-left text-slate-400"><tr><th className="p-2">Data</th><th>Descrição</th><th>Categoria</th><th>Tratamento</th><th>Compensar</th><th>Abonado</th><th>Obs.</th></tr></thead>
+                        <tbody>
+                          {cal.entries.map((e) => (
+                            <tr key={e.date} className="border-t border-slate-100"><td className="p-2 font-bold">{e.date}</td><td>{e.descricao}</td><td>{e.categoria}</td><td>{e.tratamento}</td><td>{formatMinutes(e.horasACompensar*60)}</td><td>{formatMinutes(e.horasAbonadas*60)}</td><td>{e.observacao}</td></tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
 
         {calPreview && (
           <div className={`mt-4 rounded-xl border p-3 ${calPreview.ok ? "border-emerald-200 bg-emerald-50" : "border-rose-200 bg-rose-50"}`}>
             <p className={`text-sm font-bold ${calPreview.ok ? "text-emerald-700" : "text-rose-700"}`}>
-              {calPreview.ok ? "Importação do calendário" : calPreview.error}
+              {calPreview.ok ? "Importação de calendário" : calPreview.error}
             </p>
             {calPreview.ok && (
               <>
                 <p className="mt-1 text-xs text-emerald-700">
-                  {calPreview.stats.count} datas encontradas · {calPreview.stats.compensar} com obrigação · Total a compensar {formatMinutes(calPreview.stats.totalCompensar)} · Abonadas {formatMinutes(calPreview.stats.totalAbonado)}
+                  Ciclo detectado: <b>{calPreview.cycle?.label}</b> ({calPreview.cycle ? `${formatDateBR(calPreview.cycle.start)} → ${formatDateBR(calPreview.cycle.end)}` : ""})
+                  {" · "}{calPreview.stats.count} datas · {calPreview.stats.compensar} com obrigação · A compensar {formatMinutes(calPreview.stats.totalCompensar)} · Abonadas {formatMinutes(calPreview.stats.totalAbonado)}
                 </p>
                 <div className="mt-3 max-h-48 overflow-auto rounded-lg bg-white/70 ring-1 ring-emerald-200">
                   <table className="w-full min-w-[640px] text-xs">
@@ -299,25 +386,37 @@ export default function ConfiguracoesPage() {
                     </tbody>
                   </table>
                 </div>
-                <div className="mt-3 flex gap-2">
-                  <Button variant="secondary" size="sm" onClick={() => setCalPreview(null)}>Cancelar</Button>
-                  <Button size="sm" onClick={confirmCalendarImport}>Confirmar importação</Button>
-                </div>
+
+                {previewCycleMismatch ? (
+                  <>
+                    <p className="mt-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800">
+                      Este arquivo pertence ao ciclo {calPreview.cycle?.label}, mas você escolheu substituir outro ciclo.
+                      Importe o arquivo correto ou cancele.
+                    </p>
+                    <div className="mt-3 flex gap-2">
+                      <Button variant="secondary" size="sm" onClick={() => setCalPreview(null)}>Cancelar</Button>
+                    </div>
+                  </>
+                ) : previewCycleExists && importMode.type === "add" ? (
+                  <>
+                    <p className="mt-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800">
+                      Já existe um calendário para o ciclo {calPreview.cycle?.label}. Nada será duplicado.
+                    </p>
+                    <div className="mt-3 flex gap-2">
+                      <Button variant="secondary" size="sm" onClick={() => setCalPreview(null)}>Cancelar</Button>
+                      <Button variant="danger" size="sm" onClick={confirmCalendarReplace}>Substituir calendário deste ciclo</Button>
+                    </div>
+                  </>
+                ) : (
+                  <div className="mt-3 flex gap-2">
+                    <Button variant="secondary" size="sm" onClick={() => setCalPreview(null)}>Cancelar</Button>
+                    <Button size="sm" onClick={importMode.type === "replace" ? confirmCalendarReplace : confirmCalendarImport}>
+                      {importMode.type === "replace" ? "Confirmar substituição" : "Confirmar importação"}
+                    </Button>
+                  </div>
+                )}
               </>
             )}
-          </div>
-        )}
-
-        {showCalendar && companyCalendar && (
-          <div className="mt-4 max-h-60 overflow-auto rounded-xl border border-slate-200 bg-white">
-            <table className="w-full min-w-[720px] text-xs">
-              <thead className="text-left text-slate-400"><tr><th className="p-2">Data</th><th>Descrição</th><th>Categoria</th><th>Tratamento</th><th>Compensar</th><th>Abonado</th><th>Obs.</th></tr></thead>
-              <tbody>
-                {companyCalendar.entries.map((e) => (
-                  <tr key={e.date} className="border-t border-slate-100"><td className="p-2 font-bold">{e.date}</td><td>{e.descricao}</td><td>{e.categoria}</td><td>{e.tratamento}</td><td>{formatMinutes(e.horasACompensar*60)}</td><td>{formatMinutes(e.horasAbonadas*60)}</td><td>{e.observacao}</td></tr>
-                ))}
-              </tbody>
-            </table>
           </div>
         )}
       </Card>

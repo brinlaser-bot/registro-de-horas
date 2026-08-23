@@ -1,5 +1,6 @@
 import { computeDay, expectedMinutesOf, formatMinutes, parseDate, type WorkSettings } from "./time";
 import { absenceLabel, dayContext, regularBalanceContribution, type Absence, type DayBalanceView, type DayContext } from "./absences";
+import { annualCycleBounds, getAnnualPointCycle } from "./periods";
 import type { Compensation, DayResult, TimeEntry } from "./types";
 
 /** Tipo consolidado do dia da empresa (apresentação central). */
@@ -27,16 +28,40 @@ export interface CompanyCalendarEntry {
   observacao: string | null;
 }
 
+/**
+ * Calendário da empresa de UM ciclo anual (01/05/YYYY → 30/04/YYYY+1).
+ * O sistema mantém UMA COLEÇÃO persistida (companyCalendars) — um calendário
+ * por ciclo — preservando o histórico de ciclos encerrados.
+ */
 export interface CompanyCalendar {
+  /** Id estável do calendário (igual a cycleStart — único por ciclo). */
+  id: string;
+  /** Início do ciclo anual: "YYYY-05-01". */
+  cycleStart: string;
+  /** Fim do ciclo anual: "(YYYY+1)-04-30". */
+  cycleEnd: string;
+  /** Rótulo do ciclo para exibição. Ex.: "2025–2026". */
+  cycleLabel: string;
   version: number;
   importedAt: string;
   entries: CompanyCalendarEntry[];
+}
+
+/** Coleção de calendários (um por ciclo anual). */
+export type CompanyCalendars = CompanyCalendar[];
+
+export interface CalendarCycleInfo {
+  start: string;
+  end: string;
+  label: string;
 }
 
 export interface CalendarImportPreview {
   ok: boolean;
   error?: string;
   entries: CompanyCalendarEntry[];
+  /** Ciclo anual detectado pelas datas do arquivo (regra 01/05→30/04). */
+  cycle?: CalendarCycleInfo;
   stats: {
     count: number;
     abonados: number;
@@ -195,8 +220,22 @@ export function parseCompanyCalendarCsv(text: string, settings: WorkSettings): C
     });
   }
 
+  // Um arquivo = um único ciclo anual (nunca dividir silenciosamente)
+  const foundCycles = [...new Set(entries.map((e) => getAnnualPointCycle(e.date)))].sort();
+  if (foundCycles.length > 1) {
+    return {
+      ok: false,
+      error: `Este arquivo contém datas de mais de um ciclo anual (${foundCycles
+        .map((c) => c.replace("/", "–"))
+        .join(", ")}). Importe um calendário por ciclo.`,
+      entries: [],
+      stats: emptyStats(),
+    };
+  }
+  const cycle = foundCycles.length === 1 ? calendarCycleOf(entries[0].date) : undefined;
+
   const stats = statsOf(entries);
-  return { ok: true, entries, stats };
+  return { ok: true, entries, cycle, stats };
 
   function fail(lineNo: number, msg: string): CalendarImportPreview {
     return { ok: false, error: `Linha ${lineNo} — ${msg}`, entries: [], stats: emptyStats() };
@@ -217,8 +256,76 @@ export function statsOf(entries: CompanyCalendarEntry[]) {
   };
 }
 
+/* ── Ciclos anuais (01/05 → 30/04) — helpers centrais ─────
+ * Toda resolução de ciclo passa por aqui: componentes nunca calculam ciclo.
+ */
+
+/** Ciclo anual ao qual a data pertence (início, fim e rótulo de exibição). */
+export function calendarCycleOf(date: string): CalendarCycleInfo {
+  const cycle = getAnnualPointCycle(date); // "2025/2026"
+  const { from, to } = annualCycleBounds(cycle);
+  return { start: from, end: to, label: cycle.replace("/", "–") };
+}
+
 export function buildCompanyCalendar(entries: CompanyCalendarEntry[]): CompanyCalendar {
-  return { version: 1, importedAt: new Date().toISOString(), entries };
+  const cycle = calendarCycleOf(entries[0]?.date ?? new Date().toISOString().slice(0, 10));
+  return { id: cycle.start, cycleStart: cycle.start, cycleEnd: cycle.end, cycleLabel: cycle.label, version: 2, importedAt: new Date().toISOString(), entries };
+}
+
+/**
+ * MIGRAÇÃO/normalização: aceita o formato antigo (companyCalendar único,
+ * possivelmente sem campos de ciclo) e devolve a coleção normalizada.
+ * Usada na leitura do localStorage e na importação de backups antigos.
+ */
+export function normalizeCompanyCalendars(value: unknown): CompanyCalendar[] | undefined {
+  if (value === undefined || value === null) return undefined;
+  // Formato antigo: objeto único com entries (sem ou com campos de ciclo)
+  const single = value as Partial<CompanyCalendar>;
+  if (!Array.isArray(value) && Array.isArray(single.entries)) {
+    const cycle = calendarCycleOf((single.entries[0]?.date as string) ?? new Date().toISOString().slice(0, 10));
+    return [{
+      id: single.id ?? cycle.start,
+      cycleStart: single.cycleStart ?? cycle.start,
+      cycleEnd: single.cycleEnd ?? cycle.end,
+      cycleLabel: single.cycleLabel ?? cycle.label,
+      version: 2,
+      importedAt: single.importedAt ?? new Date().toISOString(),
+      entries: single.entries,
+    }];
+  }
+  if (Array.isArray(value)) {
+    return value.map((c) => {
+      const cycle = calendarCycleOf(c.entries?.[0]?.date ?? c.cycleStart ?? new Date().toISOString().slice(0, 10));
+      return {
+        id: c.id ?? cycle.start,
+        cycleStart: c.cycleStart ?? cycle.start,
+        cycleEnd: c.cycleEnd ?? cycle.end,
+        cycleLabel: c.cycleLabel ?? cycle.label,
+        version: 2,
+        importedAt: c.importedAt ?? new Date().toISOString(),
+        entries: c.entries ?? [],
+      };
+    });
+  }
+  return undefined;
+}
+
+/** FUNÇÃO CENTRAL: calendário (ciclo) responsável por uma data. */
+export function companyCalendarForDate(
+  date: string,
+  calendars: CompanyCalendars | undefined,
+): CompanyCalendar | undefined {
+  return calendars?.find((c) => date >= c.cycleStart && date <= c.cycleEnd);
+}
+
+/** Status de apresentação do ciclo em relação à data atual. */
+export function cycleStatusOf(
+  calendar: CompanyCalendar,
+  today: string,
+): "atual" | "encerrado" | "futuro" {
+  if (today > calendar.cycleEnd) return "encerrado";
+  if (today < calendar.cycleStart) return "futuro";
+  return "atual";
 }
 
 export function exportCompanyCalendarCsv(calendar: CompanyCalendar | undefined): string {
@@ -243,8 +350,8 @@ function csvCell(v: unknown): string {
   return /[;,"\n]/.test(s) ? `"${s.replaceAll('"', '""')}"` : s;
 }
 
-export function entryOnDate(calendar: CompanyCalendar | undefined, date: string): CompanyCalendarEntry | undefined {
-  return calendar?.entries.find((e) => e.date === date);
+export function entryOnDate(calendars: CompanyCalendars | undefined, date: string): CompanyCalendarEntry | undefined {
+  return companyCalendarForDate(date, calendars)?.entries.find((e) => e.date === date);
 }
 
 /**
@@ -261,11 +368,11 @@ export function companyDayContext(
   date: string,
   entries: TimeEntry[],
   absences: Absence[],
-  calendar: CompanyCalendar | undefined,
+  calendars: CompanyCalendars | undefined,
   settings: WorkSettings,
   nowMinutes?: number,
 ): CalendarDayView {
-  const calendarEntry = entryOnDate(calendar, date);
+  const calendarEntry = entryOnDate(calendars, date);
   const baseCtx = dayContext(date, entries, absences, settings, nowMinutes);
   const day = baseCtx.day;
   const worked = day.workedMinutes;

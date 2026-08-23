@@ -9,7 +9,7 @@ import { absencesEqual, compsEqual, entriesEqual, mergeByIdAndContent } from "./
 import { canCompleteComp, extraCapacityForDate } from "./debt";
 import { validateAbsence, type Absence, type AbsenceSplit } from "./absences";
 import { sameAnnualCycle } from "./periods";
-import type { CompanyCalendar } from "./company-calendar";
+import { normalizeCompanyCalendars, type CompanyCalendar, type CompanyCalendars } from "./company-calendar";
 
 /** Resultado estruturado de operações que podem ser rejeitadas por validação. */
 export interface ActionResult {
@@ -57,7 +57,7 @@ const pristine: AppData = {
   entries: [],
   compensations: [],
   absences: [],
-  companyCalendar: undefined,
+  companyCalendars: undefined,
 };
 
 let data: AppData = pristine;
@@ -91,7 +91,14 @@ function load() {
         Array.isArray(parsed.compensations)
       ) {
         // Retrocompatibilidade: dados antigos podem não ter "absences"
-        data = { ...parsed, absences: Array.isArray(parsed.absences) ? parsed.absences : [] };
+        const absences = Array.isArray(parsed.absences) ? parsed.absences : [];
+        // MIGRAÇÃO multi-calendário: formato antigo { companyCalendar } (único)
+        // vira coleção { companyCalendars } com ciclos normalizados na leitura.
+        const legacy = parsed as unknown as { companyCalendar?: unknown; companyCalendars?: unknown };
+        const companyCalendars =
+          normalizeCompanyCalendars(legacy.companyCalendars) ??
+          normalizeCompanyCalendars(legacy.companyCalendar);
+        data = { user: parsed.user, entries: parsed.entries, compensations: parsed.compensations, absences, companyCalendars };
         emit();
         return;
       }
@@ -445,7 +452,7 @@ export const actions = {
    * Mescla o backup com os dados atuais, preservando eventos distintos.
    * Deduplicação segura via ID + conteúdo completo (nunca apenas dias/minutos).
    */
-  mergeBackup(p: { entries: TimeEntry[]; compensations: Compensation[]; absences?: Absence[]; companyCalendar?: CompanyCalendar }) {
+  mergeBackup(p: { entries: TimeEntry[]; compensations: Compensation[]; absences?: Absence[]; companyCalendars?: CompanyCalendars }) {
     mutate((d) => {
       const entryMerge = mergeByIdAndContent(d.entries, p.entries, entriesEqual);
       const compMerge = mergeByIdAndContent(d.compensations, p.compensations, compsEqual);
@@ -455,23 +462,51 @@ export const actions = {
         p.absences ?? [],
         absencesEqual,
       );
+      // Calendários: união POR CICLO — nunca apaga ciclos existentes;
+      // em conflito de ciclo, o calendário local já importado prevalece.
+      const current = d.companyCalendars ?? [];
+      const mergedCalendars = [...current];
+      for (const c of p.companyCalendars ?? []) {
+        if (!mergedCalendars.some((m) => m.cycleStart === c.cycleStart)) mergedCalendars.push(c);
+      }
       return {
         ...d,
         entries: entryMerge.merged,
         compensations: compMerge.merged,
         absences: absenceMerge.merged,
-        companyCalendar: d.companyCalendar ?? p.companyCalendar,
+        companyCalendars: mergedCalendars.length > 0 ? mergedCalendars : undefined,
       };
     });
   },
 
-  setCompanyCalendar(calendar: CompanyCalendar): ActionResult {
-    mutate((d) => ({ ...d, companyCalendar: calendar }));
+  /**
+   * Adiciona o calendário de um NOVO ciclo. Recusa duplicidade de ciclo:
+   * para trocar o calendário de um ciclo existente use replaceCompanyCalendar.
+   */
+  addCompanyCalendar(calendar: CompanyCalendar): ActionResult {
+    const existing = getAppData().companyCalendars ?? [];
+    if (existing.some((c) => c.cycleStart === calendar.cycleStart)) {
+      return { ok: false, code: "overlap", error: `Já existe um calendário para o ciclo ${calendar.cycleLabel}.` };
+    }
+    mutate((d) => ({ ...d, companyCalendars: [...(d.companyCalendars ?? []), calendar].sort((a, b) => a.cycleStart.localeCompare(b.cycleStart)) }));
     return OK;
   },
 
-  clearCompanyCalendar(): ActionResult {
-    mutate((d) => ({ ...d, companyCalendar: undefined }));
+  /** Substitui SOMENTE o calendário do mesmo ciclo (demais ciclos intactos). */
+  replaceCompanyCalendar(calendar: CompanyCalendar): ActionResult {
+    mutate((d) => {
+      const list = (d.companyCalendars ?? []).filter((c) => c.cycleStart !== calendar.cycleStart);
+      return { ...d, companyCalendars: [...list, calendar].sort((a, b) => a.cycleStart.localeCompare(b.cycleStart)) };
+    });
+    return OK;
+  },
+
+  /** Remove SOMENTE o calendário do ciclo informado (registros de ponto intactos). */
+  removeCompanyCalendar(cycleStart: string): ActionResult {
+    mutate((d) => {
+      const list = (d.companyCalendars ?? []).filter((c) => c.cycleStart !== cycleStart);
+      return { ...d, companyCalendars: list.length > 0 ? list : undefined };
+    });
     return OK;
   },
 };

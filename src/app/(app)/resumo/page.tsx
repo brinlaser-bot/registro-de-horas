@@ -58,23 +58,23 @@ interface DayRow {
 
 export default function ResumoPage() {
   const mounted = useIsClient();
-  const { user, entries, compensations, absences, companyCalendar } = useAppData();
+  const { user, entries, compensations, absences, companyCalendars } = useAppData();
   const settings = settingsOf(user);
   const [period, setPeriod] = useState<PointPeriod>(() => getPointPeriod(new Date().toISOString().slice(0, 10)));
 
   // Visão central dos acordos do período (original/compensado/planejado/restante)
   const acordoByDate = useMemo(() => {
     const map = new Map<string, AcordoView>();
-    for (const d of buildDebtDays(entries, compensations, settings, period, absences, companyCalendar)) {
+    for (const d of buildDebtDays(entries, compensations, settings, period, absences, companyCalendars)) {
       if (d.kind === "acordo") map.set(d.date, acordoViewOf(d));
     }
     return map;
-  }, [entries, compensations, absences, companyCalendar, settings, period]);
+  }, [entries, compensations, absences, companyCalendars, settings, period]);
 
   const allDays: DayRow[] = useMemo(() => {
     return listDaysBetween(period.from, period.to)
       .map((date) => {
-        const cctx = companyDayContext(date, entries, absences, companyCalendar, settings);
+        const cctx = companyDayContext(date, entries, absences, companyCalendars, settings);
         const ctx = cctx.ctx;
         const absence = absenceOnDate(absences, date);
         return {

@@ -59,7 +59,7 @@ function toSummary(d: DayResult, date?: string): DaySummary {
 export default function DashboardPage() {
   const toast = useToast();
   const mounted = useIsClient();
-  const { user, entries, compensations, absences, companyCalendar } = useAppData();
+  const { user, entries, compensations, absences, companyCalendars } = useAppData();
   const settings = settingsOf(user);
   const todayStr = todayString();
   const period = getPointPeriod(todayStr);
@@ -105,7 +105,7 @@ export default function DashboardPage() {
       { trackedDays: 0, workedTotal: 0, registrableTotal: 0, balanceTotal: 0, excessTotal: 0 },
     );
 
-    const tCtx = companyDayContext(todayStr, entries, absences, companyCalendar, settings, nowMinutes);
+    const tCtx = companyDayContext(todayStr, entries, absences, companyCalendars, settings, nowMinutes);
     const todays = tCtx.displayDay;
 
     const recents: DaySummary[] = [];
@@ -121,7 +121,7 @@ export default function DashboardPage() {
       .sort((a, b) => a.targetDate.localeCompare(b.targetDate));
 
     return { monthDays: days, totals: sum, today: todays, todayCtx: tCtx, recent: recents, pending: pend };
-  }, [entries, compensations, absences, companyCalendar, settings, period, todayStr, nowMinutes]);
+  }, [entries, compensations, absences, companyCalendars, settings, period, todayStr, nowMinutes]);
 
   const range = period;
 
@@ -339,7 +339,7 @@ export default function DashboardPage() {
             entries={entries}
             compensations={compensations}
             absences={absences}
-            companyCalendar={companyCalendar}
+            companyCalendars={companyCalendars}
             settings={settings}
             range={range}
             monthLabel={periodLabel(period)}

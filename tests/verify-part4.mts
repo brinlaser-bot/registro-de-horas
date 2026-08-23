@@ -95,9 +95,10 @@ const csv = readFileSync(new URL("./fixtures/calendario-sebrae-2025-2026.csv", i
 const preview = parseCompanyCalendarCsv(csv, settings);
 assert.equal(preview.ok, true, `CSV inválido: ${preview.error}`);
 const cal: CompanyCalendar = buildCompanyCalendar(preview.entries);
+const CALS: CompanyCalendar[] = [cal];
 
-const cctx = (date: string, entries: TimeEntry[] = [], absences: Absence[] = [], calendar: CompanyCalendar | undefined = cal) =>
-  companyDayContext(date, entries, absences, calendar, settings);
+const cctx = (date: string, entries: TimeEntry[] = [], absences: Absence[] = [], calendars: CompanyCalendar[] | undefined = CALS) =>
+  companyDayContext(date, entries, absences, calendars, settings);
 
 const results: string[] = [];
 const check = (id: string, fn: () => void) => {
@@ -204,7 +205,7 @@ check("I. feriado em sábado (15/11/2025): abonado 0, carga 0", () => {
 
 /* ── J. Calendário a compensar: kind "calendario" ──────── */
 check("J. obrigação de calendário gera kind \"calendario\" (recesso 12/2025)", () => {
-  const days = buildDebtDays([], [], settings, { from: "2025-12-22", to: "2025-12-23" }, [], cal);
+  const days = buildDebtDays([], [], settings, { from: "2025-12-22", to: "2025-12-23" }, [], CALS);
   const calDays = days.filter((d) => d.kind === "calendario");
   assert.equal(calDays.length, 2);
   assert.deepEqual(calDays.map((d) => d.debtMinutes), [480, 480]);
@@ -300,9 +301,9 @@ check("R. fechamento anual 30/04→01/05: obrigação de calendário não cruza 
   assert.equal(annualCycleClose(getAnnualPointCycle("2026-04-30")), "2026-04-30");
   assert.equal(nextCycleStart(getAnnualPointCycle("2026-04-30")), "2026-05-01");
   // Obrigação de 20/04/2026 existe só no ciclo anterior:
-  const antes = buildDebtDays([], [], settings, { from: "2026-04-01", to: "2026-04-30" }, [], cal);
+  const antes = buildDebtDays([], [], settings, { from: "2026-04-01", to: "2026-04-30" }, [], CALS);
   assert.deepEqual(antes.filter((d) => d.kind === "calendario").map((d) => d.date), ["2026-04-02", "2026-04-20"]);
-  const depois = buildDebtDays([], [], settings, { from: "2026-05-01", to: "2026-05-31" }, [], cal);
+  const depois = buildDebtDays([], [], settings, { from: "2026-05-01", to: "2026-05-31" }, [], CALS);
   assert.equal(depois.filter((d) => d.kind === "calendario").length, 0);
 });
 
@@ -318,7 +319,7 @@ check("S. backup v1/antigo sem calendário importa normalmente", () => {
   const r = parseBackup(JSON.stringify(old));
   assert.equal(r.ok, true);
   if (r.ok) {
-    assert.equal(r.backup.companyCalendar, undefined);
+    assert.equal(r.backup.companyCalendars, undefined);
     assert.deepEqual(r.backup.absences, []);
     assert.equal(r.backup.entries.length, 2);
   }
@@ -326,13 +327,14 @@ check("S. backup v1/antigo sem calendário importa normalmente", () => {
 
 /* ── T. Backup com calendário: restaura calendário ─────── */
 check("T. backup com calendário: ida e volta preserva as 37 datas/148h", () => {
-  const payload = buildBackupPayload({ user, entries: [], compensations: [], absences: [], companyCalendar: cal });
+  const payload = buildBackupPayload({ user, entries: [], compensations: [], absences: [], companyCalendars: CALS });
   const r = parseBackup(JSON.stringify(payload));
   assert.equal(r.ok, true);
   if (r.ok) {
-    assert.equal(r.backup.companyCalendar?.entries.length, 37);
-    assert.equal(statsOf(r.backup.companyCalendar!.entries).totalCompensar, 148 * 60);
-    assert.equal(statsOf(r.backup.companyCalendar!.entries).totalAbonado, 96 * 60);
+    assert.equal(r.backup.companyCalendars?.length, 1);
+    assert.equal(r.backup.companyCalendars?.[0].entries.length, 37);
+    assert.equal(statsOf(r.backup.companyCalendars![0].entries).totalCompensar, 148 * 60);
+    assert.equal(statsOf(r.backup.companyCalendars![0].entries).totalAbonado, 96 * 60);
   }
 });
 

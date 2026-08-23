@@ -1,7 +1,7 @@
 // Matemática de dívida de horas: abatimento fracionado + sugestões inteligentes.
 import { computeDay, expectedMinutesOf, formatDateBR, formatMinutes } from "./time";
 import { dayContext, type Absence } from "./absences";
-import { companyDayContext, type CompanyCalendar } from "./company-calendar";
+import { companyDayContext, type CompanyCalendars } from "./company-calendar";
 import { sameAnnualCycle } from "./periods";
 import type {
   CompKind,
@@ -64,7 +64,7 @@ export function buildDebtDays(
   settings: WorkSettings,
   range?: { from: string; to: string },
   absences: Absence[] = [],
-  companyCalendar?: CompanyCalendar,
+  companyCalendars?: CompanyCalendars,
 ): DebtDay[] {
   // Datas relevantes: com batidas OU cobertas por ausência (acordo sem batidas conta)
   const dates = new Set<string>();
@@ -79,15 +79,17 @@ export function buildDebtDays(
       cur = addOneDay(cur);
     }
   }
-  for (const e of companyCalendar?.entries ?? []) {
-    if (!range || (e.date >= range.from && e.date <= range.to)) dates.add(e.date);
+  for (const cal of companyCalendars ?? []) {
+    for (const e of cal.entries) {
+      if (!range || (e.date >= range.from && e.date <= range.to)) dates.add(e.date);
+    }
   }
 
   const out: DebtDay[] = [];
 
   for (const date of dates) {
-    const cctx = companyCalendar
-      ? companyDayContext(date, entries, absences, companyCalendar, settings)
+    const cctx = companyCalendars
+      ? companyDayContext(date, entries, absences, companyCalendars, settings)
       : null;
     const ctx = cctx?.ctx ?? dayContext(date, entries, absences, settings);
     const day = ctx.day;

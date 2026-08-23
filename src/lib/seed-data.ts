@@ -105,5 +105,5 @@ export function buildSeedData(): AppData {
     },
   ];
 
-  return { user: { ...DEFAULT_USER }, entries, compensations, absences: [], companyCalendar: undefined };
+  return { user: { ...DEFAULT_USER }, entries, compensations, absences: [], companyCalendars: undefined };
 }
