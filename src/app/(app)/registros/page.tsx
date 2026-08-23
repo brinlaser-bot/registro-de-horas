@@ -117,7 +117,9 @@ export default function RegistrosPage() {
 
   // Resumo do intervalo, AGRUPADO POR CICLO ANUAL (nunca mistura pendências)
   const summaries = useMemo(() => {
-    const debts = buildDebtDays(entries, compensations, settings, range, absences);
+    // SEMPRE com a coleção de calendários: a resolução central zera o déficit
+    // comum em folga/abonado/recesso/folga a compensar (sem "8h − trabalhado").
+    const debts = buildDebtDays(entries, compensations, settings, range, absences, companyCalendars);
     const byCycle = new Map<string, RangeSummary>();
     const get = (cycle: string): RangeSummary => {
       let s = byCycle.get(cycle);
@@ -168,7 +170,7 @@ export default function RegistrosPage() {
     }
 
     return [...byCycle.values()].sort((a, b) => a.cycle.localeCompare(b.cycle));
-  }, [days, entries, compensations, absences, settings, range]);
+  }, [days, entries, compensations, absences, companyCalendars, settings, range]);
 
   /* ── Handlers (preservam comportamento validado) ── */
 
@@ -219,7 +221,10 @@ export default function RegistrosPage() {
 
   /** Atalhos de compensação por dia (déficit comum / acordo), via funções centrais. */
   const shortcutsByDate = useMemo(() => {
-    const debts = buildDebtDays(entries, compensations, settings, range, absences);
+    // Idem: a mesma resolução central do card/resumo. Em folga com trabalho
+    // (Trabalho em folga) o ajustedDeficit central é 0 → nenhum banner
+    // "Déficit pendente" / botão "Quitar com hora extra" é exibido.
+    const debts = buildDebtDays(entries, compensations, settings, range, absences, companyCalendars);
     const map = new Map<
       string,
       {
@@ -252,7 +257,7 @@ export default function RegistrosPage() {
       map.set(dd.date, cur);
     }
     return map;
-  }, [entries, compensations, absences, settings, range, todayStr]);
+  }, [entries, compensations, absences, companyCalendars, settings, range, todayStr]);
 
   const createComp = async (payload: { sourceDate: string; targetDate: string; minutes: number; note: string; kind?: CompKind }) => {
     const res = actions.addComp({ ...payload, note: payload.note || null, kind: payload.kind ?? "excedente" });
@@ -430,7 +435,7 @@ export default function RegistrosPage() {
               balanceView={balanceView}
               shortcuts={shortcutsByDate.get(date)}
               getCapacity={(targetDate) =>
-                extraCapacityForDate(targetDate, entries, compensations, settings)
+                extraCapacityForDate(targetDate, entries, compensations, settings, { companyCalendars })
               }
               onAddEntry={addEntry}
               onUpdateEntry={updateEntry}

@@ -32,7 +32,7 @@ import {
   periodLabel,
   sameAnnualCycle,
 } from "@/lib/periods";
-import { activeAcordos, canCompleteComp, extraCapacityForDate } from "@/lib/debt";
+import { activeAcordos, canCompleteComp, extraCapacityForDate, kindOf, usesHourExtra } from "@/lib/debt";
 import type { CompKind, DayResult, DaySummary } from "@/lib/types";
 import { Badge, Button, Card, EmptyState, Skeleton, StatCard } from "@/components/ui";
 import { QuickPunch } from "@/components/quick-punch";
@@ -425,23 +425,27 @@ export default function DashboardPage() {
                   </div>
                   <Badge
                     tone={
-                      (c.kind ?? "excedente") === "deficit"
+                      kindOf(c) === "deficit"
                         ? "emerald"
-                        : (c.kind ?? "excedente") === "acordo"
+                        : kindOf(c) === "acordo"
                           ? "indigo"
-                          : "indigo"
+                          : kindOf(c) === "calendario"
+                            ? "amber"
+                            : "indigo"
                     }
                   >
-                    {(c.kind ?? "excedente") === "deficit"
+                    {kindOf(c) === "deficit"
                       ? "hora extra"
-                      : (c.kind ?? "excedente") === "acordo"
+                      : kindOf(c) === "acordo"
                         ? "hora extra · acordo"
-                        : "sair cedo"}
+                        : kindOf(c) === "calendario"
+                          ? "hora extra · calendário"
+                          : "sair cedo"}
                   </Badge>
                   {(() => {
-                    const isExtra = c.kind === "deficit" || c.kind === "acordo";
+                    const isExtra = usesHourExtra(kindOf(c));
                     const check = isExtra
-                      ? canCompleteComp(c, entries, compensations, settings, todayStr)
+                      ? canCompleteComp(c, entries, compensations, settings, todayStr, { companyCalendars })
                       : { ok: true };
                     return (
                       <Button
@@ -511,7 +515,7 @@ export default function DashboardPage() {
         kind={compDraft?.kind ?? "excedente"}
         initial={compDraft?.initial}
         getCapacity={(targetDate) =>
-          extraCapacityForDate(targetDate, entries, compensations, settings)
+          extraCapacityForDate(targetDate, entries, compensations, settings, { companyCalendars })
         }
         onSave={createComp}
       />

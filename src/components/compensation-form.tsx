@@ -282,7 +282,7 @@ export function CompensationForm({
                 </p>
                 <p>
                   <b>Capacidade até o limite de {formatMinutes(cap.limitMinutes)}:</b>{" "}
-                  {formatMinutes(Math.max(0, cap.limitMinutes - cap.baseMinutes - cap.alreadyAllocated))}
+                  {formatMinutes(Math.max(0, cap.limitMinutes - (cap.effectiveBaseMinutes ?? cap.baseMinutes) - cap.alreadyAllocated))}
                 </p>
                 {cap.realExtra !== null && (
                   <p className="sm:col-span-2">

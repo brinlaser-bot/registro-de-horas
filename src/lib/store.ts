@@ -201,6 +201,7 @@ export const actions = {
           d.entries,
           d.compensations,
           settingsOf(d.user),
+          { companyCalendars: d.companyCalendars },
         );
         if (p.minutes > cap.available) {
           result = {
@@ -272,7 +273,7 @@ export const actions = {
           d.entries,
           d.compensations,
           settingsOf(d.user),
-          { excludeCompId: id },
+          { excludeCompId: id, companyCalendars: d.companyCalendars },
         );
         if (next.minutes > cap.available) {
           result = {
@@ -311,6 +312,7 @@ export const actions = {
       data.compensations,
       settingsOf(data.user),
       todayString(),
+      { companyCalendars: data.companyCalendars },
     );
     if (!check.ok) {
       return { ok: false, code: "invalid", error: check.error };

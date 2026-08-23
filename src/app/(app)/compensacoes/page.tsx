@@ -376,14 +376,14 @@ export default function CompensacoesPage() {
                 {c.status === "cancelada" && <Badge tone="slate">Cancelada</Badge>}
                 {c.status === "pendente" &&
                   usesHourExtra(kindOf(c)) &&
-                  canCompleteComp(c, entries, compensations, settings, todayStr).ok && (
+                  canCompleteComp(c, entries, compensations, settings, todayStr, { companyCalendars }).ok && (
                     <Badge tone="emerald">Meta de compensação atingida ✓</Badge>
                   )}
                 <div className="flex items-center gap-1">
                   {c.status === "pendente" && (() => {
                     const isExtra = usesHourExtra(kindOf(c));
                     const check = isExtra
-                      ? canCompleteComp(c, entries, compensations, settings, todayStr)
+                      ? canCompleteComp(c, entries, compensations, settings, todayStr, { companyCalendars })
                       : { ok: true };
                     return (
                       <>
@@ -460,6 +460,7 @@ export default function CompensacoesPage() {
         getCapacity={(targetDate) =>
           extraCapacityForDate(targetDate, entries, compensations, settings, {
             excludeCompId: editing ?? undefined,
+            companyCalendars,
           })
         }
         pendingDebtMinutes={editing === null && formInitial ? formInitial.minutes : undefined}

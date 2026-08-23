@@ -1,6 +1,6 @@
 // Matemática de dívida de horas: abatimento fracionado + sugestões inteligentes.
 import { computeDay, expectedMinutesOf, formatDateBR, formatMinutes } from "./time";
-import { dayContext, type Absence } from "./absences";
+import { type Absence } from "./absences";
 import { calendarCycleOf, companyDayContext, type CompanyCalendars } from "./company-calendar";
 import { sameAnnualCycle } from "./periods";
 import type {
@@ -97,10 +97,11 @@ export function buildDebtDays(
   const out: DebtDay[] = [];
 
   for (const date of dates) {
-    const cctx = companyCalendars
-      ? companyDayContext(date, entries, absences, companyCalendars, settings)
-      : null;
-    const ctx = cctx?.ctx ?? dayContext(date, entries, absences, settings);
+    // FONTE ÚNICA: a resolução central é SEMPRE usada — com ou sem calendário
+    // (coleção vazia ainda resolve sábado/domingo como folga). Nunca cair no
+    // dayContext bruto de jornada fixa 8h.
+    const cctx = companyDayContext(date, entries, absences, companyCalendars ?? [], settings);
+    const ctx = cctx.ctx;
     const day = ctx.day;
 
     const excess = day.excessMinutes;
@@ -110,11 +111,11 @@ export function buildDebtDays(
       comps.filter((c) => c.targetDate === date && kindOf(c) === "excedente" && isActive(c)),
     );
     // Dia com ponto aberto: déficit só é definitivo após a saída final.
-    // Com calendário, o déficit comum vem da RESOLUÇÃO CENTRAL (folga/recesso/
-    // compensar com jornada 0 não geram déficit comum — só "calendario").
+    // O déficit comum vem SEMPRE da RESOLUÇÃO CENTRAL (folga/abonado/recesso/
+    // compensar com jornada 0 e fins de semana não geram déficit comum).
     const deficit = day.open
       ? 0
-      : Math.max(0, (cctx ? cctx.adjustedDeficit : ctx.adjustedDeficit) - coveredByEarlyExit);
+      : Math.max(0, cctx.adjustedDeficit - coveredByEarlyExit);
 
     const push = (kind: CompKind, debtMinutes: number) => {
       if (debtMinutes <= 0) return;
@@ -123,7 +124,7 @@ export function buildDebtDays(
         date,
         kind,
         workedMinutes: day.workedMinutes,
-        expectedMinutes: cctx ? cctx.effectiveExpected : ctx.effectiveExpected,
+        expectedMinutes: cctx.effectiveExpected,
         debtMinutes,
         allocatedMinutes: Math.min(allocated, debtMinutes),
         pendingMinutes: pendingForSource(comps, date, kind),
@@ -135,7 +136,7 @@ export function buildDebtDays(
     push("excedente", excess);
     push("deficit", deficit);
     push("acordo", ctx.acordoMinutes);
-    push("calendario", cctx?.calendarioACompensar ?? 0);
+    push("calendario", cctx.calendarioACompensar);
   }
 
   return out.sort((a, b) => a.date.localeCompare(b.date));
@@ -178,6 +179,7 @@ export function suggestTargets(
   excludeDate: string,
   today: string,
   limit = 6,
+  companyCalendars?: CompanyCalendars,
 ): TargetSuggestion[] {
   const byDate = new Map<string, TimeEntry[]>();
   for (const e of entries) {
@@ -194,8 +196,10 @@ export function suggestTargets(
     // Dia em andamento não é candidato: o saldo ainda não está fechado
     if (day.open) continue;
 
-    // Capacidade livre = déficit do dia menos o que já está comprometido
-    const deficit = Math.max(0, expectedMinutesOf(settings) - day.workedMinutes);
+    // Capacidade livre = déficit do dia pela RESOLUÇÃO CENTRAL menos o que já
+    // está comprometido. Folga/abonado/fim de semana têm déficit 0 e nunca
+    // entram como sugestão de destino (sem "8h − trabalhado").
+    const deficit = companyDayContext(date, entries, [], companyCalendars ?? [], settings).adjustedDeficit;
     const used = appliedOnDate(comps, date);
     const free = deficit - used;
     if (free <= 0) continue;
@@ -218,32 +222,62 @@ export function openDebtFor(
   settings: WorkSettings,
   date: string,
   kind: CompKind,
+  companyCalendars?: CompanyCalendars,
 ): number {
-  const days = buildDebtDays(entries, comps, settings);
+  const days = buildDebtDays(entries, comps, settings, undefined, [], companyCalendars);
   const found = days.find((d) => d.date === date && d.kind === kind);
   if (found) return found.remainingMinutes;
 
-  // Dia ainda sem excedente/déficit registrado: cai para o valor bruto
+  // Dia ainda sem excedente/déficit registrado: fallback — quando há calendário,
+  // usa a RESOLUÇÃO CENTRAL (folga/abonado → déficit 0, nunca 8h fixas).
   const day = computeDay(
     entries.filter((e) => e.date === date),
     settings,
   );
   if (day.empty) return 0;
-  return kind === "excedente"
-    ? day.excessMinutes
-    : Math.max(0, day.expectedMinutes - day.workedMinutes);
+  if (kind === "excedente") return day.excessMinutes;
+  // Resolução central: folga/abonado/fim de semana → déficit 0 (nunca 8h fixas)
+  return companyDayContext(date, entries, [], companyCalendars ?? [], settings).adjustedDeficit;
 }
 
 /* ── Capacidade de hora extra por dia (função central) ────── */
 
+/** Opções de resolução central (Calendário da empresa) compartilhadas. */
+export interface CentralDayOpts {
+  /**
+   * Coleção de calendários da empresa. Quando presente, a jornada-base usada
+   * nos cálculos de capacidade/extra vem da RESOLUÇÃO CENTRAL
+   * (companyDayContext.effectiveExpected): 0 em folga/abonado/recesso/folga a
+   * compensar e jornada do calendário em eventos — nunca 8h fixas.
+   */
+  companyCalendars?: CompanyCalendars;
+}
+
+/**
+ * Jornada esperada EFETIVA de uma data pela resolução central (fonte única):
+ * folga/fins de semana/abonado/recesso => 0; Cinzas => jornada do evento;
+ * dia útil normal => base configurada. Funciona mesmo sem calendário
+ * importado (coleção vazia ainda resolve sábado/domingo como folga).
+ */
+function effectiveBaseForDate(
+  date: string,
+  entries: TimeEntry[],
+  settings: WorkSettings,
+  companyCalendars?: CompanyCalendars,
+): number {
+  return companyDayContext(date, entries, [], companyCalendars ?? [], settings).effectiveExpected;
+}
+
 export interface ExtraCapacity {
   /** Jornada-base configurada (min). */
   baseMinutes: number;
+  /** Jornada-base EFETIVA da data pela resolução central (0 em folga/abonado). */
+  effectiveBaseMinutes?: number;
   /** Limite diário configurado (min). */
   limitMinutes: number;
   /** Minutos de hora extra já vinculados (ativos) à data — exclui `excludeCompId`. */
   alreadyAllocated: number;
-  /** Dia encerrado: hora extra REAL existente (trabalhado − base). Null se vazio/aberto. */
+  /** Dia encerrado: hora extra REAL existente (trabalhado − base efetiva). Null se vazio/aberto. */
   realExtra: number | null;
   /** Máximo disponível para uma nova compensação de hora extra nesta data. */
   available: number;
@@ -265,11 +299,15 @@ export function extraCapacityForDate(
   entries: TimeEntry[],
   comps: Compensation[],
   settings: WorkSettings,
-  opts?: { excludeCompId?: number },
+  opts?: { excludeCompId?: number } & CentralDayOpts,
 ): ExtraCapacity {
   const baseMinutes = expectedMinutesOf(settings);
+  /** Jornada-base EFETIVA pela resolução central — sábado/domingo, feriados
+   * abonados, recessos e folgas a compensar têm base 0: as horas realmente
+   * trabalhadas nesses dias são integralmente hora positiva utilizável. */
+  const effectiveBase = effectiveBaseForDate(date, entries, settings, opts?.companyCalendars);
   const limitMinutes = settings.maxDailyMinutes;
-  const headroom = Math.max(0, limitMinutes - baseMinutes);
+  const headroom = Math.max(0, limitMinutes - effectiveBase);
 
   // Hora extra do dia é consumida tanto por déficit quanto por acordo a compensar
   const alreadyAllocated = sumMinutes(
@@ -287,14 +325,21 @@ export function extraCapacityForDate(
     settings,
   );
   const finished = !day.empty && !day.open;
-  const realExtra = finished ? Math.max(0, day.workedMinutes - baseMinutes) : null;
+  const realExtra = finished ? Math.max(0, day.workedMinutes - effectiveBase) : null;
 
   let available = Math.max(0, headroom - alreadyAllocated);
   if (realExtra !== null) {
     available = Math.min(available, Math.max(0, realExtra - alreadyAllocated));
   }
 
-  return { baseMinutes, limitMinutes, alreadyAllocated, realExtra, available };
+  return {
+    baseMinutes,
+    effectiveBaseMinutes: effectiveBase,
+    limitMinutes,
+    alreadyAllocated,
+    realExtra,
+    available,
+  };
 }
 
 /**
@@ -328,18 +373,24 @@ export function checkSourceOverflow(
 
 /**
  * Hora extra REAL existente em uma data (mesma lógica central dos dias
- * encerrados): trabalhado − jornada-base. Usa as batidas reais do dia.
+ * encerrados): trabalhado − jornada-base EFETIVA (resolução central quando
+ * há calendário — folga/abonado têm base 0, então tudo que foi trabalhado no
+ * dia conta como hora positiva). Usa as batidas reais do dia.
  */
 export function actualExtraForDate(
   date: string,
   entries: TimeEntry[],
   settings: WorkSettings,
+  opts?: CentralDayOpts,
 ): number {
   const day = computeDay(
     entries.filter((e) => e.date === date),
     settings,
   );
-  return Math.max(0, day.workedMinutes - day.expectedMinutes);
+  const base = opts?.companyCalendars
+    ? effectiveBaseForDate(date, entries, settings, opts.companyCalendars)
+    : day.expectedMinutes;
+  return Math.max(0, day.workedMinutes - base);
 }
 
 export interface CompletionCheck {
@@ -368,6 +419,7 @@ export function canCompleteComp(
   comps: Compensation[],
   settings: WorkSettings,
   today: string,
+  opts?: CentralDayOpts,
 ): CompletionCheck {
   const kind = kindOf(comp);
   if (kind === "excedente") return { ok: true };
@@ -380,7 +432,7 @@ export function canCompleteComp(
     };
   }
 
-  const actualExtra = actualExtraForDate(comp.targetDate, entries, settings);
+  const actualExtra = actualExtraForDate(comp.targetDate, entries, settings, opts);
   const committed = sumMinutes(
     comps.filter(
       (c) =>

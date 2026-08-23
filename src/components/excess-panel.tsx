@@ -81,15 +81,15 @@ export function ExcessPanel({
   }, [entries, compensations, absences, companyCalendars, settings, today]);
 
   const openFor = (date: string, kind: CompKind) => {
-    const minutes = openDebtFor(entries, compensations, settings, date, kind);
+    const minutes = openDebtFor(entries, compensations, settings, date, kind, companyCalendars);
     // Para hora extra o destino é um dia de trabalho futuro/hoje (não um dia com déficit);
     // para excedente sugerimos dias recentes com saldo negativo (sair mais cedo).
     const target =
       kind === "excedente"
-        ? suggestTargets(entries, compensations, settings, date, today)[0]?.date ?? today
+        ? suggestTargets(entries, compensations, settings, date, today, undefined, companyCalendars)[0]?.date ?? today
         : today;
     // Pré-preenche respeitando a capacidade real do dia de destino
-    const cap = extraCapacityForDate(target, entries, compensations, settings);
+    const cap = extraCapacityForDate(target, entries, compensations, settings, { companyCalendars });
     const prefill =
       kind === "deficit" ? Math.max(5, Math.min(minutes, Math.max(5, cap.available))) : minutes;
     setDraft({
@@ -351,11 +351,11 @@ export function ExcessPanel({
         kind={draft?.kind ?? "excedente"}
         suggestions={
           draft && draft.kind === "excedente"
-            ? suggestTargets(entries, compensations, settings, draft.sourceDate, today)
+            ? suggestTargets(entries, compensations, settings, draft.sourceDate, today, undefined, companyCalendars)
             : []
         }
         getCapacity={(targetDate) =>
-          extraCapacityForDate(targetDate, entries, compensations, settings)
+          extraCapacityForDate(targetDate, entries, compensations, settings, { companyCalendars })
         }
         pendingDebtMinutes={draftDebt}
         onSave={async (payload) => {
