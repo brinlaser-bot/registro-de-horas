@@ -1,5 +1,5 @@
 import { computeDay, expectedMinutesOf, formatMinutes, parseDate, type WorkSettings } from "./time";
-import { absenceLabel, dayContext, regularBalanceContribution, type Absence, type DayContext } from "./absences";
+import { absenceLabel, dayContext, regularBalanceContribution, type Absence, type DayBalanceView, type DayContext } from "./absences";
 import type { Compensation, DayResult, TimeEntry } from "./types";
 
 /** Tipo consolidado do dia da empresa (apresentação central). */
@@ -388,4 +388,29 @@ export function calendarMonthlyTotals(entries: CompanyCalendarEntry[]): Record<s
 export function companyBalanceContribution(view: CalendarDayView): number {
   if (view.calendarEntry || view.isWeekend) return view.regularBalance;
   return regularBalanceContribution(view.ctx);
+}
+
+/**
+ * AGREGADOR CENTRAL do déficit comum do período.
+ * Feriado, abono, folga a compensar, recesso e fim de semana NÃO geram déficit
+ * comum; em "Compensação parcial" (ex.: Cinzas) o déficit só pode incidir
+ * sobre a jornada regular reduzida do calendário — nunca sobre as 8h padrão.
+ */
+export function companyDeficitContribution(view: CalendarDayView): number {
+  return view.adjustedDeficit;
+}
+
+/**
+ * VIEW MODEL CENTRAL para o DayCard: mesmo shape de DayBalanceView, mas com
+ * jornada esperada, saldo regular e déficit JÁ ajustados pela resolução
+ * central (calendário/folga/evento). O componente apenas apresenta — não
+ * recalcula regra de calendário nem usa o saldo bruto de computeDay().
+ */
+export function companyDayBalanceView(view: CalendarDayView): DayBalanceView {
+  return {
+    ...view.ctx,
+    effectiveExpected: view.effectiveExpected,
+    adjustedBalance: view.adjustedBalance,
+    adjustedDeficit: view.adjustedDeficit,
+  };
 }

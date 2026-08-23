@@ -8,7 +8,6 @@ import {
   absenceLabel,
   absenceOnDate,
   dayContext,
-  regularBalanceContribution,
 } from "@/lib/absences";
 import {
   getNextPointPeriod,

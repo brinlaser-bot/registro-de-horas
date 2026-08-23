@@ -14,10 +14,14 @@ import {
 import {
   absenceOnDate,
   dayContext,
-  regularBalanceContribution,
   type Absence,
 } from "@/lib/absences";
-import { companyBalanceContribution, companyDayContext } from "@/lib/company-calendar";
+import {
+  companyBalanceContribution,
+  companyDayBalanceView,
+  companyDayContext,
+  companyDeficitContribution,
+} from "@/lib/company-calendar";
 import {
   getAnnualPointCycle,
   getNextPointPeriod,
@@ -100,7 +104,12 @@ export default function RegistrosPage() {
           date,
           ctx: cctx.ctx,
           calendarLabel: cctx.label,
+          /* View model central: card e resumo consomem SEMPRE a resolução central
+           * (calendário/folga/evento) — nunca o saldo bruto de computeDay/dayContext. */
+          balanceView: companyDayBalanceView(cctx),
+          displayDay: cctx.displayDay,
           balanceContribution: companyBalanceContribution(cctx),
+          deficitContribution: companyDeficitContribution(cctx),
           absence: absenceOnDate(absences, date),
         };
       });
@@ -123,7 +132,7 @@ export default function RegistrosPage() {
       return s;
     };
 
-    for (const { date, ctx, balanceContribution, absence } of days) {
+    for (const { date, ctx, balanceContribution, deficitContribution, absence } of days) {
       const s = get(getAnnualPointCycle(date));
       if (ctx.day.entries.length > 0) {
         s.workedDays += 1;
@@ -133,7 +142,8 @@ export default function RegistrosPage() {
       }
       // Mesmo agregador central do Resumo: sem dados/jornada aberta não geram saldo artificial.
       s.balanceMinutes += balanceContribution;
-      s.deficitMinutes += ctx.adjustedDeficit;
+      // Déficit comum vem da resolução central (eventos de calendário não geram déficit).
+      s.deficitMinutes += deficitContribution;
       if (absence?.kind === "ferias") s.vacationDays += 1;
       if (absence?.kind === "saude") s.healthDays += 1;
       if (absence && (absence.kind === "outro" || (absence.kind === "acordado" && absence.treatment === "dispensado"))) {
@@ -405,10 +415,10 @@ export default function RegistrosPage() {
         />
       ) : (
         <div className="space-y-4">
-          {days.map(({ date, ctx, absence, calendarLabel }) => (
+          {days.map(({ date, balanceView, displayDay, absence, calendarLabel }) => (
             <DayCard
               key={date}
-              result={ctx.day}
+              result={displayDay}
               settings={settings}
               compsForDate={compensations.filter((c) => c.targetDate === date)}
               allComps={compensations}
@@ -416,8 +426,8 @@ export default function RegistrosPage() {
               isToday={date === todayStr}
               absence={absence}
               calendarLabel={calendarLabel}
-              effectiveExpected={ctx.effectiveExpected}
-              balanceView={ctx}
+              effectiveExpected={balanceView.effectiveExpected}
+              balanceView={balanceView}
               shortcuts={shortcutsByDate.get(date)}
               getCapacity={(targetDate) =>
                 extraCapacityForDate(targetDate, entries, compensations, settings)
