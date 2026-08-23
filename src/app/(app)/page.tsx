@@ -23,7 +23,8 @@ import {
   weekdayShort,
   type EntryType,
 } from "@/lib/time";
-import { companyDayContext, dayContext } from "@/lib/absences";
+import { dayContext } from "@/lib/absences";
+import { companyDayContext } from "@/lib/company-calendar";
 import {
   annualCycleBounds,
   getAnnualPointCycle,
@@ -58,7 +59,7 @@ function toSummary(d: DayResult, date?: string): DaySummary {
 export default function DashboardPage() {
   const toast = useToast();
   const mounted = useIsClient();
-  const { user, entries, compensations, absences } = useAppData();
+  const { user, entries, compensations, absences, companyCalendar } = useAppData();
   const settings = settingsOf(user);
   const todayStr = todayString();
   const period = getPointPeriod(todayStr);
@@ -104,7 +105,7 @@ export default function DashboardPage() {
       { trackedDays: 0, workedTotal: 0, registrableTotal: 0, balanceTotal: 0, excessTotal: 0 },
     );
 
-    const tCtx = companyDayContext(todayStr, entries, absences, settings, nowMinutes);
+    const tCtx = companyDayContext(todayStr, entries, absences, companyCalendar, settings, nowMinutes);
     const todays = tCtx.displayDay;
 
     const recents: DaySummary[] = [];
@@ -120,7 +121,7 @@ export default function DashboardPage() {
       .sort((a, b) => a.targetDate.localeCompare(b.targetDate));
 
     return { monthDays: days, totals: sum, today: todays, todayCtx: tCtx, recent: recents, pending: pend };
-  }, [entries, compensations, absences, settings, period, todayStr, nowMinutes]);
+  }, [entries, compensations, absences, companyCalendar, settings, period, todayStr, nowMinutes]);
 
   const range = period;
 
@@ -215,6 +216,8 @@ export default function DashboardPage() {
   }
 
   const t = today;
+  /* Visão geral exige "Folga hoje"; a resolução central usa "Folga" (listas). */
+  const todayLabel = todayCtx.type === "folga" ? "Folga hoje" : (todayCtx.label ?? undefined);
   const balanceTone = totals.balanceTotal > 0 ? "emerald" : totals.balanceTotal < 0 ? "rose" : "slate";
   const excessTone = totals.excessTotal > 0 ? "rose" : "slate";
   const todayStatusTone =
@@ -266,7 +269,7 @@ export default function DashboardPage() {
           sub={
             <>
               {todayCtx.type === "folga" || todayCtx.type === "trabalho-folga"
-                ? `${todayCtx.label} · esperado ${formatMinutes(t.expectedMinutes)}`
+                ? `${todayLabel} · esperado ${formatMinutes(t.expectedMinutes)}`
                 : `base ${formatMinutes(t.expectedMinutes || expectedMinutesOf(settings))}`} ·{" "}
               <span className={t.balanceMinutes >= 0 ? "text-emerald-600" : "text-rose-600"}>
                 {t.balanceMinutes >= 0 ? "+" : ""}
@@ -321,7 +324,7 @@ export default function DashboardPage() {
         today={t}
         todayStr={todayStr}
         settings={settings}
-        dayLabel={todayCtx.type === "regular" ? undefined : todayCtx.label}
+        dayLabel={todayCtx.type === "regular" ? undefined : todayLabel}
         onAddEntry={onAddEntry}
         onDeleteEntry={onDeleteEntry}
       />
@@ -336,6 +339,7 @@ export default function DashboardPage() {
             entries={entries}
             compensations={compensations}
             absences={absences}
+            companyCalendar={companyCalendar}
             settings={settings}
             range={range}
             monthLabel={periodLabel(period)}

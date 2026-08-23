@@ -111,6 +111,8 @@ interface Props {
   effectiveExpected?: number;
   /** Visão central de saldo regular / déficit / acordo a compensar. */
   balanceView?: DayBalanceView;
+  /** Situação de calendário/folga do dia, quando não houver ausência manual. */
+  calendarLabel?: string | null;
   /** Atalhos de compensação do dia (calculados pela página com as funções centrais). */
   shortcuts?: {
     deficitRemaining: number;
@@ -144,6 +146,7 @@ export function DayCard({
   absence,
   effectiveExpected,
   balanceView,
+  calendarLabel,
   shortcuts,
   getCapacity,
 }: Props) {
@@ -267,7 +270,16 @@ export function DayCard({
             <span className="ml-2 font-medium text-slate-400">{formatDateShortBR(d.date)}</span>
           </p>
           <div className="mt-1 flex flex-wrap items-center gap-2">
-            {absence ? absenceBadge(absence) : statusBadge(d)}
+            {absence ? (
+              absenceBadge(absence)
+            ) : calendarLabel ? (
+              <Badge tone="slate" className="shrink-0 gap-1.5 py-1">
+                <CalendarDays size={14} className="shrink-0" aria-hidden />
+                <span>{calendarLabel}</span>
+              </Badge>
+            ) : (
+              statusBadge(d)
+            )}
             {/* Acordo: indicação curta do que ainda falta (sem duplicar no badge) */}
             {absence?.kind === "acordado" &&
               absence.treatment === "compensar" &&

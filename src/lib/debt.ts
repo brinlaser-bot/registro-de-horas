@@ -1,6 +1,7 @@
 // Matemática de dívida de horas: abatimento fracionado + sugestões inteligentes.
 import { computeDay, expectedMinutesOf, formatDateBR, formatMinutes } from "./time";
 import { dayContext, type Absence } from "./absences";
+import { companyDayContext, type CompanyCalendar } from "./company-calendar";
 import { sameAnnualCycle } from "./periods";
 import type {
   CompKind,
@@ -63,6 +64,7 @@ export function buildDebtDays(
   settings: WorkSettings,
   range?: { from: string; to: string },
   absences: Absence[] = [],
+  companyCalendar?: CompanyCalendar,
 ): DebtDay[] {
   // Datas relevantes: com batidas OU cobertas por ausência (acordo sem batidas conta)
   const dates = new Set<string>();
@@ -77,11 +79,17 @@ export function buildDebtDays(
       cur = addOneDay(cur);
     }
   }
+  for (const e of companyCalendar?.entries ?? []) {
+    if (!range || (e.date >= range.from && e.date <= range.to)) dates.add(e.date);
+  }
 
   const out: DebtDay[] = [];
 
   for (const date of dates) {
-    const ctx = dayContext(date, entries, absences, settings);
+    const cctx = companyCalendar
+      ? companyDayContext(date, entries, absences, companyCalendar, settings)
+      : null;
+    const ctx = cctx?.ctx ?? dayContext(date, entries, absences, settings);
     const day = ctx.day;
 
     const excess = day.excessMinutes;
@@ -91,9 +99,11 @@ export function buildDebtDays(
       comps.filter((c) => c.targetDate === date && kindOf(c) === "excedente" && isActive(c)),
     );
     // Dia com ponto aberto: déficit só é definitivo após a saída final.
+    // Com calendário, o déficit comum vem da RESOLUÇÃO CENTRAL (folga/recesso/
+    // compensar com jornada 0 não geram déficit comum — só "calendario").
     const deficit = day.open
       ? 0
-      : Math.max(0, ctx.adjustedDeficit - coveredByEarlyExit);
+      : Math.max(0, (cctx ? cctx.adjustedDeficit : ctx.adjustedDeficit) - coveredByEarlyExit);
 
     const push = (kind: CompKind, debtMinutes: number) => {
       if (debtMinutes <= 0) return;
@@ -102,7 +112,7 @@ export function buildDebtDays(
         date,
         kind,
         workedMinutes: day.workedMinutes,
-        expectedMinutes: ctx.effectiveExpected,
+        expectedMinutes: cctx ? cctx.effectiveExpected : ctx.effectiveExpected,
         debtMinutes,
         allocatedMinutes: Math.min(allocated, debtMinutes),
         pendingMinutes: pendingForSource(comps, date, kind),
@@ -114,6 +124,7 @@ export function buildDebtDays(
     push("excedente", excess);
     push("deficit", deficit);
     push("acordo", ctx.acordoMinutes);
+    push("calendario", cctx?.calendarioACompensar ?? 0);
   }
 
   return out.sort((a, b) => a.date.localeCompare(b.date));
@@ -254,7 +265,7 @@ export function extraCapacityForDate(
     comps.filter(
       (c) =>
         c.targetDate === date &&
-        (kindOf(c) === "deficit" || kindOf(c) === "acordo") &&
+        (kindOf(c) === "deficit" || kindOf(c) === "acordo" || kindOf(c) === "calendario") &&
         isActive(c) &&
         c.id !== opts?.excludeCompId,
     ),
@@ -365,7 +376,7 @@ export function canCompleteComp(
         c.id !== comp.id &&
         c.targetDate === comp.targetDate &&
         c.status === "concluida" &&
-        (kindOf(c) === "deficit" || kindOf(c) === "acordo"),
+        (kindOf(c) === "deficit" || kindOf(c) === "acordo" || kindOf(c) === "calendario"),
     ),
   );
   const available = Math.max(0, actualExtra - committed);

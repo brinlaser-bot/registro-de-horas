@@ -1,6 +1,9 @@
 import { computeDay, expectedMinutesOf, formatMinutes, parseDate, type WorkSettings } from "./time";
-import { dayContext, type Absence, type DayContext } from "./absences";
-import type { Compensation, TimeEntry } from "./types";
+import { absenceLabel, dayContext, regularBalanceContribution, type Absence, type DayContext } from "./absences";
+import type { Compensation, DayResult, TimeEntry } from "./types";
+
+/** Tipo consolidado do dia da empresa (apresentação central). */
+export type CompanyDayType = "regular" | "folga" | "trabalho-folga" | "evento";
 
 export type CalendarTreatment = "ABONADO" | "COMPENSAR";
 export type CalendarCategory =
@@ -62,6 +65,18 @@ export interface CalendarDayView {
   calendarioACompensar: number;
   regularBalance: number;
   isWeekend: boolean;
+  /* ── Apresentação consolidada (Visão geral / Registro rápido) ──
+   * Mesma semântica validada na correção de sábado/domingo:
+   * folga → esperado 0, saldo = trabalhado, déficit 0, "Folga hoje". */
+  type: CompanyDayType;
+  /** Jornada esperada efetiva do dia (0 em folga; jornada do calendário em eventos). */
+  effectiveExpected: number;
+  /** Saldo ajustado para apresentação. */
+  adjustedBalance: number;
+  /** Déficit comum para apresentação (0 em folga). */
+  adjustedDeficit: number;
+  /** DayResult pronto para UI: expected/balance já refletem folga/evento/calendário. */
+  displayDay: DayResult;
 }
 
 export const CALENDAR_HEADER =
@@ -232,6 +247,16 @@ export function entryOnDate(calendar: CompanyCalendar | undefined, date: string)
   return calendar?.entries.find((e) => e.date === date);
 }
 
+/**
+ * RESOLUÇÃO CENTRAL do dia da empresa (fonte única de verdade).
+ * Consolida: calendário empresarial (feriados, abonos, recesso, compensações),
+ * férias/afastamentos (via dayContext) e a regra de fim de semana.
+ * Visão geral, Registros, Resumo e dívidas devem consumir esta função.
+ *
+ * Regra obrigatória de sábado/domingo (sem evento explícito):
+ *   sem batidas → folga: esperado 0, trabalhado 0, saldo 0, déficit 0;
+ *   com batidas → trabalho em folga: esperado 0, saldo = trabalhado.
+ */
 export function companyDayContext(
   date: string,
   entries: TimeEntry[],
@@ -242,8 +267,11 @@ export function companyDayContext(
 ): CalendarDayView {
   const calendarEntry = entryOnDate(calendar, date);
   const baseCtx = dayContext(date, entries, absences, settings, nowMinutes);
-  const worked = baseCtx.day.workedMinutes;
+  const day = baseCtx.day;
+  const worked = day.workedMinutes;
   const weekend = isWeekendDate(date);
+  const statusOf = (): DayResult["status"] =>
+    day.open ? "in-progress" : day.entries.length > 0 ? "ok" : "empty";
 
   if (calendarEntry) {
     const expectedRegular = Math.max(0, calendarEntry.jornadaEsperadaHoras * 60);
@@ -264,26 +292,81 @@ export function companyDayContext(
           : marker === "recesso"
             ? `Recesso de final de ano — ${formatMinutes(calendarioACompensar)} a compensar`
             : `${calendarEntry.jornadaEsperadaHoras > 0 ? "Compensação parcial" : "Folga a compensar"} — Calendário`;
-    return { ctx: baseCtx, calendarEntry, label, marker, expectedRegular, abonadasMinutes, cargaConsiderada, calendarioACompensar, regularBalance, isWeekend: weekend };
-  }
-
-  if (weekend) {
-    const day = computeDay(entries.filter((e) => e.date === date), settings, nowMinutes);
-    const workedWeekend = day.workedMinutes;
     return {
       ctx: baseCtx,
-      label: workedWeekend > 0 ? "Trabalho em folga" : "Folga",
-      marker: workedWeekend > 0 ? "trabalho-folga" : "folga",
-      expectedRegular: 0,
-      abonadasMinutes: 0,
-      cargaConsiderada: workedWeekend,
-      calendarioACompensar: 0,
-      regularBalance: workedWeekend,
-      isWeekend: true,
+      calendarEntry,
+      label,
+      marker,
+      expectedRegular,
+      abonadasMinutes,
+      cargaConsiderada,
+      calendarioACompensar,
+      regularBalance,
+      isWeekend: weekend,
+      type: "evento",
+      effectiveExpected: expectedRegular,
+      adjustedBalance: regularBalance,
+      adjustedDeficit: day.open ? 0 : Math.max(0, expectedRegular - worked),
+      displayDay: { ...day, expectedMinutes: expectedRegular, balanceMinutes: regularBalance, status: statusOf() },
     };
   }
 
-  return { ctx: baseCtx, label: baseCtx.absence ? null : null, marker: null, expectedRegular: baseCtx.effectiveExpected, abonadasMinutes: 0, cargaConsiderada: worked, calendarioACompensar: 0, regularBalance: baseCtx.adjustedBalance, isWeekend: false };
+  if (weekend) {
+    const hasPunches = day.entries.length > 0;
+    const type: CompanyDayType = hasPunches ? "trabalho-folga" : "folga";
+    return {
+      ctx: baseCtx,
+      label: hasPunches ? "Trabalho em folga" : "Folga",
+      marker: hasPunches ? "trabalho-folga" : "folga",
+      expectedRegular: 0,
+      abonadasMinutes: 0,
+      cargaConsiderada: worked,
+      calendarioACompensar: 0,
+      regularBalance: worked,
+      isWeekend: true,
+      type,
+      effectiveExpected: 0,
+      adjustedBalance: worked,
+      adjustedDeficit: 0,
+      displayDay: { ...day, expectedMinutes: 0, balanceMinutes: worked, status: statusOf() },
+    };
+  }
+
+  if (baseCtx.absence) {
+    return {
+      ctx: baseCtx,
+      label: absenceLabel(baseCtx.absence),
+      marker: null,
+      expectedRegular: baseCtx.effectiveExpected,
+      abonadasMinutes: 0,
+      cargaConsiderada: worked,
+      calendarioACompensar: 0,
+      regularBalance: baseCtx.adjustedBalance,
+      isWeekend: false,
+      type: "evento",
+      effectiveExpected: baseCtx.effectiveExpected,
+      adjustedBalance: baseCtx.adjustedBalance,
+      adjustedDeficit: baseCtx.adjustedDeficit,
+      displayDay: { ...day, expectedMinutes: baseCtx.effectiveExpected, balanceMinutes: baseCtx.adjustedBalance, status: statusOf() },
+    };
+  }
+
+  return {
+    ctx: baseCtx,
+    label: null,
+    marker: null,
+    expectedRegular: baseCtx.effectiveExpected,
+    abonadasMinutes: 0,
+    cargaConsiderada: worked,
+    calendarioACompensar: 0,
+    regularBalance: baseCtx.adjustedBalance,
+    isWeekend: false,
+    type: "regular",
+    effectiveExpected: baseCtx.effectiveExpected,
+    adjustedBalance: baseCtx.adjustedBalance,
+    adjustedDeficit: baseCtx.adjustedDeficit,
+    displayDay: { ...day, expectedMinutes: baseCtx.effectiveExpected, balanceMinutes: baseCtx.adjustedBalance, status: day.status },
+  };
 }
 
 export function calendarMonthlyTotals(entries: CompanyCalendarEntry[]): Record<string, number> {
@@ -293,4 +376,16 @@ export function calendarMonthlyTotals(entries: CompanyCalendarEntry[]): Record<s
     out[month] = (out[month] ?? 0) + e.horasACompensar * 60;
   }
   return out;
+}
+
+/**
+ * AGREGADOR CENTRAL do saldo regular do período.
+ * Fonte única usada por Resumo e Registros: dias com entrada de calendário ou
+ * fim de semana usam o saldo da resolução central (folga não gera déficit);
+ * demais dias usam o agregador clássico de dayContext (sem dados/jornada
+ * aberta = 0). Não altera a matemática validada de férias/saúde/acordo.
+ */
+export function companyBalanceContribution(view: CalendarDayView): number {
+  if (view.calendarEntry || view.isWeekend) return view.regularBalance;
+  return regularBalanceContribution(view.ctx);
 }

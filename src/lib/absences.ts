@@ -220,76 +220,11 @@ export function regularBalanceContribution(view: DayBalanceView): number {
   return view.adjustedBalance;
 }
 
-/* ── Visão central de dia da empresa (apresentação) ─────────
- * Regra de folga comum: sábado/domingo sem evento explícito e sem jornada
- * exigida não gera déficit. Se houver batidas, é "Trabalho em folga".
- * Esta função NÃO altera dayContext(): é uma visão central para telas que
- * precisam apresentar o tipo do dia (ex.: Visão geral).
+/* ── Visão central de dia da empresa ─────────────────────────
+ * A resolução consolidada do dia (fim de semana/folga/evento/calendário)
+ * vive em ./company-calendar.ts (companyDayContext) — fonte única de verdade.
+ * Este módulo mantém apenas a matemática de férias/afastamentos (dayContext).
  */
-export type CompanyDayType = "regular" | "folga" | "trabalho-folga" | "evento";
-
-export interface CompanyDayContext extends DayContext {
-  type: CompanyDayType;
-  label: string;
-  /** DayResult pronto para UI: expected/balance já refletem folga/evento. */
-  displayDay: DayResult;
-}
-
-export function companyDayContext(
-  date: string,
-  entries: TimeEntry[],
-  absences: Absence[],
-  settings: WorkSettings,
-  nowMinutes?: number,
-): CompanyDayContext {
-  const ctx = dayContext(date, entries, absences, settings, nowMinutes);
-  const wd = new Date(`${date}T12:00:00`).getDay();
-  const weekend = wd === 0 || wd === 6;
-
-  if (ctx.absence) {
-    return {
-      ...ctx,
-      type: "evento",
-      label: absenceLabel(ctx.absence),
-      displayDay: {
-        ...ctx.day,
-        expectedMinutes: ctx.effectiveExpected,
-        balanceMinutes: ctx.adjustedBalance,
-        status: ctx.day.open ? "in-progress" : ctx.day.entries.length > 0 ? "ok" : "empty",
-      },
-    };
-  }
-
-  if (weekend) {
-    const worked = ctx.day.workedMinutes;
-    const type: CompanyDayType = ctx.day.entries.length > 0 ? "trabalho-folga" : "folga";
-    return {
-      ...ctx,
-      type,
-      label: type === "folga" ? "Folga hoje" : "Trabalho em folga",
-      effectiveExpected: 0,
-      adjustedBalance: worked,
-      adjustedDeficit: 0,
-      displayDay: {
-        ...ctx.day,
-        expectedMinutes: 0,
-        balanceMinutes: worked,
-        status: ctx.day.open ? "in-progress" : ctx.day.entries.length > 0 ? "ok" : "empty",
-      },
-    };
-  }
-
-  return {
-    ...ctx,
-    type: "regular",
-    label: "Jornada regular",
-    displayDay: {
-      ...ctx.day,
-      expectedMinutes: ctx.effectiveExpected,
-      balanceMinutes: ctx.adjustedBalance,
-    },
-  };
-}
 
 /* ── Validação central de férias/afastamentos ────────────── */
 

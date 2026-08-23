@@ -107,7 +107,12 @@ export function ImportBackupModal({ open, onClose }: Props) {
   const merge = async () => {
     if (!parsed) return;
     setBusy(true);
-    actions.mergeBackup({ entries: parsed.entries, compensations: parsed.compensations });
+    actions.mergeBackup({
+      entries: parsed.entries,
+      compensations: parsed.compensations,
+      absences: parsed.absences,
+      companyCalendar: parsed.companyCalendar,
+    });
     setBusy(false);
     toast.show("Backup mesclado com sucesso.");
     onClose();
