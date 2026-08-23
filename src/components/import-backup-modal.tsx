@@ -98,7 +98,14 @@ export function ImportBackupModal({ open, onClose }: Props) {
     );
     if (!ok) return;
     setBusy(true);
-    actions.replaceAll({ user: parsed.user, entries: parsed.entries, compensations: parsed.compensations });
+    actions.replaceAll({
+      user: parsed.user,
+      entries: parsed.entries,
+      compensations: parsed.compensations,
+      absences: parsed.absences,
+      companyCalendars: parsed.companyCalendars,
+      faltas: parsed.faltas,
+    });
     setBusy(false);
     toast.show("Backup restaurado com sucesso.");
     onClose();
@@ -112,6 +119,7 @@ export function ImportBackupModal({ open, onClose }: Props) {
       compensations: parsed.compensations,
       absences: parsed.absences,
       companyCalendars: parsed.companyCalendars,
+      faltas: parsed.faltas,
     });
     setBusy(false);
     toast.show("Backup mesclado com sucesso.");

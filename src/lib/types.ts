@@ -85,6 +85,21 @@ export interface AppData {
   absences: import("./absences").Absence[];
   /** Calendários da empresa — um por ciclo anual (01/05→30/04). */
   companyCalendars?: import("./company-calendar").CompanyCalendar[];
+  /** Faltas registradas manualmente (integrais, um registro por dia). */
+  faltas: Falta[];
+}
+
+/**
+ * Falta — ocorrência de ponto (NÃO é férias/afastamento): o dia tinha jornada
+ * efetiva e o usuário não trabalhou. Só existe por registro explícito; dia
+ * vazio nunca vira falta automaticamente. Futura = "Falta prevista" (sem
+ * déficit até a data chegar): a vigência é derivada de date vs. hoje.
+ */
+export interface Falta {
+  id: number;
+  /** YYYY-MM-DD — um registro por dia. */
+  date: string;
+  createdAt: number;
 }
 
 export interface CompWithDays extends Compensation {

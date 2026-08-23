@@ -8,6 +8,7 @@ import type {
   Compensation,
   DebtDay,
   DebtTotals,
+  Falta,
   TargetSuggestion,
   TimeEntry,
   WorkSettings,
@@ -74,6 +75,8 @@ export function buildDebtDays(
   range?: { from: string; to: string },
   absences: Absence[] = [],
   companyCalendars?: CompanyCalendars,
+  /** Faltas EFETIVAS (date <= hoje) — falta futura/prevista NÃO gera déficit. */
+  faltas: Falta[] = [],
 ): DebtDay[] {
   // Datas relevantes: com batidas OU cobertas por ausência (acordo sem batidas conta)
   const dates = new Set<string>();
@@ -92,6 +95,11 @@ export function buildDebtDays(
     for (const e of cal.entries) {
       if (!range || (e.date >= range.from && e.date <= range.to)) dates.add(e.date);
     }
+  }
+  // Falta EFETIVA: o déficit nasce da resolução central (jornada efetiva do dia,
+  // nunca 8h fixas). Falta prevista (futura) não entra aqui — já foi filtrada.
+  for (const f of faltas) {
+    if (!range || (f.date >= range.from && f.date <= range.to)) dates.add(f.date);
   }
 
   const out: DebtDay[] = [];

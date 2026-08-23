@@ -8,6 +8,7 @@ import { buildSeedData, DEFAULT_USER } from "./seed-data";
 import { absencesEqual, compsEqual, entriesEqual, mergeByIdAndContent } from "./backup";
 import { canCompleteComp, extraCapacityForDate, usesHourExtra } from "./debt";
 import { validateAbsence, type Absence, type AbsenceSplit } from "./absences";
+import { canRegisterFalta } from "./faltas";
 import { sameAnnualCycle } from "./periods";
 import { normalizeCompanyCalendars, type CompanyCalendar, type CompanyCalendars } from "./company-calendar";
 
@@ -16,7 +17,7 @@ export interface ActionResult {
   ok: boolean;
   /** Mensagem pronta para exibição na interface. */
   error?: string;
-  code?: "over-capacity" | "invalid" | "not-found" | "cross-cycle" | "overlap";
+  code?: "over-capacity" | "invalid" | "not-found" | "cross-cycle" | "overlap" | "linked-compensations";
   /** Capacidade disponível no dia de destino (quando code = over-capacity). */
   available?: number;
   limitMinutes?: number;
@@ -45,6 +46,7 @@ import type {
   Compensation,
   CompWithDays,
   DayResult,
+  Falta,
   TimeEntry,
   User,
   WorkSettings,
@@ -58,6 +60,7 @@ const pristine: AppData = {
   compensations: [],
   absences: [],
   companyCalendars: undefined,
+  faltas: [],
 };
 
 let data: AppData = pristine;
@@ -98,7 +101,9 @@ function load() {
         const companyCalendars =
           normalizeCompanyCalendars(legacy.companyCalendars) ??
           normalizeCompanyCalendars(legacy.companyCalendar);
-        data = { user: parsed.user, entries: parsed.entries, compensations: parsed.compensations, absences, companyCalendars };
+        // Retrocompatibilidade: dados antigos podem não ter "faltas".
+        const faltas = Array.isArray(parsed.faltas) ? parsed.faltas : [];
+        data = { user: parsed.user, entries: parsed.entries, compensations: parsed.compensations, absences, companyCalendars, faltas };
         emit();
         return;
       }
@@ -325,6 +330,71 @@ export const actions = {
   },
 
   /**
+   * Registra uma FALTA INTEGRAL (ocorrência de ponto — nunca automática).
+   * A validação é o gate central (canRegisterFalta): só datas com jornada
+   * efetiva > 0 pela resolução central (folga/abonado/obrigação de calendário/
+   * cobertura integral ⇒ bloqueadas), sem batidas e sem falta já registrada.
+   * O déficit correspondente é DERIVADO (jornada efetiva do dia, nunca 8h
+   * fixas) — falta futura vira "Falta prevista" e não gera déficit até a data.
+   */
+  addFalta(date: string): ActionResult {
+    let result: ActionResult = OK;
+    mutate((d) => {
+      const gate = canRegisterFalta(
+        date,
+        d.entries,
+        d.absences,
+        d.companyCalendars,
+        settingsOf(d.user),
+        d.faltas,
+      );
+      if (!gate.ok) {
+        result = { ok: false, code: "invalid", error: gate.error };
+        return d;
+      }
+      return {
+        ...d,
+        faltas: [...d.faltas, { id: nextId(d.faltas), date, createdAt: Date.now() }],
+      };
+    });
+    return result;
+  },
+
+  /**
+   * Remove/cancela uma falta. O déficit derivado dela desaparece junto.
+   * NUNCA deixa compensação órfã: se houver compensação ATIVA (pendente ou
+   * concluída) de déficit vinculada à data da falta, bloqueia a exclusão —
+   * o usuário deve cancelar/ajustar essas compensações primeiro.
+   */
+  removeFalta(id: number): ActionResult {
+    let result: ActionResult = OK;
+    mutate((d) => {
+      const target = d.faltas.find((f) => f.id === id);
+      if (!target) {
+        result = { ok: false, code: "not-found", error: "Falta não encontrada." };
+        return d;
+      }
+      const linked = d.compensations.some(
+        (c) =>
+          c.sourceDate === target.date &&
+          (c.kind ?? "excedente") === "deficit" &&
+          c.status !== "cancelada",
+      );
+      if (linked) {
+        result = {
+          ok: false,
+          code: "linked-compensations",
+          error:
+            "Existem compensações vinculadas ao déficit desta falta. Cancele-as primeiro para poder excluir a falta.",
+        };
+        return d;
+      }
+      return { ...d, faltas: d.faltas.filter((f) => f.id !== id) };
+    });
+    return result;
+  },
+
+  /**
    * Cria um evento de férias/afastamento. Valida: datas, período parcial,
    * tratamento do acordo, sobreposição com outros eventos e a barreira do
    * fechamento anual (não salva evento único atravessando 30/04 — devolve
@@ -442,12 +512,21 @@ export const actions = {
   },
 
   /** Substitui integralmente os dados pelos do backup. */
-  replaceAll(p: { user: User; entries: TimeEntry[]; compensations: Compensation[]; absences?: Absence[] }) {
+  replaceAll(p: {
+    user: User;
+    entries: TimeEntry[];
+    compensations: Compensation[];
+    absences?: Absence[];
+    companyCalendars?: CompanyCalendars;
+    faltas?: Falta[];
+  }) {
     mutate(() => ({
       user: p.user,
       entries: p.entries,
       compensations: p.compensations,
       absences: p.absences ?? [],
+      companyCalendars: p.companyCalendars,
+      faltas: p.faltas ?? [],
     }));
   },
 
@@ -455,7 +534,7 @@ export const actions = {
    * Mescla o backup com os dados atuais, preservando eventos distintos.
    * Deduplicação segura via ID + conteúdo completo (nunca apenas dias/minutos).
    */
-  mergeBackup(p: { entries: TimeEntry[]; compensations: Compensation[]; absences?: Absence[]; companyCalendars?: CompanyCalendars }) {
+  mergeBackup(p: { entries: TimeEntry[]; compensations: Compensation[]; absences?: Absence[]; companyCalendars?: CompanyCalendars; faltas?: Falta[] }) {
     mutate((d) => {
       const entryMerge = mergeByIdAndContent(d.entries, p.entries, entriesEqual);
       const compMerge = mergeByIdAndContent(d.compensations, p.compensations, compsEqual);
@@ -465,6 +544,17 @@ export const actions = {
         p.absences ?? [],
         absencesEqual,
       );
+      // Faltas: união por DATA (uma falta por dia; nunca duplica na mesclagem).
+      // Em colisão de data — ex.: mesmo dia faltado registrado em dois
+      // dispositivos — a falta local já registrada prevalece.
+      const faltaMerge = [...d.faltas];
+      const faltaDates = new Set(faltaMerge.map((f) => f.date));
+      for (const f of p.faltas ?? []) {
+        if (faltaDates.has(f.date)) continue;
+        faltaDates.add(f.date);
+        const id = faltaMerge.some((x) => x.id === f.id) ? nextId(faltaMerge) : f.id;
+        faltaMerge.push({ ...f, id });
+      }
       // Calendários: união POR CICLO — nunca apaga ciclos existentes;
       // em conflito de ciclo, o calendário local já importado prevalece.
       const current = d.companyCalendars ?? [];
@@ -478,6 +568,7 @@ export const actions = {
         compensations: compMerge.merged,
         absences: absenceMerge.merged,
         companyCalendars: mergedCalendars.length > 0 ? mergedCalendars : undefined,
+        faltas: faltaMerge,
       };
     });
   },

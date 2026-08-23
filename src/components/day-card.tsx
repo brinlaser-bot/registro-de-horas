@@ -3,6 +3,7 @@
 import { useState } from "react";
 import {
   ArrowLeftRight,
+  Ban,
   CalendarDays,
   CheckCircle2,
   ChevronDown,
@@ -107,6 +108,10 @@ interface Props {
   onCapComp?: (date: string, kind: CompKind, maxMinutes: number) => void | Promise<void>;
   /** Ausência (férias/afastamento) que cobre o dia, se houver. */
   absence?: Absence;
+  /** Falta registrada no dia (ocorrência de ponto — não é afastamento). */
+  falta?: { id: number; status: "efetiva" | "prevista"; jornadaMinutes: number };
+  /** Remove/cancela a falta (exclusão com guarda de compensação vinculada). */
+  onRemoveFalta?: (id: number) => Promise<void>;
   /** Jornada esperada efetiva do dia (com ausência descontada). */
   effectiveExpected?: number;
   /** Visão central de saldo regular / déficit / acordo a compensar. */
@@ -144,6 +149,8 @@ export function DayCard({
   onCreateComp,
   onCapComp,
   absence,
+  falta,
+  onRemoveFalta,
   effectiveExpected,
   balanceView,
   calendarLabel,
@@ -277,8 +284,26 @@ export function DayCard({
                 <CalendarDays size={14} className="shrink-0" aria-hidden />
                 <span>{calendarLabel}</span>
               </Badge>
+            ) : falta ? (
+              <Badge
+                tone={falta.status === "prevista" ? "sky" : "rose"}
+                className="shrink-0 gap-1.5 py-1"
+              >
+                <Ban size={14} className="shrink-0" aria-hidden />
+                <span>{falta.status === "prevista" ? "Falta prevista" : "Falta"}</span>
+              </Badge>
             ) : (
               statusBadge(d)
+            )}
+            {/* Jornada calendada + falta (ex.: Cinzas 4h): mostra os dois rótulos */}
+            {falta && (absence || calendarLabel) && (
+              <Badge
+                tone={falta.status === "prevista" ? "sky" : "rose"}
+                className="shrink-0 gap-1.5 py-1"
+              >
+                <Ban size={14} className="shrink-0" aria-hidden />
+                <span>{falta.status === "prevista" ? "Falta prevista" : "Falta"}</span>
+              </Badge>
             )}
             {/* Acordo: indicação curta do que ainda falta (sem duplicar no badge) */}
             {absence?.kind === "acordado" &&
@@ -381,6 +406,55 @@ export function DayCard({
                     </span>
                   </div>
                 )}
+            </div>
+          )}
+
+          {/* Falta registrada no dia (ocorrência de ponto — integral) */}
+          {falta && (
+            <div
+              className={`mb-3 rounded-xl border px-3 py-2.5 text-xs font-medium ${
+                falta.status === "prevista"
+                  ? "border-sky-200 bg-sky-50 text-sky-800"
+                  : "border-rose-200 bg-rose-50 text-rose-800"
+              }`}
+            >
+              <div className="flex flex-wrap items-center gap-2">
+                <Ban size={16} className="shrink-0" aria-hidden />
+                <span className="font-bold">
+                  {falta.status === "prevista" ? "Falta prevista" : "Falta registrada"}
+                </span>
+                <span>
+                  · Jornada {falta.status === "prevista" ? "prevista" : "do dia"}:{" "}
+                  {formatMinutes(falta.jornadaMinutes)}
+                </span>
+                {falta.status === "prevista" ? (
+                  <span>· Esta falta ainda não afeta o saldo.</span>
+                ) : d.entries.length === 0 ? (
+                  <span>· Nenhuma batida registrada — déficit gerado pela jornada do dia.</span>
+                ) : null}
+              </div>
+              <div className="mt-2">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="!text-rose-600 hover:!bg-rose-100"
+                  onClick={() => {
+                    const isPrevista = falta.status === "prevista";
+                    if (
+                      !window.confirm(
+                        isPrevista
+                          ? `Cancelar a falta prevista de ${formatDateShortBR(d.date)}?`
+                          : `Excluir a falta de ${formatDateShortBR(d.date)}?\nO déficit gerado por ela será removido.`,
+                      )
+                    ) {
+                      return;
+                    }
+                    void onRemoveFalta?.(falta.id);
+                  }}
+                >
+                  <Trash2 size={13} /> {falta.status === "prevista" ? "Cancelar falta" : "Excluir falta"}
+                </Button>
+              </div>
             </div>
           )}
 

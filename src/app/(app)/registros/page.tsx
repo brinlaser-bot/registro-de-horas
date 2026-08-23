@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { CalendarClock, ChevronLeft, ChevronRight, Clock3, Search, X } from "lucide-react";
+import { Ban, CalendarClock, ChevronLeft, ChevronRight, Clock3, Search, X } from "lucide-react";
 import { actions, getAppData, settingsOf, useAppData, useIsClient } from "@/lib/store";
 import {
   computeDay,
@@ -33,9 +33,11 @@ import {
   type PointPeriod,
 } from "@/lib/periods";
 import { acordoViewOf, buildDebtDays, checkSourceOverflow, extraCapacityForDate } from "@/lib/debt";
+import { effectiveFaltas, faltaOnDate, faltaStatusOf } from "@/lib/faltas";
 import type { CompKind, DayResult, WorkSettings } from "@/lib/types";
 import { DayCard } from "@/components/day-card";
 import { ManualEntryModal, type ManualPairData } from "@/components/manual-entry-modal";
+import { FaltaModal } from "@/components/falta-modal";
 import { Badge, Button, Card, EmptyState, Skeleton } from "@/components/ui";
 import { useToast } from "@/components/toast";
 
@@ -55,12 +57,14 @@ interface RangeSummary {
   acordoTotal: number;
   acordoDone: number;
   acordoPending: number;
+  faltaDays: number; // faltas efetivas no intervalo
+  faltaPrevistaDays: number; // faltas previstas (ainda não valem)
 }
 
 export default function RegistrosPage() {
   const toast = useToast();
   const mounted = useIsClient();
-  const { user, entries, compensations, absences, companyCalendars } = useAppData();
+  const { user, entries, compensations, absences, companyCalendars, faltas } = useAppData();
   const todayStr = todayString();
 
   const settings: WorkSettings = settingsOf(user);
@@ -71,6 +75,10 @@ export default function RegistrosPage() {
   const [query, setQuery] = useState<{ from: string; to: string } | null>(null);
   const [queryDraft, setQueryDraft] = useState({ from: "", to: "" });
   const [manualOpen, setManualOpen] = useState(false);
+  const [faltaOpen, setFaltaOpen] = useState(false);
+
+  // Faltas que JÁ valem (date <= hoje) — previstas não geram déficit/saldo
+  const effectiveFaltaList = useMemo(() => effectiveFaltas(faltas, todayStr), [faltas, todayStr]);
 
   // Relógio para o assistente de saída em tempo real
   const [, setTick] = useState(0);
@@ -96,30 +104,50 @@ export default function RegistrosPage() {
     for (const e of (companyCalendars ?? []).flatMap((c) => c.entries)) {
       if (e.date >= range.from && e.date <= range.to) dates.add(e.date);
     }
+    // Faltas registradas (efetivas E previstas) também ganham card no intervalo
+    for (const f of faltas) {
+      if (f.date >= range.from && f.date <= range.to) dates.add(f.date);
+    }
     return [...dates]
       .sort((a, b) => b.localeCompare(a))
       .map((date) => {
         const cctx = companyDayContext(date, entries, absences, companyCalendars, settings, date === todayStr ? nowMinutes : undefined);
+        const baseView = companyDayBalanceView(cctx);
+        const falta = faltaOnDate(faltas, date);
+        const faltaStatus = falta ? faltaStatusOf(date, todayStr) : null;
         return {
           date,
           ctx: cctx.ctx,
           calendarLabel: cctx.label,
+          falta: falta
+            ? { id: falta.id, status: faltaStatus!, jornadaMinutes: cctx.effectiveExpected }
+            : undefined,
           /* View model central: card e resumo consomem SEMPRE a resolução central
-           * (calendário/folga/evento) — nunca o saldo bruto de computeDay/dayContext. */
-          balanceView: companyDayBalanceView(cctx),
+           * (calendário/folga/evento) — nunca o saldo bruto de computeDay/dayContext.
+           * Falta PREVISTA: saldo/déficit mascarados em 0 até a data chegar. */
+          balanceView:
+            faltaStatus === "prevista"
+              ? { ...baseView, adjustedBalance: 0, adjustedDeficit: 0 }
+              : baseView,
           displayDay: cctx.displayDay,
-          balanceContribution: companyBalanceContribution(cctx),
-          deficitContribution: companyDeficitContribution(cctx),
+          // Falta efetiva rompe a guarda de "dia vazio = 0": ela É a ocorrência do dia.
+          balanceContribution:
+            faltaStatus === "efetiva"
+              ? cctx.adjustedBalance
+              : faltaStatus === "prevista"
+                ? 0
+                : companyBalanceContribution(cctx),
+          deficitContribution: faltaStatus === "prevista" ? 0 : companyDeficitContribution(cctx),
           absence: absenceOnDate(absences, date),
         };
       });
-  }, [entries, absences, companyCalendars, settings, range, todayStr, nowMinutes]);
+  }, [entries, absences, companyCalendars, faltas, settings, range, todayStr, nowMinutes]);
 
   // Resumo do intervalo, AGRUPADO POR CICLO ANUAL (nunca mistura pendências)
   const summaries = useMemo(() => {
     // SEMPRE com a coleção de calendários: a resolução central zera o déficit
     // comum em folga/abonado/recesso/folga a compensar (sem "8h − trabalhado").
-    const debts = buildDebtDays(entries, compensations, settings, range, absences, companyCalendars);
+    const debts = buildDebtDays(entries, compensations, settings, range, absences, companyCalendars, effectiveFaltaList);
     const byCycle = new Map<string, RangeSummary>();
     const get = (cycle: string): RangeSummary => {
       let s = byCycle.get(cycle);
@@ -128,6 +156,7 @@ export default function RegistrosPage() {
           cycle, workedDays: 0, workedMinutes: 0, registrableMinutes: 0, balanceMinutes: 0,
           excessMinutes: 0, deficitMinutes: 0, compensatedMinutes: 0, pendingCompMinutes: 0,
           vacationDays: 0, healthDays: 0, waivedDays: 0, acordoTotal: 0, acordoDone: 0, acordoPending: 0,
+          faltaDays: 0, faltaPrevistaDays: 0,
         };
         byCycle.set(cycle, s);
       }
@@ -169,8 +198,16 @@ export default function RegistrosPage() {
       if (c.status === "pendente") s.pendingCompMinutes += c.minutes;
     }
 
+    // Faltas: efetivas contam como "Faltas"; previstas ficam separadas (opcional)
+    for (const f of faltas) {
+      if (f.date < range.from || f.date > range.to) continue;
+      const s = get(getAnnualPointCycle(f.date));
+      if (f.date <= todayStr) s.faltaDays += 1;
+      else s.faltaPrevistaDays += 1;
+    }
+
     return [...byCycle.values()].sort((a, b) => a.cycle.localeCompare(b.cycle));
-  }, [days, entries, compensations, absences, companyCalendars, settings, range]);
+  }, [days, entries, compensations, absences, companyCalendars, faltas, effectiveFaltaList, settings, range, todayStr]);
 
   /* ── Handlers (preservam comportamento validado) ── */
 
@@ -194,6 +231,7 @@ export default function RegistrosPage() {
   };
 
   const addEntry = async (p: { date: string; time: string; type: EntryType; note: string | null; source?: "live" | "manual" }) => {
+    if (!resolveFaltaConflict(p.date)) return;
     actions.addEntry(p);
     reconcileDay(p.date);
   };
@@ -224,7 +262,7 @@ export default function RegistrosPage() {
     // Idem: a mesma resolução central do card/resumo. Em folga com trabalho
     // (Trabalho em folga) o ajustedDeficit central é 0 → nenhum banner
     // "Déficit pendente" / botão "Quitar com hora extra" é exibido.
-    const debts = buildDebtDays(entries, compensations, settings, range, absences, companyCalendars);
+    const debts = buildDebtDays(entries, compensations, settings, range, absences, companyCalendars, effectiveFaltaList);
     const map = new Map<
       string,
       {
@@ -257,7 +295,47 @@ export default function RegistrosPage() {
       map.set(dd.date, cur);
     }
     return map;
-  }, [entries, compensations, absences, companyCalendars, settings, range, todayStr]);
+  }, [entries, compensations, absences, companyCalendars, effectiveFaltaList, settings, range, todayStr]);
+
+  /** Registrar falta (modal) — validação central no store. */
+  const registerFalta = async (date: string) => {
+    const res = actions.addFalta(date);
+    if (!res.ok) throw new Error(res.error); // modal exibe e permanece aberto
+    setFaltaOpen(false);
+    toast.show(faltaStatusOf(date, todayStr) === "prevista" ? "Falta prevista registrada." : "Falta registrada.");
+  };
+
+  /** Excluir/cancelar falta — bloqueio de compensação vinculada vem do store. */
+  const removeFalta = async (id: number) => {
+    const res = actions.removeFalta(id);
+    if (!res.ok) {
+      toast.show(res.error ?? "Não foi possível excluir a falta.", "error");
+      return;
+    }
+    toast.show("Falta removida. O déficit dela foi revertido.");
+  };
+
+  /**
+   * Conflito falta ↔ batida: nunca manter os dois. Confirma a remoção da falta
+   * antes de registrar o horário; cancelado → nada é alterado.
+   */
+  const resolveFaltaConflict = (date: string): boolean => {
+    const f = faltaOnDate(faltas, date);
+    if (!f) return true;
+    if (
+      !window.confirm(
+        "Existe uma falta registrada para este dia.\nDeseja remover a falta e registrar o horário?",
+      )
+    ) {
+      return false;
+    }
+    const res = actions.removeFalta(f.id);
+    if (!res.ok) {
+      toast.show(res.error ?? "Não foi possível remover a falta.", "error");
+      return false;
+    }
+    return true;
+  };
 
   const createComp = async (payload: { sourceDate: string; targetDate: string; minutes: number; note: string; kind?: CompKind }) => {
     const res = actions.addComp({ ...payload, note: payload.note || null, kind: payload.kind ?? "excedente" });
@@ -270,6 +348,7 @@ export default function RegistrosPage() {
   };
 
   const addManualPair = async (data: ManualPairData) => {
+    if (!resolveFaltaConflict(data.date)) return;
     actions.addEntry({ date: data.date, time: data.entrada, type: "entrada", note: data.note || null, source: "manual" });
     actions.addEntry({ date: data.date, time: data.saida, type: "saida", note: data.note || null, source: "manual" });
     reconcileDay(data.date);
@@ -338,6 +417,9 @@ export default function RegistrosPage() {
           <Button size="sm" onClick={() => setManualOpen(true)}>
             Lançamento manual
           </Button>
+          <Button variant="secondary" size="sm" onClick={() => setFaltaOpen(true)}>
+            <Ban size={14} /> Registrar falta
+          </Button>
         </div>
 
         {/* Consulta personalizada */}
@@ -400,6 +482,10 @@ export default function RegistrosPage() {
                   <Sum label="Férias (dias)" value={String(s.vacationDays)} />
                   <Sum label="Saúde (dias)" value={String(s.healthDays)} />
                   <Sum label="Dispensados (dias)" value={String(s.waivedDays)} />
+                  <Sum label="Faltas (dias)" value={String(s.faltaDays)} />
+                  {s.faltaPrevistaDays > 0 && (
+                    <Sum label="Faltas previstas" value={String(s.faltaPrevistaDays)} />
+                  )}
                   <Sum
                     label="Acordo a compensar"
                     value={`${formatMinutes(s.acordoTotal)} (feito ${formatMinutes(s.acordoDone)} · falta ${formatMinutes(s.acordoPending)})`}
@@ -420,7 +506,7 @@ export default function RegistrosPage() {
         />
       ) : (
         <div className="space-y-4">
-          {days.map(({ date, balanceView, displayDay, absence, calendarLabel }) => (
+          {days.map(({ date, balanceView, displayDay, absence, calendarLabel, falta }) => (
             <DayCard
               key={date}
               result={displayDay}
@@ -431,6 +517,7 @@ export default function RegistrosPage() {
               isToday={date === todayStr}
               absence={absence}
               calendarLabel={calendarLabel}
+              falta={falta}
               effectiveExpected={balanceView.effectiveExpected}
               balanceView={balanceView}
               shortcuts={shortcutsByDate.get(date)}
@@ -443,6 +530,7 @@ export default function RegistrosPage() {
               onCompleteComp={completeComp}
               onCreateComp={createComp}
               onCapComp={capComp}
+              onRemoveFalta={removeFalta}
             />
           ))}
         </div>
@@ -467,6 +555,17 @@ export default function RegistrosPage() {
       </Card>
 
       <ManualEntryModal open={manualOpen} onClose={() => setManualOpen(false)} onSave={addManualPair} />
+      <FaltaModal
+        open={faltaOpen}
+        onClose={() => setFaltaOpen(false)}
+        entries={entries}
+        absences={absences}
+        companyCalendars={companyCalendars}
+        settings={settings}
+        faltas={faltas}
+        todayStr={todayStr}
+        onSave={registerFalta}
+      />
     </div>
   );
 }

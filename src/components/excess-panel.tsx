@@ -22,7 +22,8 @@ import { formatDateShortBR, formatMinutes, todayString, weekdayShort } from "@/l
 import type { Absence } from "@/lib/absences";
 import { annualCycleBounds, getAnnualPointCycle } from "@/lib/periods";
 import type { CompanyCalendars } from "@/lib/company-calendar";
-import type { CompKind, Compensation, TimeEntry, WorkSettings } from "@/lib/types";
+import { effectiveFaltas } from "@/lib/faltas";
+import type { CompKind, Compensation, Falta, TimeEntry, WorkSettings } from "@/lib/types";
 import { Badge, Button, Card, EmptyState, ProgressBar, StatCard } from "@/components/ui";
 import { CompensationForm, type CompFormData } from "@/components/compensation-form";
 
@@ -31,6 +32,8 @@ interface Props {
   compensations: Compensation[];
   absences?: Absence[];
   companyCalendars?: CompanyCalendars;
+  /** Faltas registradas — só as EFETIVAS (date ≤ hoje) geram déficit. */
+  faltas?: Falta[];
   settings: WorkSettings;
   range: { from: string; to: string };
   monthLabel: string;
@@ -42,6 +45,7 @@ export function ExcessPanel({
   compensations,
   absences = [],
   companyCalendars,
+  faltas = [],
   settings,
   range,
   monthLabel,
@@ -53,7 +57,15 @@ export function ExcessPanel({
   const [draftDebt, setDraftDebt] = useState<number | undefined>();
 
   const { excessDays, deficitDays, excessTotals, deficitTotals } = useMemo(() => {
-    const all = buildDebtDays(entries, compensations, settings, range, absences, companyCalendars);
+    const all = buildDebtDays(
+      entries,
+      compensations,
+      settings,
+      range,
+      absences,
+      companyCalendars,
+      effectiveFaltas(faltas, today),
+    );
     const ex = all.filter((d) => d.kind === "excedente");
     const df = all.filter((d) => d.kind === "deficit");
     return {
@@ -62,7 +74,7 @@ export function ExcessPanel({
       excessTotals: totalsOf(ex),
       deficitTotals: totalsOf(df),
     };
-  }, [entries, compensations, absences, settings, range]);
+  }, [entries, compensations, absences, companyCalendars, faltas, settings, range, today]);
 
   // Acordos a compensar: escopo = CICLO ANUAL (não o período 21→20).
   // Um acordo continua ativo até ser quitado, cancelado ou chegar o fechamento anual.
@@ -73,12 +85,20 @@ export function ExcessPanel({
 
   const calendarioDays = useMemo(() => {
     const bounds = annualCycleBounds(getAnnualPointCycle(today));
-    return buildDebtDays(entries, compensations, settings, bounds, absences, companyCalendars)
+    return buildDebtDays(
+      entries,
+      compensations,
+      settings,
+      bounds,
+      absences,
+      companyCalendars,
+      effectiveFaltas(faltas, today),
+    )
       .filter((d) => d.kind === "calendario")
       .map(acordoViewOf)
       .filter((d) => d.remainingMinutes > 0)
       .reverse();
-  }, [entries, compensations, absences, companyCalendars, settings, today]);
+  }, [entries, compensations, absences, companyCalendars, faltas, settings, today]);
 
   const openFor = (date: string, kind: CompKind) => {
     const minutes = openDebtFor(entries, compensations, settings, date, kind, companyCalendars);

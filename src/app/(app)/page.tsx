@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   ArrowLeftRight,
+  Ban,
   CalendarClock,
   Clock3,
   PlusCircle,
@@ -33,6 +34,7 @@ import {
   sameAnnualCycle,
 } from "@/lib/periods";
 import { activeAcordos, canCompleteComp, extraCapacityForDate, kindOf, usesHourExtra } from "@/lib/debt";
+import { canRegisterFalta, faltaConfirmText, faltaOnDate } from "@/lib/faltas";
 import type { CompKind, DayResult, DaySummary } from "@/lib/types";
 import { Badge, Button, Card, EmptyState, Skeleton, StatCard } from "@/components/ui";
 import { QuickPunch } from "@/components/quick-punch";
@@ -59,7 +61,7 @@ function toSummary(d: DayResult, date?: string): DaySummary {
 export default function DashboardPage() {
   const toast = useToast();
   const mounted = useIsClient();
-  const { user, entries, compensations, absences, companyCalendars } = useAppData();
+  const { user, entries, compensations, absences, companyCalendars, faltas } = useAppData();
   const settings = settingsOf(user);
   const todayStr = todayString();
   const period = getPointPeriod(todayStr);
@@ -125,7 +127,69 @@ export default function DashboardPage() {
 
   const range = period;
 
+  /** Falta "hoje": a jornada vem SEMPRE da resolução central (nunca 8h fixas). */
+  const faltaHojeGate = useMemo(
+    () => canRegisterFalta(todayStr, entries, absences, companyCalendars, settings, faltas),
+    [todayStr, entries, absences, companyCalendars, settings, faltas],
+  );
+  const faltaHoje = faltaOnDate(faltas, todayStr);
+
+  /** §3: botão discreto com confirmação simples antes de registrar a falta. */
+  const registerFaltaHoje = async () => {
+    const gate = canRegisterFalta(todayStr, entries, absences, companyCalendars, settings, faltas);
+    if (!gate.ok) {
+      toast.show(gate.error ?? "Não é possível registrar falta nesta data.", "error");
+      return;
+    }
+    if (!window.confirm(faltaConfirmText(todayStr, gate.jornadaMinutes ?? 0, todayStr))) return;
+    const res = actions.addFalta(todayStr);
+    if (!res.ok) {
+      toast.show(res.error ?? "Não foi possível registrar a falta.", "error");
+      return;
+    }
+    toast.show("Falta registrada — o déficit corresponde à jornada do dia.");
+  };
+
+  /** §15: falta de hoje é passada → "Excluir falta", com confirmação. */
+  const removeFaltaHoje = async () => {
+    const f = faltaOnDate(faltas, todayStr);
+    if (!f) return;
+    if (
+      !window.confirm(
+        `Excluir a falta de ${formatDateShortBR(todayStr)}?\nO déficit gerado por ela será removido.`,
+      )
+    ) {
+      return;
+    }
+    const res = actions.removeFalta(f.id);
+    if (!res.ok) {
+      toast.show(res.error ?? "Não foi possível excluir a falta.", "error");
+      return;
+    }
+    toast.show("Falta removida. O déficit dela foi revertido.");
+  };
+
+  /**
+   * §16: conflito falta ↔ nova batida — nunca ambos no mesmo dia. Confirma a
+   * remoção da falta; se cancelar, NADA é alterado.
+   */
+  const resolveFaltaConflict = (date: string): boolean => {
+    const f = faltaOnDate(faltas, date);
+    if (!f) return true;
+    const ok = window.confirm(
+      "Existe uma falta registrada para este dia.\nDeseja remover a falta e registrar o horário?",
+    );
+    if (!ok) return false;
+    const res = actions.removeFalta(f.id);
+    if (!res.ok) {
+      toast.show(res.error ?? "Não foi possível remover a falta.", "error");
+      return false;
+    }
+    return true;
+  };
+
   const onAddEntry = async (p: { date: string; time: string; type: EntryType; note: string | null }) => {
+    if (!resolveFaltaConflict(p.date)) return;
     actions.addEntry(p);
   };
 
@@ -155,6 +219,7 @@ export default function DashboardPage() {
 
   /** Saída em 1 clique: registra a saída (hora atual) e quita compensações de saída antecipada. */
   const smartExit = async (time: string, compIds: number[]) => {
+    if (!resolveFaltaConflict(todayStr)) return;
     actions.addEntry({
       date: todayStr,
       time,
@@ -329,6 +394,28 @@ export default function DashboardPage() {
         onDeleteEntry={onDeleteEntry}
       />
 
+      {/* §3: "Falta hoje" — ação discreta; some quando o dia já tem batidas,
+          folga/cobertura integral (o gate central decide). */}
+      {faltaHoje ? (
+        <p className="flex items-center gap-2 text-xs text-slate-400">
+          <Ban size={12} className="text-rose-500" />
+          Falta registrada hoje — o déficit corresponde à jornada efetiva do dia.
+          <button
+            type="button"
+            className="font-semibold text-rose-500 underline-offset-2 hover:underline"
+            onClick={removeFaltaHoje}
+          >
+            Excluir falta
+          </button>
+        </p>
+      ) : faltaHojeGate.ok ? (
+        <div>
+          <Button variant="ghost" size="sm" onClick={registerFaltaHoje}>
+            <Ban size={13} /> Falta hoje
+          </Button>
+        </div>
+      ) : null}
+
       {/* Gestão de excedentes */}
       <div>
         <h3 className="mb-3 text-sm font-extrabold uppercase tracking-wider text-slate-400">
@@ -340,6 +427,7 @@ export default function DashboardPage() {
             compensations={compensations}
             absences={absences}
             companyCalendars={companyCalendars}
+            faltas={faltas}
             settings={settings}
             range={range}
             monthLabel={periodLabel(period)}

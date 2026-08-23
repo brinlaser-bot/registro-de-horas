@@ -1,5 +1,5 @@
 // Import/Export de backup (JSON) com versionamento e validação.
-import type { AppData, Compensation, TimeEntry, User } from "./types";
+import type { AppData, Compensation, Falta, TimeEntry, User } from "./types";
 import type { Absence } from "./absences";
 import { normalizeCompanyCalendars, type CompanyCalendars } from "./company-calendar";
 
@@ -20,6 +20,8 @@ export interface BackupPayload {
   compensations: Compensation[];
   absences: Absence[];
   companyCalendars?: CompanyCalendars;
+  /** Faltas (inclusive previstas). Campo opcional: backups antigos não o têm. */
+  faltas?: Falta[];
 }
 
 export interface BackupSummary {
@@ -38,6 +40,7 @@ export interface ParsedBackup {
   compensations: Compensation[];
   absences: Absence[];
   companyCalendars?: CompanyCalendars;
+  faltas: Falta[];
   version: number;
   summary: BackupSummary;
 }
@@ -105,6 +108,18 @@ function validAbsence(v: unknown): v is Absence {
   );
 }
 
+/** Validação de falta em backups (campo opcional, introduzido sem nova versão). */
+function validFalta(v: unknown): v is Falta {
+  if (!v || typeof v !== "object") return false;
+  const f = v as Record<string, unknown>;
+  return isNum(f.id) && isDate(f.date) && isNum(f.createdAt);
+}
+
+/** Comparação de conteúdo para mesclagem de faltas: uma falta por dia. */
+export function faltasEqual(a: Falta, b: Falta): boolean {
+  return a.date === b.date;
+}
+
 /** Comparação de conteúdo para mesclagem de ausências. */
 export function absencesEqual(a: Absence, b: Absence): boolean {
   return (
@@ -130,6 +145,7 @@ export function buildBackupPayload(data: AppData): BackupPayload {
     compensations: data.compensations,
     absences: data.absences ?? [],
     companyCalendars: data.companyCalendars,
+    faltas: data.faltas ?? [],
   };
 }
 
@@ -182,6 +198,12 @@ export function parseBackup(
   const companyCalendars =
     normalizeCompanyCalendars(obj.companyCalendars) ??
     normalizeCompanyCalendars(obj.companyCalendar);
+  // Retrocompatibilidade: backups v1/v2/v3 antigos não possuem "faltas" → [].
+  const rawFaltas = obj.faltas;
+  if (rawFaltas !== undefined && (!Array.isArray(rawFaltas) || !rawFaltas.every(validFalta))) {
+    return { ok: false, error: "bad-faltas" };
+  }
+  const faltas = (rawFaltas as Falta[] | undefined) ?? [];
 
   const allDates = [
     ...entries.map((e) => e.date),
@@ -200,7 +222,7 @@ export function parseBackup(
     periodTo,
   };
 
-  return { ok: true, backup: { user, entries, compensations, absences, companyCalendars, version, summary } };
+  return { ok: true, backup: { user, entries, compensations, absences, companyCalendars, faltas, version, summary } };
 }
 
 /* ──────────────────────────────────────────────────────────
