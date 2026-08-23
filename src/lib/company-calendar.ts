@@ -476,6 +476,45 @@ export function companyDayContext(
   };
 }
 
+/* ── Apresentação da linha de uma compensação (origem/destino) ── */
+
+export interface CompDayLineView {
+  /** Horas realmente trabalhadas no dia (somente batidas — nunca abonadas). */
+  workedMinutes: number;
+  /** Saldo pela RESOLUÇÃO CENTRAL (folga/abonado → +trabalhado; nunca "8h − trabalhado"). */
+  balanceMinutes: number;
+  /** Sufixo semântico quando há trabalho fora da jornada: "em folga" / "em feriado". */
+  contextSuffix: string | null;
+}
+
+/**
+ * View model para a linha "origem/destino: Xh trabalhados (±Y de saldo)" da
+ * aba Compensações. Mesmo critério de existência do enrichComp (sem batidas →
+ * null), mas o saldo vem da resolução central aprovada — evita o "−6h" em
+ * folgas/dias abonados. APENAS apresentação: não altera cálculo nem store.
+ */
+export function compDayLineView(
+  date: string,
+  entries: TimeEntry[],
+  absences: Absence[],
+  calendars: CompanyCalendars | undefined,
+  settings: WorkSettings,
+): CompDayLineView | null {
+  const cctx = companyDayContext(date, entries, absences, calendars ?? [], settings);
+  const day = cctx.ctx.day;
+  if (day.entries.length === 0) return null; // sem batidas: linha não é exibida
+  return {
+    workedMinutes: day.workedMinutes,
+    balanceMinutes: cctx.adjustedBalance,
+    contextSuffix:
+      cctx.type === "trabalho-folga"
+        ? "em folga"
+        : cctx.marker === "trabalho-feriado"
+          ? "em feriado"
+          : null,
+  };
+}
+
 export function calendarMonthlyTotals(entries: CompanyCalendarEntry[]): Record<string, number> {
   const out: Record<string, number> = {};
   for (const e of entries) {

@@ -10,6 +10,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { actions, enrichComp, settingsOf, useAppData, useIsClient } from "@/lib/store";
+import { compDayLineView } from "@/lib/company-calendar";
 import { formatDateBR, formatDateShortBR, formatMinutes, todayString } from "@/lib/time";
 import type { CompKind } from "@/lib/types";
 import type { CompFormData } from "@/components/compensation-form";
@@ -335,16 +336,25 @@ export default function CompensacoesPage() {
                         )}
                       </span>
                     )}
-                    {c.targetDay && (
-                      <span>
-                        destino: <b>{formatMinutes(c.targetDay.workedMinutes)}</b> trabalhados
-                        {c.targetDay.balanceMinutes < 0 && (
-                          <span className="text-amber-600">
-                            ({formatMinutes(c.targetDay.balanceMinutes)} de saldo)
-                          </span>
-                        )}
-                      </span>
-                    )}
+                    {(() => {
+                      // Saldo do dia-destino pela RESOLUÇÃO CENTRAL (apresentação):
+                      // folga/abonado com trabalho → +trabalhado, nunca "−8h".
+                      const line = c.targetDay
+                        ? compDayLineView(c.targetDate, entries, absences, companyCalendars, settings)
+                        : null;
+                      if (!line) return null;
+                      return (
+                        <span>
+                          destino: <b>{formatMinutes(line.workedMinutes)}</b> trabalhados
+                          {line.contextSuffix ? ` ${line.contextSuffix}` : ""}
+                          {line.balanceMinutes !== 0 && (
+                            <span className={line.balanceMinutes > 0 ? "text-emerald-600" : "text-amber-600"}>
+                              ({line.balanceMinutes > 0 ? "+" : ""}{formatMinutes(line.balanceMinutes)} de saldo)
+                            </span>
+                          )}
+                        </span>
+                      );
+                    })()}
                     {c.note && <span className="italic">“{c.note}”</span>}
                     <span
                       className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${
