@@ -7,6 +7,8 @@ import {
   computeDay,
   formatDateShortBR,
   formatMinutes,
+  FUTURE_DATE_ERROR,
+  isFutureDate,
   nowMinutesLocal,
   todayString,
   type EntryType,
@@ -231,14 +233,27 @@ export default function RegistrosPage() {
   };
 
   const addEntry = async (p: { date: string; time: string; type: EntryType; note: string | null; source?: "live" | "manual" }) => {
+    // §7: data futura → bloquear ANTES de tratar qualquer conflito com falta
+    if (isFutureDate(p.date)) {
+      toast.show(FUTURE_DATE_ERROR, "error");
+      return;
+    }
     if (!resolveFaltaConflict(p.date)) return;
-    actions.addEntry(p);
+    const res = actions.addEntry(p);
+    if (!res.ok) {
+      toast.show(res.error ?? FUTURE_DATE_ERROR, "error");
+      return;
+    }
     reconcileDay(p.date);
   };
 
-  const updateEntry = async (id: number, patch: { time?: string; type?: EntryType; note?: string | null }) => {
+  const updateEntry = async (id: number, patch: { time?: string; type?: EntryType; note?: string | null; date?: string }) => {
     const target = entries.find((e) => e.id === id);
-    actions.updateEntry(id, patch);
+    const res = actions.updateEntry(id, patch);
+    if (!res.ok) {
+      toast.show(res.error ?? "Não foi possível editar o registro.", "error");
+      return;
+    }
     if (target) reconcileDay(target.date);
   };
 
@@ -348,9 +363,22 @@ export default function RegistrosPage() {
   };
 
   const addManualPair = async (data: ManualPairData) => {
+    // §4/§7: data futura → bloquear ANTES de tratar qualquer conflito com falta
+    if (isFutureDate(data.date)) {
+      toast.show(FUTURE_DATE_ERROR, "error");
+      return;
+    }
     if (!resolveFaltaConflict(data.date)) return;
-    actions.addEntry({ date: data.date, time: data.entrada, type: "entrada", note: data.note || null, source: "manual" });
-    actions.addEntry({ date: data.date, time: data.saida, type: "saida", note: data.note || null, source: "manual" });
+    const r1 = actions.addEntry({ date: data.date, time: data.entrada, type: "entrada", note: data.note || null, source: "manual" });
+    if (!r1.ok) {
+      toast.show(r1.error ?? FUTURE_DATE_ERROR, "error");
+      return;
+    }
+    const r2 = actions.addEntry({ date: data.date, time: data.saida, type: "saida", note: data.note || null, source: "manual" });
+    if (!r2.ok) {
+      toast.show(r2.error ?? FUTURE_DATE_ERROR, "error");
+      return;
+    }
     reconcileDay(data.date);
     toast.show("Lançamento manual registrado!");
   };

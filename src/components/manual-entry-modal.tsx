@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { CalendarPlus } from "lucide-react";
 import { Button, Input, Modal } from "@/components/ui";
 import { useToast } from "@/components/toast";
-import { formatMinutes, toMinutes, todayString } from "@/lib/time";
+import { formatMinutes, FUTURE_DATE_ERROR, isFutureDate, toMinutes, todayString } from "@/lib/time";
 
 export interface ManualPairData {
   date: string;
@@ -44,8 +44,9 @@ export function ManualEntryModal({ open, onClose, onSave }: Props) {
 
   const submit = async () => {
     if (!form.date) return toast.show("Informe a data.", "error");
-    if (form.date > today) {
-      return toast.show("Não é permitido registrar data futura.", "error");
+    // Regra absoluta (helper central — data local, nunca UTC): sem batida futura
+    if (isFutureDate(form.date, today)) {
+      return toast.show(FUTURE_DATE_ERROR, "error");
     }
     if (!form.entrada || !form.saida) {
       return toast.show("Informe a hora de entrada e a hora de saída.", "error");

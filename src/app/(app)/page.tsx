@@ -19,6 +19,8 @@ import {
   expectedMinutesOf,
   formatDateShortBR,
   formatMinutes,
+  FUTURE_DATE_ERROR,
+  isFutureDate,
   nowMinutesLocal,
   todayString,
   weekdayShort,
@@ -189,8 +191,16 @@ export default function DashboardPage() {
   };
 
   const onAddEntry = async (p: { date: string; time: string; type: EntryType; note: string | null }) => {
+    // §7: data futura → bloquear ANTES de tratar qualquer conflito com falta
+    if (isFutureDate(p.date)) {
+      toast.show(FUTURE_DATE_ERROR, "error");
+      return;
+    }
     if (!resolveFaltaConflict(p.date)) return;
-    actions.addEntry(p);
+    const res = actions.addEntry(p);
+    if (!res.ok) {
+      toast.show(res.error ?? FUTURE_DATE_ERROR, "error");
+    }
   };
 
   const onDeleteEntry = async (id: number) => actions.deleteEntry(id);
@@ -219,13 +229,22 @@ export default function DashboardPage() {
 
   /** Saída em 1 clique: registra a saída (hora atual) e quita compensações de saída antecipada. */
   const smartExit = async (time: string, compIds: number[]) => {
+    // §7: data futura → bloquear ANTES de tratar qualquer conflito com falta
+    if (isFutureDate(todayStr)) {
+      toast.show(FUTURE_DATE_ERROR, "error");
+      return;
+    }
     if (!resolveFaltaConflict(todayStr)) return;
-    actions.addEntry({
+    const res = actions.addEntry({
       date: todayStr,
       time,
       type: "saida",
       note: "Saída sugerida pelo assistente",
     });
+    if (!res.ok) {
+      toast.show(res.error ?? FUTURE_DATE_ERROR, "error");
+      return;
+    }
     for (const id of compIds) actions.completeComp(id);
     toast.show(
       compIds.length > 0

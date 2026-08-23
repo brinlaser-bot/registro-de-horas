@@ -258,17 +258,19 @@ check("N. 20/08 com jornada completa registrada: falta bloqueada", () => {
   assert.match(gate.error ?? "", /registros de horário/);
 });
 
-/* ── O. prevista + nova batida → remover falta antes ──────── */
-check("O. falta prevista 28/08: excluir e bater o ponto no mesmo dia — gate passa a bloquear (sem falta+trabalho juntos)", () => {
+/* ── O. falta + nova batida → remover falta antes ─────────── */
+check("O. falta 18/08: excluir e bater o ponto no mesmo dia — gate passa a bloquear (sem falta+trabalho juntos)", () => {
   reset();
-  assert.equal(actions.addFalta("2026-08-28").ok, true);
+  assert.equal(actions.addFalta("2026-08-18").ok, true);
   const faltaId = getAppData().faltas[0].id;
   // Fluxo da UI (§16): confirmada a remoção → remove falta → registra a batida
+  // (data <= hoje: batida futura é proibida pela regra absoluta de ponto)
   assert.equal(actions.removeFalta(faltaId).ok, true, "sem compensação vinculada: remoção livre");
   assert.equal(getAppData().faltas.length, 0);
-  actions.addEntry({ date: "2026-08-28", time: "08:00", type: "entrada", note: null });
+  const punch = actions.addEntry({ date: "2026-08-18", time: "08:00", type: "entrada", note: null });
+  assert.equal(punch.ok, true);
   const st = getAppData();
-  assert.equal(canRegisterFalta("2026-08-28", st.entries, st.absences, st.companyCalendars, settings, st.faltas).ok, false);
+  assert.equal(canRegisterFalta("2026-08-18", st.entries, st.absences, st.companyCalendars, settings, st.faltas).ok, false);
 });
 
 /* ── P. excluir falta sem compensação: déficit desaparece ─── */

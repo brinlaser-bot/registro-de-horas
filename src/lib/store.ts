@@ -3,7 +3,7 @@
 // Store client-side com persistência em localStorage.
 // Uso pessoal: todos os dados ficam apenas no navegador.
 import { useEffect, useState, useSyncExternalStore } from "react";
-import { computeDay, formatMinutes, todayString, type EntryType } from "./time";
+import { computeDay, formatMinutes, FUTURE_DATE_ERROR, isFutureDate, todayString, type EntryType } from "./time";
 import { buildSeedData, DEFAULT_USER } from "./seed-data";
 import { absencesEqual, compsEqual, entriesEqual, mergeByIdAndContent } from "./backup";
 import { canCompleteComp, extraCapacityForDate, usesHourExtra } from "./debt";
@@ -144,27 +144,54 @@ const nextId = (rows: { id: number }[]) =>
   rows.reduce((m, r) => Math.max(m, r.id), 0) + 1;
 
 export const actions = {
+  /**
+   * Cria uma batida. REGRA ABSOLUTA: somente em data <= hoje — batida em
+   * data futura é rejeitada aqui (não apenas na UI), qualquer que seja a
+   * origem (lançamento manual, atalho, QuickPunch, Smart Exit, etc.).
+   * Falta prevista futura continua permitida — a regra é só de ponto.
+   */
   addEntry(p: {
     date: string;
     time: string;
     type: EntryType;
     note: string | null;
     source?: "live" | "manual";
-  }) {
-    mutate((d) => ({
-      ...d,
-      entries: [
-        ...d.entries,
-        { id: nextId(d.entries), ...p, source: p.source ?? "live" },
-      ],
-    }));
+  }): ActionResult {
+    let result: ActionResult = OK;
+    mutate((d) => {
+      if (isFutureDate(p.date)) {
+        result = { ok: false, code: "invalid", error: FUTURE_DATE_ERROR };
+        return d;
+      }
+      return {
+        ...d,
+        entries: [
+          ...d.entries,
+          { id: nextId(d.entries), ...p, source: p.source ?? "live" },
+        ],
+      };
+    });
+    return result;
   },
 
-  updateEntry(id: number, patch: Partial<Pick<TimeEntry, "time" | "type" | "note">>) {
-    mutate((d) => ({
-      ...d,
-      entries: d.entries.map((e) => (e.id === id ? { ...e, ...patch, edited: true } : e)),
-    }));
+  /**
+   * Edita uma batida existente. Registros históricos seguem editáveis
+   * (hora/tipo/observação, e data quando informada) — mas NUNCA se move um
+   * registro para data futura: a mesma regra absoluta se aplica à edição.
+   */
+  updateEntry(id: number, patch: Partial<Pick<TimeEntry, "time" | "type" | "note" | "date">>): ActionResult {
+    let result: ActionResult = OK;
+    mutate((d) => {
+      if (patch.date && isFutureDate(patch.date)) {
+        result = { ok: false, code: "invalid", error: FUTURE_DATE_ERROR };
+        return d;
+      }
+      return {
+        ...d,
+        entries: d.entries.map((e) => (e.id === id ? { ...e, ...patch, edited: true } : e)),
+      };
+    });
+    return result;
   },
 
   deleteEntry(id: number) {

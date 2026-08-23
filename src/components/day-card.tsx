@@ -22,7 +22,7 @@ import {
 } from "lucide-react";
 import type { Compensation, DayResult, WorkSettings } from "@/lib/types";
 import type { EntryType, TimeEntryLike } from "@/lib/time";
-import { formatDateShortBR, formatMinutes, nextWorkday, nowTimeString, todayString, weekdayLong } from "@/lib/time";
+import { formatDateShortBR, formatMinutes, isFutureDate, nextWorkday, nowTimeString, todayString, weekdayLong } from "@/lib/time";
 import { Badge, Button, Input, Select } from "@/components/ui";
 import { CompensationForm, type CompFormData } from "@/components/compensation-form";
 import { SmartExit } from "@/components/smart-exit";
@@ -178,6 +178,10 @@ export function DayCard({
 
   const d = result;
   const pendingComp = compsForDate.find((c) => c.status === "pendente");
+  // REGRA ABSOLUTA: batidas só em data <= hoje. Em card FUTURO nenhum controle
+  // de ponto é oferecido (formulário, atalhos, Smart Exit) — o card fica
+  // somente leitura (Falta prevista, métricas e Cancelar falta permanecem).
+  const futureDay = isFutureDate(d.date);
 
   const add = async (type?: EntryType, time?: string) => {
     if (busy) return;
@@ -336,8 +340,8 @@ export function DayCard({
 
       {expanded && (
         <div className="border-t border-slate-100 px-5 py-4">
-          {/* Assistente de saída (somente para o dia em andamento) */}
-          {d.open && (
+          {/* Assistente de saída (somente para o dia em andamento; nunca no futuro) */}
+          {d.open && !futureDay && (
             <div className="mb-4">
               <SmartExit
                 date={d.date}
@@ -647,8 +651,8 @@ export function DayCard({
               ),
             )}
 
-            {/* Formulário adicionar */}
-            {showAdd ? (
+            {/* Formulário adicionar — NUNCA em data futura (card vira somente leitura) */}
+            {!futureDay && (showAdd ? (
               <div className="flex flex-wrap items-end gap-2 rounded-xl border border-dashed border-slate-300 bg-white p-3">
                 <Select
                   label="Tipo"
@@ -673,25 +677,27 @@ export function DayCard({
               >
                 <Plus size={14} /> Adicionar registro manual
               </button>
-            )}
+            ))}
           </div>
 
-          {/* Atalhos */}
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Atalhos:</span>
-            <Button variant="ghost" size="sm" onClick={() => add("entrada", nowTimeString())}>
-              <LogIn size={13} /> Entrada agora
-            </Button>
-            <Button variant="ghost" size="sm" onClick={() => add("saida", nowTimeString())}>
-              <LogOut size={13} /> Saída agora
-            </Button>
-            <Button variant="ghost" size="sm" onClick={() => add("saida", settings.lunchStart)}>
-              <Coffee size={13} /> Almoço {settings.lunchStart}
-            </Button>
-            <Button variant="ghost" size="sm" onClick={() => add("entrada", settings.lunchEnd)}>
-              <Zap size={13} /> Volta {settings.lunchEnd}
-            </Button>
-          </div>
+          {/* Atalhos — NUNCA em data futura */}
+          {!futureDay && (
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Atalhos:</span>
+              <Button variant="ghost" size="sm" onClick={() => add("entrada", nowTimeString())}>
+                <LogIn size={13} /> Entrada agora
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => add("saida", nowTimeString())}>
+                <LogOut size={13} /> Saída agora
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => add("saida", settings.lunchStart)}>
+                <Coffee size={13} /> Almoço {settings.lunchStart}
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => add("entrada", settings.lunchEnd)}>
+                <Zap size={13} /> Volta {settings.lunchEnd}
+              </Button>
+            </div>
+          )}
 
           <p className="mt-3 text-[11px] text-slate-400">
             * "No ponto" é o total que pode ser lançado no sistema da empresa (limitado a{" "}

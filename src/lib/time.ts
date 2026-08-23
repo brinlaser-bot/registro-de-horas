@@ -85,6 +85,21 @@ export function todayString(): string {
   return dateToString(new Date());
 }
 
+/**
+ * REGRA ABSOLUTA de ponto: registros de horário (TimeEntry) só podem ser
+ * criados/movidos para data <= hoje. Comparação pura de strings
+ * YYYY-MM-DD (data LOCAL — nunca UTC, para não virar o dia no fuso).
+ *
+ * ATENÇÃO: esta regra é exclusiva de BATIDAS. Falta prevista PODE ser
+ * futura; férias/afastamentos e compensações têm regras próprias.
+ */
+export const FUTURE_DATE_ERROR = "Não é possível registrar horários em uma data futura.";
+
+/** Verdadeiro quando a data é posterior a hoje (também usado para ocultar controles na UI). */
+export function isFutureDate(date: string, today: string = todayString()): boolean {
+  return date > today;
+}
+
 /** "YYYY-MM-DD" -> Date (meio-dia local, evita off-by-one de UTC) */
 export function parseDate(s: string): Date {
   const [y, m, d] = s.split("-").map(Number);
