@@ -6,7 +6,7 @@ import { Button, Input, Modal, Select } from "@/components/ui";
 import { useToast } from "@/components/toast";
 import { formatDateBR, formatMinutes, todayString, weekdayShort } from "@/lib/time";
 import type { CompKind, TargetSuggestion } from "@/lib/types";
-import type { ExtraCapacity } from "@/lib/debt";
+import { usesHourExtra, type ExtraCapacity } from "@/lib/debt";
 import { getAnnualPointCycle, sameAnnualCycle } from "@/lib/periods";
 
 export interface CompFormData {
@@ -110,7 +110,7 @@ export function CompensationForm({
   }, [open, initial, kind]);
 
   // ── Validação visual (não substitui a validação central do store) ──
-  const usesCapacity = kind === "deficit" || kind === "acordo";
+  const usesCapacity = usesHourExtra(kind);
   const cap = usesCapacity && getCapacity ? getCapacity(form.targetDate) : null;
   const crossCycle =
     !!form.sourceDate && !!form.targetDate && !sameAnnualCycle(form.sourceDate, form.targetDate);
@@ -172,7 +172,9 @@ export function CompensationForm({
           ? "Regra da empresa: excedente acima do limite diário deve ser compensado em outro dia."
           : kind === "acordo"
             ? "Compensação de horas de afastamento acordado, respeitando o teto diário."
-            : "Quitação de saldo negativo com hora extra, respeitando o teto diário."
+            : kind === "calendario"
+              ? "Quitação de obrigação do calendário da empresa com hora extra, respeitando o teto diário."
+              : "Quitação de saldo negativo com hora extra, respeitando o teto diário."
       }
       footer={
         <>
@@ -202,7 +204,8 @@ export function CompensationForm({
             label={copy.sourceLabel}
             type="date"
             value={form.sourceDate}
-            max={todayString()}
+            // Obrigações de calendário podem ser futuras (planejamento antecipado)
+            max={kind === "calendario" ? undefined : todayString()}
             onChange={(e) => setForm({ ...form, sourceDate: e.target.value })}
           />
           <Input
@@ -264,7 +267,7 @@ export function CompensationForm({
               <div className="grid gap-1 sm:grid-cols-2">
                 {pendingDebtMinutes !== undefined && (
                   <p>
-                    <b>{kind === "acordo" ? "Acordo pendente:" : "Déficit pendente:"}</b>{" "}
+                    <b>{kind === "acordo" ? "Acordo pendente:" : kind === "calendario" ? "Obrigação de calendário:" : "Déficit pendente:"}</b>{" "}
                     {formatMinutes(pendingDebtMinutes)}
                   </p>
                 )}

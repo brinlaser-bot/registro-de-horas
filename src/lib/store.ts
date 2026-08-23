@@ -6,7 +6,7 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import { computeDay, formatMinutes, todayString, type EntryType } from "./time";
 import { buildSeedData, DEFAULT_USER } from "./seed-data";
 import { absencesEqual, compsEqual, entriesEqual, mergeByIdAndContent } from "./backup";
-import { canCompleteComp, extraCapacityForDate } from "./debt";
+import { canCompleteComp, extraCapacityForDate, usesHourExtra } from "./debt";
 import { validateAbsence, type Absence, type AbsenceSplit } from "./absences";
 import { sameAnnualCycle } from "./periods";
 import { normalizeCompanyCalendars, type CompanyCalendar, type CompanyCalendars } from "./company-calendar";
@@ -194,7 +194,8 @@ export const actions = {
         return d;
       }
       // Regra central: hora extra nunca ultrapassa a capacidade real do dia de destino
-      if ((kind === "deficit" || kind === "acordo") && p.status !== "cancelada") {
+      // (déficit, acordo E calendário disputam a mesma hora extra — anti dupla quitação)
+      if (usesHourExtra(kind) && p.status !== "cancelada") {
         const cap = extraCapacityForDate(
           p.targetDate,
           d.entries,
@@ -263,7 +264,7 @@ export const actions = {
 
       if (
         touchesCapacity &&
-        ((next.kind ?? "excedente") === "deficit" || (next.kind ?? "excedente") === "acordo") &&
+        usesHourExtra(next.kind ?? "excedente") &&
         next.status !== "cancelada"
       ) {
         const cap = extraCapacityForDate(

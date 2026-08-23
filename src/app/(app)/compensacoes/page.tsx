@@ -13,7 +13,14 @@ import { actions, enrichComp, settingsOf, useAppData, useIsClient } from "@/lib/
 import { formatDateBR, formatDateShortBR, formatMinutes, todayString } from "@/lib/time";
 import type { CompKind } from "@/lib/types";
 import type { CompFormData } from "@/components/compensation-form";
-import { activeAcordos, canCompleteComp, extraCapacityForDate } from "@/lib/debt";
+import {
+  activeAcordos,
+  activeCalendarObligations,
+  canCompleteComp,
+  extraCapacityForDate,
+  kindOf,
+  usesHourExtra,
+} from "@/lib/debt";
 import { annualCycleBounds, getAnnualPointCycle } from "@/lib/periods";
 import { Badge, Button, Card, EmptyState, Skeleton } from "@/components/ui";
 import { CompensationForm } from "@/components/compensation-form";
@@ -22,7 +29,7 @@ import { useToast } from "@/components/toast";
 export default function CompensacoesPage() {
   const toast = useToast();
   const mounted = useIsClient();
-  const { user, entries, compensations } = useAppData();
+  const { user, entries, compensations, absences, companyCalendars } = useAppData();
   const settings = settingsOf(user);
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<number | null>(null);
@@ -42,10 +49,24 @@ export default function CompensacoesPage() {
   const cycle = getAnnualPointCycle(todayStr);
   const cycleBounds = useMemo(() => annualCycleBounds(cycle), [cycle]);
 
-  const { absences } = useAppData();
   const acordosAtivos = useMemo(
     () => activeAcordos(entries, compensations, settings, cycleBounds, absences),
     [entries, compensations, absences, settings, cycleBounds],
+  );
+
+  // Obrigações DERIVADAS do calendário da empresa (somente o ciclo anual atual).
+  // Futuras ficam visíveis para planejamento; nada é persistido no store.
+  const calObligations = useMemo(
+    () =>
+      activeCalendarObligations(
+        entries,
+        compensations,
+        settings,
+        cycleBounds,
+        companyCalendars,
+        todayStr,
+      ),
+    [entries, compensations, settings, cycleBounds, companyCalendars, todayStr],
   );
 
   const [formKind, setFormKind] = useState<CompKind>("excedente");
@@ -59,6 +80,18 @@ export default function CompensacoesPage() {
       targetDate: todayStr,
       minutes: remainingMinutes,
       note: `Acordo de ${formatDateShortBR(sourceDate)}`,
+    });
+    setModalOpen(true);
+  };
+
+  /** Abre o modal pré-preenchido para uma obrigação do calendário da empresa */
+  const openCalendarioForm = (sourceDate: string, remainingMinutes: number) => {
+    setFormKind("calendario");
+    setFormInitial({
+      sourceDate,
+      targetDate: todayStr,
+      minutes: remainingMinutes,
+      note: `Obrigação de calendário de ${formatDateShortBR(sourceDate)}`,
     });
     setModalOpen(true);
   };
@@ -151,16 +184,76 @@ export default function CompensacoesPage() {
         </Button>
       </div>
 
-      {pendentes.length > 0 && (
-        <div className="flex flex-wrap gap-3 rounded-2xl border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm font-semibold text-indigo-700">
-          <span className="inline-flex items-center gap-1.5">
-            <ArrowLeftRight size={15} /> {pendentes.length} pendente(s)
-          </span>
-          <span>·</span>
-          <span>{formatMinutes(pendingMinutes)} a compensar</span>
-          <span>·</span>
-          <span className="text-indigo-500">{concluidas.length} já concluída(s)</span>
+      {(pendentes.length > 0 || calObligations.length > 0 || acordosAtivos.length > 0) && (
+        <div className="flex flex-wrap gap-x-3 gap-y-1 rounded-2xl border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm font-semibold text-indigo-700">
+          {pendentes.length > 0 && (
+            <>
+              <span className="inline-flex items-center gap-1.5">
+                <ArrowLeftRight size={15} /> {pendentes.length} pendente(s)
+              </span>
+              <span>·</span>
+              <span>{formatMinutes(pendingMinutes)} a compensar</span>
+            </>
+          )}
+          {calObligations.length > 0 && (
+            <>
+              {pendentes.length > 0 && <span>·</span>}
+              <span className="text-amber-600">
+                Calendário a compensar: {calObligations.length} obrigação(ões) ·{" "}
+                {formatMinutes(calObligations.reduce((s, o) => s + o.remainingMinutes, 0))} restantes
+              </span>
+            </>
+          )}
+          {acordosAtivos.length > 0 && (
+            <>
+              {(pendentes.length > 0 || calObligations.length > 0) && <span>·</span>}
+              <span className="text-violet-600">
+                Acordos a compensar: {acordosAtivos.length} ·{" "}
+                {formatMinutes(acordosAtivos.reduce((s, a) => s + a.remainingMinutes, 0))} restantes
+              </span>
+            </>
+          )}
+          {concluidas.length > 0 && (
+            <>
+              <span>·</span>
+              <span className="text-indigo-500">{concluidas.length} já concluída(s)</span>
+            </>
+          )}
         </div>
+      )}
+
+      {/* Seção de obrigações do Calendário da empresa (derivadas; ciclo anual atual) */}
+      {calObligations.length > 0 && (
+        <Card
+          title="Calendário a compensar"
+          subtitle={`Obrigações do calendário da empresa no ciclo anual ${cycle} — visíveis antes da data para planejamento; somente compensações concluídas abatem o restante`}
+        >
+          <ul className="space-y-3">
+            {calObligations.map((d) => (
+              <li key={d.date} className="flex flex-wrap items-center gap-3 rounded-xl border border-amber-100 bg-amber-50/50 p-3">
+                <div className="min-w-0 flex-1">
+                  <p className="flex flex-wrap items-center gap-2 text-sm font-bold text-slate-800">
+                    Calendário a compensar — {formatMinutes(d.originalMinutes)}
+                    {d.future && <Badge tone="sky">Próxima</Badge>}
+                  </p>
+                  <p className="mt-0.5 text-xs text-slate-500">
+                    Origem: {formatDateShortBR(d.date)} · Ciclo: {d.cycleLabel} · Compensado:{" "}
+                    <b className="text-emerald-600">{formatMinutes(d.compensatedMinutes)}</b> ·
+                    Restante: <b className="text-amber-600">{formatMinutes(d.remainingMinutes)}</b>
+                    {d.plannedMinutes > 0 && (
+                      <> · Planejado: <b className="text-sky-600">{formatMinutes(d.plannedMinutes)}</b></>
+                    )}
+                  </p>
+                </div>
+                {d.remainingMinutes > 0 && (
+                  <Button size="sm" variant="subtle" onClick={() => openCalendarioForm(d.date, d.remainingMinutes)}>
+                    Compensar com hora extra
+                  </Button>
+                )}
+              </li>
+            ))}
+          </ul>
+        </Card>
       )}
 
       {/* Seção de Acordos a compensar ativos (origem do ciclo anual atual) */}
@@ -255,18 +348,22 @@ export default function CompensacoesPage() {
                     {c.note && <span className="italic">“{c.note}”</span>}
                     <span
                       className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${
-                        (c.kind ?? "excedente") === "deficit"
+                        kindOf(c) === "deficit"
                           ? "bg-emerald-50 text-emerald-700"
-                          : (c.kind ?? "excedente") === "acordo"
+                          : kindOf(c) === "acordo"
                             ? "bg-violet-50 text-violet-700"
-                            : "bg-sky-50 text-sky-700"
+                            : kindOf(c) === "calendario"
+                              ? "bg-amber-50 text-amber-700"
+                              : "bg-sky-50 text-sky-700"
                       }`}
                     >
-                      {(c.kind ?? "excedente") === "deficit"
+                      {kindOf(c) === "deficit"
                         ? "↗ hora extra"
-                        : (c.kind ?? "excedente") === "acordo"
+                        : kindOf(c) === "acordo"
                           ? "↗ hora extra · acordo"
-                          : "↘ sair mais cedo"}
+                          : kindOf(c) === "calendario"
+                            ? "↗ hora extra · calendário"
+                            : "↘ sair mais cedo"}
                     </span>
                   </div>
                 </div>
@@ -278,13 +375,13 @@ export default function CompensacoesPage() {
                 )}
                 {c.status === "cancelada" && <Badge tone="slate">Cancelada</Badge>}
                 {c.status === "pendente" &&
-                  (c.kind === "deficit" || c.kind === "acordo") &&
+                  usesHourExtra(kindOf(c)) &&
                   canCompleteComp(c, entries, compensations, settings, todayStr).ok && (
                     <Badge tone="emerald">Meta de compensação atingida ✓</Badge>
                   )}
                 <div className="flex items-center gap-1">
                   {c.status === "pendente" && (() => {
-                    const isExtra = c.kind === "deficit" || c.kind === "acordo";
+                    const isExtra = usesHourExtra(kindOf(c));
                     const check = isExtra
                       ? canCompleteComp(c, entries, compensations, settings, todayStr)
                       : { ok: true };

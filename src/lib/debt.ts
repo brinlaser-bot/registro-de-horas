@@ -1,7 +1,7 @@
 // Matemática de dívida de horas: abatimento fracionado + sugestões inteligentes.
 import { computeDay, expectedMinutesOf, formatDateBR, formatMinutes } from "./time";
 import { dayContext, type Absence } from "./absences";
-import { companyDayContext, type CompanyCalendars } from "./company-calendar";
+import { calendarCycleOf, companyDayContext, type CompanyCalendars } from "./company-calendar";
 import { sameAnnualCycle } from "./periods";
 import type {
   CompKind,
@@ -15,6 +15,15 @@ import type {
 
 export function kindOf(c: Compensation): CompKind {
   return c.kind ?? "excedente";
+}
+
+/**
+ * Kinds quitados com HORA EXTRA no dia de destino (capacidade real + teto).
+ * "excedente" é o único que vai no sentido oposto (sair mais cedo), por isso
+ * fica fora das validações de capacidade/conclusão por hora extra.
+ */
+export function usesHourExtra(kind: CompKind): boolean {
+  return kind === "deficit" || kind === "acordo" || kind === "calendario";
 }
 
 /** Compensações que contam para abatimento (canceladas são ignoradas). */
@@ -440,4 +449,59 @@ export function activeAcordos(
     .map(acordoViewOf)
     .filter((a) => a.remainingMinutes > 0)
     .reverse();
+}
+
+/* ── Visão do "Calendário a compensar" (obrigações derivadas — nunca persistidas) ── */
+
+export interface CalendarioView {
+  /** Data de origem da obrigação (evento do calendário com tratamento COMPENSAR). */
+  date: string;
+  /** Ciclo anual da data de origem, ex.: "2026–2027". */
+  cycleLabel: string;
+  /** Horas a compensar do evento (compensação parcial de Cinzas = 4h etc.). */
+  originalMinutes: number;
+  /** Soma SOMENTE das compensações de calendário concluídas vinculadas à origem. */
+  compensatedMinutes: number;
+  /** Soma das compensações de calendário ainda pendentes (planejadas). */
+  plannedMinutes: number;
+  /** Original − Compensado (planejado NÃO abate o restante). Nunca negativo. */
+  remainingMinutes: number;
+  /** True quando a data de origem ainda não chegou (visível para planejamento). */
+  future: boolean;
+}
+
+/**
+ * Obrigações DERIVADAS do Calendário da empresa (tratamento COMPENSAR) dentro
+ * de um intervalo — normalmente o ciclo anual atual, para que ciclos encerrados
+ * não apareçam como obrigação ativa.
+ *
+ * A fonte da obrigação é SEMPRE o calendário: nenhuma Compensation é criada
+ * automaticamente ao importar/substituir calendários; compensações persistidas
+ * representam apenas planejamento, execução e quitação (kind "calendario"
+ * vinculado à data de origem). A derivação é idempotente por natureza.
+ *
+ * Semântica idêntica à aprovada para Acordo a compensar: só compensações
+ * CONCLUÍDAS abatem o Restante; Planejado é informativo.
+ */
+export function activeCalendarObligations(
+  entries: TimeEntry[],
+  comps: Compensation[],
+  settings: WorkSettings,
+  range: { from: string; to: string },
+  companyCalendars: CompanyCalendars | undefined,
+  today: string,
+): CalendarioView[] {
+  return buildDebtDays(entries, comps, settings, range, [], companyCalendars)
+    .filter((d) => d.kind === "calendario")
+    .map((d) => ({
+      date: d.date,
+      cycleLabel: calendarCycleOf(d.date).label,
+      originalMinutes: d.debtMinutes,
+      compensatedMinutes: d.concludedMinutes,
+      plannedMinutes: d.pendingMinutes,
+      remainingMinutes: Math.max(0, d.debtMinutes - d.concludedMinutes),
+      future: d.date > today,
+    }))
+    .filter((v) => v.remainingMinutes > 0)
+    .sort((a, b) => a.date.localeCompare(b.date)); // mais próxima primeiro
 }
