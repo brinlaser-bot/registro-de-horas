@@ -1,13 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Cake, CalendarPlus, Scissors, TriangleAlert } from "lucide-react";
+import { CalendarPlus, Scissors } from "lucide-react";
 import { Button, Input, Modal, Select, Toggle } from "@/components/ui";
 import { useToast } from "@/components/toast";
-import { suggestedAbonoDate, type Absence, type AbsenceKind, type AbsenceTreatment } from "@/lib/absences";
-import { abonoDateAdvisory } from "@/lib/company-calendar";
-import { formatDateBR, todayString } from "@/lib/time";
-import { settingsOf, useAppData } from "@/lib/store";
+import { type Absence, type AbsenceKind, type AbsenceTreatment } from "@/lib/absences";
+import { formatDateBR } from "@/lib/time";
 import type { AbsenceSplit } from "@/lib/absences";
 
 export type AbsenceDraft = Omit<Absence, "id" | "createdAt">;
@@ -22,19 +20,17 @@ interface Props {
   onSave: (draft: AbsenceDraft, editingId?: number) => Promise<AbsenceSaveOutcome>;
 }
 
+/* §7: o Abono de aniversário é somente histórico aqui — Definir/Alterar
+ * acontece EXCLUSIVAMENTE em Configurações (AbonoModal). */
 const KIND_OPTIONS: Array<{ value: AbsenceKind; label: string }> = [
   { value: "ferias", label: "Férias" },
   { value: "saude", label: "Afastamento por saúde / atestado" },
   { value: "acordado", label: "Afastamento acordado" },
-  { value: "abono", label: "Abono de aniversário 🎂" },
   { value: "outro", label: "Outro afastamento justificado" },
 ];
 
 export function AbsenceModal({ open, onClose, initial, onSave }: Props) {
   const toast = useToast();
-  const { user, companyCalendars } = useAppData();
-  const settings = settingsOf(user);
-  const today = todayString();
   const [draft, setDraft] = useState<AbsenceDraft>({
     kind: "ferias",
     startDate: "",
@@ -191,26 +187,7 @@ export function AbsenceModal({ open, onClose, initial, onSave }: Props) {
         <Select
           label="Tipo"
           value={draft.kind}
-          onChange={(e) => {
-            const kind = e.target.value as AbsenceKind;
-            if (kind === "abono") {
-              // Abono de aniversário: sempre dia inteiro; se houver nascimento,
-              // a data do aniversário do ciclo é SUGERIDA (escolha livre — J1).
-              const sug = suggestedAbonoDate(user.birthDate, today);
-              setDraft((d) => ({
-                ...d,
-                kind,
-                duration: "integral",
-                treatment: undefined,
-                partialStart: undefined,
-                partialEnd: undefined,
-                startDate: d.startDate || sug || "",
-                endDate: d.endDate || sug || "",
-              }));
-            } else {
-              setDraft((d) => ({ ...d, kind }));
-            }
-          }}
+          onChange={(e) => setDraft((d) => ({ ...d, kind: e.target.value as AbsenceKind }))}
         >
           {KIND_OPTIONS.map((o) => (
             <option key={o.value} value={o.value}>{o.label}</option>
@@ -222,71 +199,25 @@ export function AbsenceModal({ open, onClose, initial, onSave }: Props) {
             label="Data inicial"
             type="date"
             value={draft.startDate}
-            onChange={(e) =>
-              setDraft({
-                ...draft,
-                startDate: e.target.value,
-                // Abono = um único dia: a data final acompanha a inicial
-                endDate: draft.kind === "abono" ? e.target.value : draft.endDate || e.target.value,
-              })
-            }
+            onChange={(e) => setDraft({ ...draft, startDate: e.target.value, endDate: draft.endDate || e.target.value })}
           />
-          {draft.kind === "abono" ? (
-            /* Abono de aniversário: benefício de UM único dia */
-            <Input
-              label="Data final"
-              type="date"
-              value={draft.endDate}
-              disabled
-              title="O Abono de aniversário é de um único dia"
-            />
-          ) : (
-            <Input
-              label="Data final"
-              type="date"
-              value={draft.endDate}
-              min={draft.startDate}
-              onChange={(e) => setDraft({ ...draft, endDate: e.target.value })}
-            />
-          )}
+          <Input
+            label="Data final"
+            type="date"
+            value={draft.endDate}
+            min={draft.startDate}
+            onChange={(e) => setDraft({ ...draft, endDate: e.target.value })}
+          />
         </div>
 
-        {/* Abono: identidade própria, sempre dia inteiro; sugestão/aviso de data */}
-        {draft.kind === "abono" && (
-          <div className="space-y-2 rounded-xl border border-amber-200 bg-amber-50/70 p-3">
-            <p className="flex items-center gap-1.5 text-xs font-bold text-amber-800">
-              <Cake size={14} /> Abono de aniversário — dia inteiro, jornada 0h, saldo neutro
-              (um por ciclo anual).
-            </p>
-            {user.birthDate ? (
-              <p className="text-[11px] text-amber-700">
-                Sugestão: aniversário do ciclo ({formatDateBR(suggestedAbonoDate(user.birthDate, today) ?? draft.startDate)}) —
-                você pode escolher <b>qualquer data do ciclo</b>; a distância do aniversário não bloqueia.
-              </p>
-            ) : (
-              <p className="text-[11px] text-amber-700">
-                Cadastre sua <b>Data de nascimento</b> em Configurações para receber a sugestão automática.
-              </p>
-            )}
-            {draft.startDate && abonoDateAdvisory(draft.startDate, companyCalendars) && (
-              <p className="flex items-start gap-1.5 text-[11px] font-semibold text-amber-800">
-                <TriangleAlert size={13} className="mt-0.5 shrink-0" />
-                {abonoDateAdvisory(draft.startDate, companyCalendars)}
-              </p>
-            )}
-          </div>
-        )}
-
-        {draft.kind !== "abono" && (
-          <Select
-            label="Duração"
-            value={draft.duration}
-            onChange={(e) => setDraft({ ...draft, duration: e.target.value as "integral" | "parcial" })}
-          >
-            <option value="integral">Dia inteiro (todos os dias do período)</option>
-            <option value="parcial">Parcial (horário específico)</option>
-          </Select>
-        )}
+        <Select
+          label="Duração"
+          value={draft.duration}
+          onChange={(e) => setDraft({ ...draft, duration: e.target.value as "integral" | "parcial" })}
+        >
+          <option value="integral">Dia inteiro (todos os dias do período)</option>
+          <option value="parcial">Parcial (horário específico)</option>
+        </Select>
 
         {draft.duration === "parcial" && (
           <div className="grid grid-cols-2 gap-4">

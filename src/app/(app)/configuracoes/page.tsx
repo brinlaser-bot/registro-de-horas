@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import Link from "next/link";
 import { Cake, Clock3, Database, Download, Info, Pencil, Save, Trash2, Upload, UserRound } from "lucide-react";
 import {
   actions,
@@ -13,6 +12,7 @@ import {
 } from "@/lib/store";
 import { buildBackupPayload } from "@/lib/backup";
 import { abonoInCycle } from "@/lib/absences";
+import { AbonoModal } from "@/components/abono-modal";
 import {
   buildCompanyCalendar,
   CALENDAR_HEADER,
@@ -45,6 +45,7 @@ export default function ConfiguracoesPage() {
   const [busyProfile, setBusyProfile] = useState(false);
   const [busySchedule, setBusySchedule] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [abonoOpen, setAbonoOpen] = useState(false);
   const [calPreview, setCalPreview] = useState<CalendarImportPreview | null>(null);
   /** De onde veio o arquivo em prévia: novo ciclo ou substituição de um ciclo específico. */
   const [importMode, setImportMode] = useState<{ type: "add" } | { type: "replace"; cycleStart: string }>({ type: "add" });
@@ -203,6 +204,8 @@ export default function ConfiguracoesPage() {
 
   const settings = settingsOf(user);
   const expected = expectedMinutesOf(settings);
+  // MESMO evento do store reconhecido por Registros/Resumo/gráfico/backup
+  const abonoDoCiclo = abonoInCycle(absences ?? [], todayString());
 
   return (
     <div className="space-y-6">
@@ -220,24 +223,19 @@ export default function ConfiguracoesPage() {
           <Input label="Nome completo" value={profile.name} onChange={(e) => setProfile({ ...profile, name: e.target.value })} />
           <Input label="E-mail" type="email" value={profile.email} onChange={(e) => setProfile({ ...profile, email: e.target.value })} />
           <div className="sm:col-span-2">
-            {/* G: data LOCAL (sem fuso) — usada SOMENTE para o banner de aniversário
-                (somente visual) e a sugestão do Abono de aniversário. Nunca entra nos cálculos. */}
+            {/* Data LOCAL (sem fuso) — banner (somente visual) + sugestão interna do Abono. */}
             <Input
-              label="Data de nascimento (opcional)"
+              label="Data de nascimento"
               type="date"
               className="sm:max-w-64"
               value={profile.birthDate}
               onChange={(e) => setProfile({ ...profile, birthDate: e.target.value })}
             />
-            <p className="mt-1 text-[11px] text-slate-400">
-              Usada para a felicitação do dia (somente visual) e para sugerir a data do Abono de
-              aniversário — nunca altera horas ou saldos.
-            </p>
           </div>
         </div>
 
-        {/* L: atalho do Abono de aniversário do ciclo anual — a fonte única do
-            evento é o fluxo de Férias/Afastamentos (/ferias). */}
+        {/* Abono de aniversário do ciclo — Definir/Alterar AQUI mesmo (modal),
+            manipulando o mesmo evento do store que Registros/Resumo/gráfico/backup. */}
         <div className="mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-amber-200 bg-amber-50/60 px-4 py-3">
           <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-amber-100 text-amber-600">
             <Cake size={18} aria-hidden />
@@ -246,33 +244,27 @@ export default function ConfiguracoesPage() {
             <p className="text-xs font-bold uppercase tracking-wide text-amber-500">
               Abono de aniversário do ciclo
             </p>
-            {(() => {
-              const abono = abonoInCycle(absences ?? [], todayString());
-              return abono ? (
-                <p className="text-sm font-extrabold text-amber-800">
-                  Definido para {formatDateBR(abono.startDate)} 🎂
-                  <span className="ml-2 text-xs font-medium text-amber-600">
-                    (um por ciclo anual · dia integral · jornada 0 · saldo neutro)
-                  </span>
-                </p>
-              ) : (
-                <p className="text-sm font-semibold text-amber-700/80">
-                  Ainda não definido para este ciclo anual.
-                </p>
-              );
-            })()}
-          </div>
-          <Link href="/ferias" className="shrink-0">
-            {abonoInCycle(absences ?? [], todayString()) ? (
-              <Button variant="secondary" size="sm">
-                <Pencil size={13} /> Alterar
-              </Button>
+            {abonoDoCiclo ? (
+              <p className="text-sm font-extrabold text-amber-800">
+                Definido para {formatDateBR(abonoDoCiclo.startDate)} 🎂
+              </p>
             ) : (
-              <Button variant="secondary" size="sm">
-                <Cake size={13} /> Definir
-              </Button>
+              <p className="text-sm font-semibold text-amber-700/80">
+                Ainda não definido para este ciclo anual.
+              </p>
             )}
-          </Link>
+          </div>
+          <Button variant="secondary" size="sm" className="shrink-0" onClick={() => setAbonoOpen(true)}>
+            {abonoDoCiclo ? (
+              <>
+                <Pencil size={13} /> Alterar
+              </>
+            ) : (
+              <>
+                <Cake size={13} /> Definir
+              </>
+            )}
+          </Button>
         </div>
       </Card>
 
@@ -560,6 +552,8 @@ export default function ConfiguracoesPage() {
       </Card>
 
       <ImportBackupModal open={importOpen} onClose={() => setImportOpen(false)} />
+      {/* A ÚNICA interface de Definir/Alterar o Abono de aniversário */}
+      <AbonoModal open={abonoOpen} onClose={() => setAbonoOpen(false)} />
     </div>
   );
 }

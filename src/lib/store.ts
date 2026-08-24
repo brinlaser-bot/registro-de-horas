@@ -6,8 +6,8 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import { computeDay, formatMinutes, FUTURE_DATE_ERROR, isFutureDate, todayString, type EntryType } from "./time";
 import { buildSeedData, DEFAULT_USER } from "./seed-data";
 import { absencesEqual, compsEqual, entriesEqual, mergeByIdAndContent } from "./backup";
-import { canCompleteComp, extraCapacityForDate, usesHourExtra } from "./debt";
-import { validateAbsence, type Absence, type AbsenceSplit } from "./absences";
+import { canCompleteComp, extraCapacityForDate, usesHourExtra, acordoLinkedComps } from "./debt";
+import { abonoDayDecision, abonoInCycle, validateAbsence, type Absence, type AbsenceSplit } from "./absences";
 import { canRegisterFalta } from "./faltas";
 import { sameAnnualCycle } from "./periods";
 import { normalizeCompanyCalendars, type CompanyCalendar, type CompanyCalendars } from "./company-calendar";
@@ -17,7 +17,7 @@ export interface ActionResult {
   ok: boolean;
   /** Mensagem pronta para exibição na interface. */
   error?: string;
-  code?: "over-capacity" | "invalid" | "not-found" | "cross-cycle" | "overlap" | "linked-compensations";
+  code?: "over-capacity" | "invalid" | "not-found" | "cross-cycle" | "overlap" | "linked-compensations" | "falta" | "punches" | "confirm-replace" | "concluded-history";
   /** Capacidade disponível no dia de destino (quando code = over-capacity). */
   available?: number;
   limitMinutes?: number;
@@ -485,6 +485,91 @@ export const actions = {
             }
           : OK;
       return { ...d, absences: d.absences.filter((a) => a.id !== id) };
+    });
+    return result;
+  },
+
+  /**
+   * ABONO DE ANIVERSÁRIO — único ponto de Definir/Alterar (Configurações).
+   * - 1 por ciclo anual: se já existe no ciclo da data, ALTERA o mesmo evento
+   *   (mesmo id) — nunca cria segundo;
+   * - validação pela MESMA verdade central do modal (abonoDayDecision) +
+   *   regras duras de validateAbsence;
+   * - regra especial: pode prevalecer sobre "Afastamento acordado —
+   *   compensar posteriormente", mas NUNCA silenciosamente: exige
+   *   `replaceAcordo: true`; compensações vinculadas CONCLUÍDAS bloqueiam
+   *   (histórico preservado); vinculadas ainda ativas são CANCELADAS junto
+   *   com o acordo; o dia passa a jornada 0 / saldo 0 / sem obrigação.
+   */
+  setAbono(p: { date: string; note: string | null; replaceAcordo?: boolean }): ActionResult {
+    let result: ActionResult = OK;
+    mutate((d) => {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(p.date)) {
+        result = { ok: false, code: "invalid", error: "Informe a data do Abono." };
+        return d;
+      }
+      const decision = abonoDayDecision(p.date, {
+        absences: d.absences,
+        entries: d.entries,
+        faltas: d.faltas,
+      });
+      if (decision.status === "blocked") {
+        result = { ok: false, code: decision.code, error: decision.error };
+        return d;
+      }
+      let absences = d.absences;
+      let compensations = d.compensations;
+      if (decision.status === "replace-acordo") {
+        const linked = acordoLinkedComps(d.compensations, decision.acordo);
+        const actives = linked.filter((c) => c.status !== "cancelada");
+        // CASO C: já existe compensação CONCLUÍDA → nunca substituir automaticamente
+        if (actives.some((c) => c.status === "concluida")) {
+          result = {
+            ok: false,
+            code: "concluded-history",
+            error:
+              "Este afastamento já possui horas compensadas concluídas. O Abono não pode substituir automaticamente esse acordo porque existe histórico de compensação realizado.",
+          };
+          return d;
+        }
+        if (!p.replaceAcordo) {
+          result = {
+            ok: false,
+            code: "confirm-replace",
+            error:
+              "Esta data possui um Afastamento acordado — compensar posteriormente. É necessário confirmar explicitamente a substituição pelo Abono de aniversário.",
+          };
+          return d;
+        }
+        // CASO B: cancela SOMENTE as compensações pendentes vinculadas a este
+        // acordo (déficit comum/calendário/outros acordos permanecem). Então
+        // remove o evento acordado — a obrigação correspondente deixa de existir.
+        const activeIds = new Set(actives.map((c) => c.id));
+        compensations = d.compensations.map((c) =>
+          activeIds.has(c.id) ? { ...c, status: "cancelada" as const } : c,
+        );
+        absences = d.absences.filter((a) => a.id !== decision.acordo.id);
+      }
+      const existing = abonoInCycle(absences, p.date);
+      const draft: Omit<Absence, "id" | "createdAt"> = {
+        kind: "abono",
+        startDate: p.date,
+        endDate: p.date, // sempre um único dia
+        duration: "integral",
+        note: p.note,
+      };
+      const v = validateAbsence(draft, absences, d.entries, existing?.id, d.faltas);
+      if (!v.ok) {
+        result = { ok: false, code: v.code, error: v.error, split: v.split };
+        return d;
+      }
+      if (existing) {
+        // Alterar: atualiza o MESMO evento (id preservado) — nunca duplica
+        absences = absences.map((a) => (a.id === existing.id ? { ...a, ...draft } : a));
+      } else {
+        absences = [...absences, { ...draft, id: nextId(absences), createdAt: Date.now() }];
+      }
+      return { ...d, absences, compensations };
     });
     return result;
   },

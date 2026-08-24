@@ -408,3 +408,72 @@ export function abonoInCycle(absences: Absence[], referenceDate: string): Absenc
     (a) => a.kind === "abono" && sameAnnualCycle(a.startDate, referenceDate),
   );
 }
+
+/* ── Decisão central do ABONO DE ANIVERSÁRIO sobre uma data ─────────────
+ * Fonte ÚNICA de verdade usada pelo modal de Configurações (validação
+ * imediata) e pelo store (setAbono) — nunca duplicar essa lógica na UI.
+ *  - "ok"             → data livre (avisos de calendário/folga são feitos
+ *                       à parte, via abonoDateAdvisory, e não bloqueiam);
+ *  - "blocked"        → férias/saúde/horas dispensadas/outro integral, falta
+ *                       ou batidas: exige resolução explícita, nunca substitui;
+ *  - "replace-acordo" → regra especial: o Abono PODE prevalecer sobre um
+ *                       "Afastamento acordado — compensar posteriormente",
+ *                       mediante confirmação explícita e sem compensações
+ *                       concluídas vinculadas (checagem no store).
+ */
+export type AbonoDayDecision =
+  | { status: "ok" }
+  | {
+      status: "blocked";
+      code: "falta" | "punches" | "overlap";
+      error: string;
+      absence?: Absence;
+    }
+  | { status: "replace-acordo"; acordo: Absence };
+
+export const ABONO_FALTA_ERROR =
+  "Esta data possui uma falta registrada. Exclua a falta (ou a falta prevista) antes de usar o dia para o Abono de aniversário.";
+export const ABONO_PUNCHES_ERROR =
+  "Esta data já possui registros de horário. Resolva os registros antes de aplicar o Abono de aniversário.";
+
+export function abonoDayDecision(
+  date: string,
+  opts: {
+    absences: Absence[];
+    entries: TimeEntry[];
+    faltas?: Falta[];
+    /** Ao editar o abono existente, excluir um id da análise de sobreposição. */
+    excludeAbsenceId?: number;
+  },
+): AbonoDayDecision {
+  const { absences, entries, faltas = [], excludeAbsenceId } = opts;
+  // Falta (efetiva OU prevista) — conflito explícito, nunca converte em silêncio
+  if (faltas.some((f) => f.date === date)) {
+    return { status: "blocked", code: "falta", error: ABONO_FALTA_ERROR };
+  }
+  // Batidas — nunca abono silencioso sobre dia trabalhado
+  if (entries.some((e) => e.date === date)) {
+    return { status: "blocked", code: "punches", error: ABONO_PUNCHES_ERROR };
+  }
+  const covering = absences.filter(
+    (a) => a.id !== excludeAbsenceId && a.startDate <= date && date <= a.endDate,
+  );
+  // Férias / saúde / acordado-dispensado / outro: conflito BLOQUEANTE
+  const hard = covering.find(
+    (a) => !(a.kind === "acordado" && a.treatment === "compensar"),
+  );
+  if (hard) {
+    return {
+      status: "blocked",
+      code: "overlap",
+      absence: hard,
+      error: `Esta data já está coberta por ${absenceLabel(hard)}. Escolha outra data para o Abono de aniversário.`,
+    };
+  }
+  // Regra especial: acordado-compensar pode ceder ao Abono (com confirmação)
+  const acordo = covering.find(
+    (a) => a.kind === "acordado" && a.treatment === "compensar",
+  );
+  if (acordo) return { status: "replace-acordo", acordo };
+  return { status: "ok" };
+}

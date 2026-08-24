@@ -565,3 +565,19 @@ export function activeCalendarObligations(
     .filter((v) => v.remainingMinutes > 0)
     .sort((a, b) => a.date.localeCompare(b.date)); // mais próxima primeiro
 }
+
+/**
+ * Compensações VINCULADAS a um afastamento acordado (kind "acordo" cuja
+ * origem cai dentro do período do evento). Usado pela regra especial de
+ * substituição pelo Abono de aniversário: somente estas podem ser
+ * canceladas junto com o acordo — nunca tocar em compensações de déficit
+ * comum, calendário ou outros acordos.
+ */
+export function acordoLinkedComps(compensations: Compensation[], acordo: Absence): Compensation[] {
+  return compensations.filter(
+    (c) =>
+      kindOf(c) === "acordo" &&
+      c.sourceDate >= acordo.startDate &&
+      c.sourceDate <= acordo.endDate,
+  );
+}

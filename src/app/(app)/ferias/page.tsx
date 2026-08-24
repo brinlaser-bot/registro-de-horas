@@ -171,17 +171,20 @@ export default function FeriasPage() {
             )}
           </div>
           <div className="flex items-center gap-1">
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => {
-                setEditing(a);
-                setModalOpen(true);
-              }}
-              aria-label="Editar"
-            >
-              <Pencil size={14} />
-            </Button>
+            {/* §7: abono é somente histórico aqui — Definir/Alterar só em Configurações */}
+            {a.kind !== "abono" && (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  setEditing(a);
+                  setModalOpen(true);
+                }}
+                aria-label="Editar"
+              >
+                <Pencil size={14} />
+              </Button>
+            )}
             <Button
               size="sm"
               variant="ghost"

@@ -323,12 +323,12 @@ export default function DashboardPage() {
             <Cake size={22} aria-hidden />
           </span>
           <div className="min-w-0 flex-1">
+            {/* §2: SOMENTE mensagem comemorativa — sem CTA. */}
             <p className="text-base font-extrabold text-amber-800">
               Feliz aniversário, {firstName}! 🎉
             </p>
             <p className="text-xs font-medium text-amber-600">
-              Que o seu novo ano seja ótimo. Se quiser, use o Abono de aniversário do ciclo em
-              Férias/Afastamentos (facultativo — sem efeito no saldo de horas).
+              Que seu novo ciclo seja repleto de alegrias, saúde e boas realizações.
             </p>
           </div>
         </div>
