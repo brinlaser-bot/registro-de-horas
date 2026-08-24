@@ -668,15 +668,6 @@ export function DayCard({
               ),
             )}
 
-            {/* Informação no dia de Abono: registro só volta ao mover o Abono
-                para outra data (Configurações → Alterar). */}
-            {abonoDay && (
-              <p className="text-xs text-slate-400">
-                Dia coberto pelo Abono de aniversário — para trabalhar nesta data, altere a data
-                do Abono em Configurações.
-              </p>
-            )}
-
             {/* Formulário adicionar — NUNCA em data futura nem em dia de Abono (card vira somente leitura) */}
             {!futureDay && !abonoDay && (showAdd ? (
               <div className="flex flex-wrap items-end gap-2 rounded-xl border border-dashed border-slate-300 bg-white p-3">
@@ -725,10 +716,14 @@ export function DayCard({
             </div>
           )}
 
-          <p className="mt-3 text-[11px] text-slate-400">
-            * "No ponto" é o total que pode ser lançado no sistema da empresa (limitado a{" "}
-            {formatMinutes(settings.maxDailyMinutes)}/dia). O excedente deve ser compensado em outro dia.
-          </p>
+          {/* Rodapé explicativo do "No ponto" — em dia de Abono o card é
+              SOMENTE INFORMATIVO e não exibe textos explicativos. */}
+          {!abonoDay && (
+            <p className="mt-3 text-[11px] text-slate-400">
+              * "No ponto" é o total que pode ser lançado no sistema da empresa (limitado a{" "}
+              {formatMinutes(settings.maxDailyMinutes)}/dia). O excedente deve ser compensado em outro dia.
+            </p>
+          )}
         </div>
       )}
 

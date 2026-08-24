@@ -19,7 +19,6 @@ import {
   type Absence,
 } from "@/lib/absences";
 import {
-  companyBalanceContribution,
   companyDayBalanceView,
   companyDayContext,
   companyDeficitContribution,
@@ -35,7 +34,7 @@ import {
   type PointPeriod,
 } from "@/lib/periods";
 import { acordoViewOf, buildDebtDays, checkSourceOverflow, extraCapacityForDate } from "@/lib/debt";
-import { effectiveFaltas, faltaOnDate, faltaStatusOf } from "@/lib/faltas";
+import { dayBalanceContribution, effectiveFaltas, faltaOnDate, faltaStatusOf } from "@/lib/faltas";
 import type { CompKind, DayResult, WorkSettings } from "@/lib/types";
 import { DayCard } from "@/components/day-card";
 import { ManualEntryModal, type ManualPairData } from "@/components/manual-entry-modal";
@@ -132,13 +131,9 @@ export default function RegistrosPage() {
               ? { ...baseView, adjustedBalance: 0, adjustedDeficit: 0 }
               : baseView,
           displayDay: cctx.displayDay,
-          // Falta efetiva rompe a guarda de "dia vazio = 0": ela É a ocorrência do dia.
-          balanceContribution:
-            faltaStatus === "efetiva"
-              ? cctx.adjustedBalance
-              : faltaStatus === "prevista"
-                ? 0
-                : companyBalanceContribution(cctx),
+          // Contribuição CENTRAL (dayBalanceContribution) — MESMA soma da
+          // Visão geral e do Resumo do período (falta efetiva conta; prevista 0).
+          balanceContribution: dayBalanceContribution(cctx, faltas, date, todayStr),
           deficitContribution: faltaStatus === "prevista" ? 0 : companyDeficitContribution(cctx),
           absence: absenceOnDate(absences, date),
         };

@@ -8,7 +8,7 @@ import {
   absenceLabel,
   absenceOnDate,
 } from "@/lib/absences";
-import { faltaOnDate, faltaStatusOf } from "@/lib/faltas";
+import { dayBalanceContribution, faltaOnDate, faltaStatusOf } from "@/lib/faltas";
 import {
   getNextPointPeriod,
   getPointPeriod,
@@ -17,7 +17,7 @@ import {
   periodLabel,
   type PointPeriod,
 } from "@/lib/periods";
-import { companyBalanceContribution, companyDayContext } from "@/lib/company-calendar";
+import { companyDayContext } from "@/lib/company-calendar";
 import { Badge, Button, Card, EmptyState, Skeleton, StatCard } from "@/components/ui";
 import { StackedPeriodChart } from "@/components/stacked-period-chart";
 import type { Absence } from "@/lib/absences";
@@ -81,14 +81,10 @@ export default function ResumoPage() {
             cctx.label ??
             (absence ? absenceLabel(absence) : null) ??
             (faltaStatus === "efetiva" ? "Falta" : faltaStatus === "prevista" ? "Falta prevista" : null),
-          /* Falta EFETIVA rompe a guarda de "dia vazio = 0": ela É a ocorrência
-           * do dia (−jornada efetiva). Falta PREVISTA mascarada em 0 até chegar. */
-          balanceContribution:
-            faltaStatus === "efetiva"
-              ? cctx.adjustedBalance
-              : faltaStatus === "prevista"
-                ? 0
-                : companyBalanceContribution(cctx),
+          /* Contribuição CENTRAL (dayBalanceContribution) — a MESMA soma da
+           * Visão geral e de Registros: falta efetiva conta (−jornada efetiva),
+           * prevista é mascarada em 0, demais dias pelo agregador central. */
+          balanceContribution: dayBalanceContribution(cctx, faltas, date, todayStr),
           faltaStatus,
           absence,
         };

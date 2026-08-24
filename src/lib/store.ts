@@ -3,21 +3,21 @@
 // Store client-side com persistência em localStorage.
 // Uso pessoal: todos os dados ficam apenas no navegador.
 import { useEffect, useState, useSyncExternalStore } from "react";
-import { computeDay, formatMinutes, FUTURE_DATE_ERROR, isFutureDate, todayString, type EntryType } from "./time";
+import { computeDay, formatMinutes, FUTURE_DATE_ERROR, isFutureDate, todayString, validatePunchSequence, type EntryType } from "./time";
 import { buildSeedData, DEFAULT_USER } from "./seed-data";
 import { absencesEqual, compsEqual, entriesEqual, mergeByIdAndContent } from "./backup";
-import { canCompleteComp, extraCapacityForDate, usesHourExtra, acordoLinkedComps } from "./debt";
+import { canCompleteComp, concludedForSource, extraCapacityForDate, usesHourExtra, acordoLinkedComps } from "./debt";
 import { abonoDayDecision, abonoInCycle, validateAbsence, type Absence, type AbsenceSplit } from "./absences";
 import { canRegisterFalta } from "./faltas";
 import { sameAnnualCycle } from "./periods";
-import { normalizeCompanyCalendars, type CompanyCalendar, type CompanyCalendars } from "./company-calendar";
+import { companyDayContext, normalizeCompanyCalendars, type CompanyCalendar, type CompanyCalendars } from "./company-calendar";
 
 /** Resultado estruturado de operações que podem ser rejeitadas por validação. */
 export interface ActionResult {
   ok: boolean;
   /** Mensagem pronta para exibição na interface. */
   error?: string;
-  code?: "over-capacity" | "invalid" | "not-found" | "cross-cycle" | "overlap" | "linked-compensations" | "falta" | "punches" | "confirm-replace" | "concluded-history";
+  code?: "over-capacity" | "invalid" | "not-found" | "cross-cycle" | "overlap" | "linked-compensations" | "falta" | "punches" | "confirm-replace" | "concluded-history" | "sequence";
   /** Capacidade disponível no dia de destino (quando code = over-capacity). */
   available?: number;
   limitMinutes?: number;
@@ -143,12 +143,44 @@ function mutate(updater: (d: AppData) => AppData) {
 const nextId = (rows: { id: number }[]) =>
   rows.reduce((m, r) => Math.max(m, r.id), 0) + 1;
 
+const CONCLUDED_COMP_MSG =
+  "Este horário já sustenta uma compensação concluída. A alteração reduziria as horas utilizadas e não pode ser aplicada automaticamente.";
+
+/**
+ * GuARDA DE HISTÓRICO CONCLUÍDO (edição de batidas): o dia `date` pode ser
+ * ORIGEM de compensações já CONCLUÍDAS, sustentadas pelas horas do dia. Se a
+ * edição reduzir a dívida do dia (excedente/déficit/acordo pela resolução
+ * central) abaixo do total já utilizado por compensações concluídas, a
+ * alteração é BLOQUEADA — nunca cancela/reabre histórico automaticamente.
+ * Recebe o estado JÁ com a edição simulada (entries finais).
+ */
+function concludedCompGuard(d: AppData, date: string): ActionResult | null {
+  const cctx = companyDayContext(date, d.entries, d.absences, d.companyCalendars, settingsOf(d.user));
+  const debts: [CompKind, number][] = [
+    ["excedente", cctx.ctx.day.excessMinutes],
+    ["deficit", cctx.adjustedDeficit],
+    ["acordo", cctx.ctx.acordoMinutes],
+  ];
+  for (const [kind, debt] of debts) {
+    if (concludedForSource(d.compensations, date, kind) > Math.max(0, debt)) {
+      return { ok: false, code: "concluded-history", error: CONCLUDED_COMP_MSG };
+    }
+  }
+  return null;
+}
+
 export const actions = {
   /**
    * Cria uma batida. REGRA ABSOLUTA: somente em data <= hoje — batida em
    * data futura é rejeitada aqui (não apenas na UI), qualquer que seja a
    * origem (lançamento manual, atalho, QuickPunch, Smart Exit, etc.).
    * Falta prevista futura continua permitida — a regra é só de ponto.
+   *
+   * VALIDAÇÃO CENTRAL DE SEQUÊNCIA: o RESULTADO FINAL do dia (ordenado
+   * cronologicamente, com a nova batida incluída) deve alternar
+   * Entrada/Saída — inserções históricas válidas no meio do dia passam;
+   * batidas que criariam duas entradas (ou duas saídas) seguidas são
+   * rejeitadas com a mensagem central (validatePunchSequence).
    */
   addEntry(p: {
     date: string;
@@ -163,13 +195,13 @@ export const actions = {
         result = { ok: false, code: "invalid", error: FUTURE_DATE_ERROR };
         return d;
       }
-      return {
-        ...d,
-        entries: [
-          ...d.entries,
-          { id: nextId(d.entries), ...p, source: p.source ?? "live" },
-        ],
-      };
+      const created: TimeEntry = { id: nextId(d.entries), ...p, source: p.source ?? "live" };
+      const seq = validatePunchSequence([...d.entries.filter((e) => e.date === p.date), created]);
+      if (!seq.ok) {
+        result = { ok: false, code: "sequence", error: seq.error };
+        return d;
+      }
+      return { ...d, entries: [...d.entries, created] };
     });
     return result;
   },
@@ -178,6 +210,12 @@ export const actions = {
    * Edita uma batida existente. Registros históricos seguem editáveis
    * (hora/tipo/observação, e data quando informada) — mas NUNCA se move um
    * registro para data futura: a mesma regra absoluta se aplica à edição.
+   *
+   * A edição valida a SEQUÊNCIA CRONOLÓGICA FINAL de cada dia afetado
+   * (origem e destino, se a data mudar): o resultado inválido é rejeitado
+   * integralmente preservando o registro original. E, se o dia sustentar
+   * compensação CONCLUÍDA cujas horas utilizadas a edição reduziria, a
+   * alteração é bloqueada pela guarda de histórico (concludedCompGuard).
    */
   updateEntry(id: number, patch: Partial<Pick<TimeEntry, "time" | "type" | "note" | "date">>): ActionResult {
     let result: ActionResult = OK;
@@ -186,10 +224,33 @@ export const actions = {
         result = { ok: false, code: "invalid", error: FUTURE_DATE_ERROR };
         return d;
       }
-      return {
-        ...d,
-        entries: d.entries.map((e) => (e.id === id ? { ...e, ...patch, edited: true } : e)),
-      };
+      const target = d.entries.find((e) => e.id === id);
+      if (!target) {
+        result = { ok: false, code: "not-found", error: "Registro não encontrado." };
+        return d;
+      }
+      const next = { ...target, ...patch, edited: true as const };
+      // Sequência cronológica final válida em TODOS os dias afetados
+      const affectedDates = Array.from(new Set([target.date, next.date]));
+      for (const date of affectedDates) {
+        const finalList = d.entries.filter((e) => e.date === date && e.id !== id);
+        if (next.date === date) finalList.push(next);
+        const seq = validatePunchSequence(finalList);
+        if (!seq.ok) {
+          result = { ok: false, code: "sequence", error: seq.error };
+          return d;
+        }
+      }
+      // Guarda de histórico: compensação concluída sustentada pelo dia de origem
+      const sim = { ...d, entries: d.entries.map((e) => (e.id === id ? next : e)) };
+      for (const date of affectedDates) {
+        const guard = concludedCompGuard(sim, date);
+        if (guard) {
+          result = guard;
+          return d;
+        }
+      }
+      return { ...d, entries: sim.entries };
     });
     return result;
   },

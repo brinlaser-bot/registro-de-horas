@@ -218,6 +218,18 @@ export function SmartExit({
       <Badge tone="slate">Jornada padrão</Badge>
     );
 
+  /* §6 Estados com ponto aberto (planned/overdue/goal-reached): além do badge
+   * do tipo de jornada, o estado do dia é SEMPRE "Jornada em andamento" —
+   * "Jornada encerrada" só aparece no estado finished (última batida = saída).
+   * O estado deriva das batidas atuais (day.entries), então excluir a saída
+   * faz o card voltar automaticamente para "em andamento". */
+  const actions = (
+    <div className="flex items-center gap-2">
+      {badge}
+      <Badge tone="indigo">Jornada em andamento</Badge>
+    </div>
+  );
+
   const message = goalReached
     ? plan.kind === "extra"
       ? "Meta de compensação atingida ✓"
@@ -229,7 +241,7 @@ export function SmartExit({
         : `Para completar sua jornada de ${formatMinutes(plan.targetMinutes)}, a saída planejada é ${plan.plannedExit}.`;
 
   return (
-    <Card title="Previsão de saída" subtitle="Planejada a partir das suas batidas — não do relógio" actions={badge}>
+    <Card title="Previsão de saída" subtitle="Planejada a partir das suas batidas — não do relógio" actions={actions}>
       <div className="flex flex-wrap items-center gap-4">
         {/* Horário planejado */}
         <div className="flex items-center gap-3 rounded-xl border border-slate-100 bg-slate-50/70 px-4 py-3">

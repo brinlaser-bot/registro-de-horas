@@ -137,7 +137,7 @@ export function ExcessPanel({
           icon={<ArrowLeftRight size={16} />}
         />
         <StatCard
-          label="Déficit do mês"
+          label="Déficit do período"
           value={formatMinutes(deficitTotals.debtTotal)}
           sub={`abaixo da base · ${formatMinutes(deficitTotals.remaining)} em aberto`}
           tone={deficitTotals.remaining > 0 ? "indigo" : "slate"}

@@ -248,6 +248,60 @@ export function nowTimeString(): string {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+/* ── Sequência de batidas (validação central) ────────────── */
+
+/**
+ * Batidas de um dia em ORDEM CRONOLÓGICA (desempate: id — ordem de criação).
+ * A validação NUNCA confia na posição do array persistido: o array reflete a
+ * ordem de LANÇAMENTO, e um histórico válido pode ter sido lançado fora de
+ * ordem (ex.: saídas importadas antes das entradas correspondentes).
+ */
+export function sortedPunchEntries<T extends TimeEntryLike>(entries: T[]): T[] {
+  return [...entries].sort((a, b) => a.time.localeCompare(b.time) || a.id - b.id);
+}
+
+/**
+ * Próximo tipo de batida esperado no dia, pela ÚLTIMA batida CRONOLÓGICA:
+ * nenhuma batida → entrada; última = entrada → saída; última = saída → entrada.
+ */
+export function nextPunchType(entries: TimeEntryLike[]): EntryType {
+  const sorted = sortedPunchEntries(entries);
+  const last = sorted[sorted.length - 1];
+  if (!last) return "entrada";
+  return last.type === "entrada" ? "saida" : "entrada";
+}
+
+/** Mensagem central de violação da alternância Entrada/Saída. */
+export function punchSequenceError(nextType: EntryType): string {
+  return nextType === "saida"
+    ? "Já existe uma entrada aberta. A próxima batida deve ser uma saída."
+    : "A próxima batida deve ser uma entrada.";
+}
+
+/**
+ * VALIDAÇÃO CENTRAL DE SEQUÊNCIA: o RESULTADO FINAL do dia, depois de
+ * ordenado cronologicamente, deve começar com entrada e alternar
+ * estritamente entrada → saída → entrada…
+ *
+ * Valida-se sempre a sequência FINAL ORDENADA — nunca a ordem de inclusão —
+ * para que inserções históricas válidas no MEIO do dia não sejam rejeitadas
+ * (ex.: lançar mais tarde um par de almoço entre batidas já existentes).
+ */
+export function validatePunchSequence(entries: TimeEntryLike[]): { ok: boolean; error?: string } {
+  const sorted = sortedPunchEntries(entries);
+  if (sorted.length === 0) return { ok: true };
+  if (sorted[0].type !== "entrada") {
+    return { ok: false, error: punchSequenceError("entrada") };
+  }
+  for (let i = 1; i < sorted.length; i++) {
+    if (sorted[i].type === sorted[i - 1].type) {
+      // O prefixo 0..i-1 é válido: o tipo esperado é o "próximo" dele.
+      return { ok: false, error: punchSequenceError(nextPunchType(sorted.slice(0, i))) };
+    }
+  }
+  return { ok: true };
+}
+
 export function nowMinutesLocal(): number {
   const d = new Date();
   return d.getHours() * 60 + d.getMinutes();

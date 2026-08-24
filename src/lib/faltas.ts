@@ -3,7 +3,13 @@
 // criada automaticamente. A jornada da falta vem SEMPRE da resolução central
 // (companyDayContext.effectiveExpected) — nunca uma fórmula paralela de 8h.
 import { absenceLabel, type Absence } from "./absences";
-import { companyDayContext, isWeekendDate, type CompanyCalendars } from "./company-calendar";
+import {
+  companyBalanceContribution,
+  companyDayContext,
+  isWeekendDate,
+  type CalendarDayView,
+  type CompanyCalendars,
+} from "./company-calendar";
 import { formatDateBR, formatMinutes } from "./time";
 import type { Falta, TimeEntry, WorkSettings } from "./types";
 
@@ -105,6 +111,31 @@ export function canRegisterFalta(
     return { ok: false, error: "Esta data não possui jornada a cumprir — não há falta a registrar." };
   }
   return { ok: true, jornadaMinutes: cctx.effectiveExpected };
+}
+
+/**
+ * CONTRIBUIÇÃO DIÁRIA CENTRAL ao "Saldo do período" — fonte única usada por
+ * Visão geral, Resumo do período e Registros (o total das três telas é sempre
+ * o mesmo porque as três somam ESTA função sobre cada dia do período):
+ *
+ * - Falta EFETIVA (date <= hoje) rompe a guarda de "dia sem dados = 0": ela É
+ *   a ocorrência do dia → entra com o saldo ajustado da resolução central
+ *   (−jornada efetiva, nunca −8h fixas);
+ * - Falta PREVISTA (futura) é mascarada em 0 até a data chegar (derivado —
+ *   sem job/timer: a comparação de datas decide);
+ * - Demais dias seguem o agregador central companyBalanceContribution:
+ *   folga/abonado nunca geram déficit; dia sem dados ou com jornada aberta
+ *   não entra (0).
+ */
+export function dayBalanceContribution(
+  view: CalendarDayView,
+  faltas: Falta[] | undefined,
+  date: string,
+  today: string,
+): number {
+  const f = faltaOnDate(faltas, date);
+  if (f) return f.date <= today ? view.adjustedBalance : 0;
+  return companyBalanceContribution(view);
 }
 
 /** Texto da confirmação do "Registrar falta" (Visão geral / modal). */

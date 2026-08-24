@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   ArrowLeftRight,
-  Ban,
   Cake,
   CalendarClock,
   Clock3,
@@ -16,7 +15,6 @@ import {
 import { actions, enrichComp, settingsOf, useAppData, useIsClient } from "@/lib/store";
 import {
   addDays,
-  computeDay,
   expectedMinutesOf,
   formatDateShortBR,
   formatMinutes,
@@ -27,17 +25,18 @@ import {
   weekdayShort,
   type EntryType,
 } from "@/lib/time";
-import { dayContext, isBirthdayToday } from "@/lib/absences";
+import { isBirthdayToday } from "@/lib/absences";
 import { companyDayContext } from "@/lib/company-calendar";
 import {
   annualCycleBounds,
   getAnnualPointCycle,
   getPointPeriod,
+  listDaysBetween,
   periodLabel,
   sameAnnualCycle,
 } from "@/lib/periods";
 import { activeAcordos, canCompleteComp, extraCapacityForDate, kindOf, usesHourExtra } from "@/lib/debt";
-import { canRegisterFalta, faltaConfirmText, faltaOnDate } from "@/lib/faltas";
+import { canRegisterFalta, dayBalanceContribution, faltaConfirmText, faltaOnDate } from "@/lib/faltas";
 import type { CompKind, DayResult, DaySummary } from "@/lib/types";
 import { Badge, Button, Card, EmptyState, Skeleton, StatCard } from "@/components/ui";
 import { QuickPunch } from "@/components/quick-punch";
@@ -79,44 +78,43 @@ export default function DashboardPage() {
   }, []);
   const nowMinutes = nowMinutesLocal();
 
-  const { monthDays, totals, today, todayCtx, recent, pending } = useMemo(() => {
-    const byDate = new Map<string, typeof entries>();
-    for (const e of entries) {
-      if (e.date >= period.from && e.date <= period.to) {
-        byDate.set(e.date, [...(byDate.get(e.date) ?? []), e]);
+  const { totals, today, todayCtx, recent, pending } = useMemo(() => {
+    /* §1 SALDO DO PERÍODO: percorre TODOS os dias do período de ponto com a
+     * resolução central (companyDayContext — folga/fim de semana/abonado não
+     * geram déficit) e soma a CONTRIBUIÇÃO CENTRAL do dia
+     * (dayBalanceContribution — a MESMA fonte do Resumo do período e de
+     * Registros: falta efetiva conta −jornada efetiva; falta prevista entra
+     * mascarada em 0 até a data chegar). O total da Visão geral é, portanto,
+     * SEMPRE igual ao do Resumo — nunca "trabalhado − 8h" por dia com batida.
+     */
+    const sum = { trackedDays: 0, workedTotal: 0, registrableTotal: 0, balanceTotal: 0, excessTotal: 0 };
+    for (const date of listDaysBetween(period.from, period.to)) {
+      const cctx = companyDayContext(date, entries, absences, companyCalendars, settings);
+      const day = cctx.ctx.day;
+      if (day.entries.length > 0) {
+        sum.trackedDays += 1;
+        sum.workedTotal += day.workedMinutes;
+        sum.registrableTotal += day.registrableMinutes;
+        sum.excessTotal += day.excessMinutes;
       }
+      sum.balanceTotal += dayBalanceContribution(cctx, faltas, date, todayStr);
     }
-
-    const days: DaySummary[] = [];
-    for (const [date, list] of byDate) {
-      // Saldo do período considera a jornada efetiva (férias/afastamentos)
-      const ctx = dayContext(date, entries, absences, settings);
-      const s = toSummary(computeDay(list, settings), date);
-      s.expectedMinutes = ctx.effectiveExpected;
-      s.balanceMinutes = ctx.adjustedBalance;
-      days.push(s);
-    }
-    days.sort((a, b) => a.date.localeCompare(b.date));
-
-    const sum = days.reduce(
-      (acc, d) => {
-        acc.trackedDays += 1;
-        acc.workedTotal += d.workedMinutes;
-        acc.registrableTotal += d.registrableMinutes;
-        acc.balanceTotal += d.balanceMinutes;
-        acc.excessTotal += d.excessMinutes;
-        return acc;
-      },
-      { trackedDays: 0, workedTotal: 0, registrableTotal: 0, balanceTotal: 0, excessTotal: 0 },
-    );
 
     const tCtx = companyDayContext(todayStr, entries, absences, companyCalendars, settings, nowMinutes);
     const todays = tCtx.displayDay;
 
+    /* §2 DIAS RECENTES: saldo da linha pela resolução central (regularBalance) —
+     * sábado/domingo/abonado trabalhados entram como CRÉDITO (+trabalhado);
+     * nunca mais "trabalhado − base 8h" (o antigo −6h/−7h de fim de semana).
+     */
     const recents: DaySummary[] = [];
     for (let i = 13; i >= 0; i--) {
       const d = addDays(todayStr, -i);
-      recents.push(toSummary(computeDay(entries.filter((e) => e.date === d), settings), d));
+      const cctx = companyDayContext(d, entries, absences, companyCalendars, settings, d === todayStr ? nowMinutes : undefined);
+      const s = toSummary(cctx.ctx.day, d);
+      s.expectedMinutes = cctx.effectiveExpected;
+      s.balanceMinutes = cctx.regularBalance;
+      recents.push(s);
     }
 
     // Regra 15: pendências de ciclos encerrados NÃO aparecem como ativas no ciclo atual
@@ -125,8 +123,8 @@ export default function DashboardPage() {
       .map((c) => enrichComp(c, entries, settings))
       .sort((a, b) => a.targetDate.localeCompare(b.targetDate));
 
-    return { monthDays: days, totals: sum, today: todays, todayCtx: tCtx, recent: recents, pending: pend };
-  }, [entries, compensations, absences, companyCalendars, settings, period, todayStr, nowMinutes]);
+    return { totals: sum, today: todays, todayCtx: tCtx, recent: recents, pending: pend };
+  }, [entries, compensations, absences, companyCalendars, faltas, settings, period, todayStr, nowMinutes]);
 
   const range = period;
 
@@ -195,16 +193,29 @@ export default function DashboardPage() {
     // §7: data futura → bloquear ANTES de tratar qualquer conflito com falta
     if (isFutureDate(p.date)) {
       toast.show(FUTURE_DATE_ERROR, "error");
-      return;
+      return { ok: false as const, error: FUTURE_DATE_ERROR };
     }
-    if (!resolveFaltaConflict(p.date)) return;
+    if (!resolveFaltaConflict(p.date)) return { ok: false as const };
     const res = actions.addEntry(p);
+    // §7: rejeição da validação central de sequência chega aqui (toast + erro)
     if (!res.ok) {
       toast.show(res.error ?? FUTURE_DATE_ERROR, "error");
     }
+    return res;
   };
 
   const onDeleteEntry = async (id: number) => actions.deleteEntry(id);
+
+  /** §8/§9: edição de batida pelo Registro rápido — validação da sequência
+   *  cronológica final e guarda de compensação concluída vivem no store. O
+   *  resultado volta ao modal: erro → toast e o modal PERMANECE aberto. */
+  const onUpdateEntry = async (id: number, patch: { time?: string; note?: string | null }) => {
+    const res = actions.updateEntry(id, patch);
+    if (!res.ok) {
+      toast.show(res.error ?? "Não foi possível editar o registro.", "error");
+    }
+    return res;
+  };
 
   const completeComp = async (id: number) => {
     const res = actions.completeComp(id);
@@ -424,30 +435,13 @@ export default function DashboardPage() {
         settings={settings}
         dayLabel={todayCtx.type === "regular" ? undefined : todayLabel}
         onAddEntry={onAddEntry}
+        onUpdateEntry={onUpdateEntry}
         onDeleteEntry={onDeleteEntry}
+        faltaRegistrada={!!faltaHoje}
+        faltaGate={faltaHojeGate}
+        onRegisterFalta={registerFaltaHoje}
+        onRemoveFalta={removeFaltaHoje}
       />
-
-      {/* §3: "Falta hoje" — ação discreta; some quando o dia já tem batidas,
-          folga/cobertura integral (o gate central decide). */}
-      {faltaHoje ? (
-        <p className="flex items-center gap-2 text-xs text-slate-400">
-          <Ban size={12} className="text-rose-500" />
-          Falta registrada hoje — o déficit corresponde à jornada efetiva do dia.
-          <button
-            type="button"
-            className="font-semibold text-rose-500 underline-offset-2 hover:underline"
-            onClick={removeFaltaHoje}
-          >
-            Excluir falta
-          </button>
-        </p>
-      ) : faltaHojeGate.ok ? (
-        <div>
-          <Button variant="ghost" size="sm" onClick={registerFaltaHoje}>
-            <Ban size={13} /> Falta hoje
-          </Button>
-        </div>
-      ) : null}
 
       {/* Gestão de excedentes */}
       <div>
