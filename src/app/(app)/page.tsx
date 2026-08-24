@@ -5,6 +5,7 @@ import Link from "next/link";
 import {
   ArrowLeftRight,
   Ban,
+  Cake,
   CalendarClock,
   Clock3,
   PlusCircle,
@@ -26,7 +27,7 @@ import {
   weekdayShort,
   type EntryType,
 } from "@/lib/time";
-import { dayContext } from "@/lib/absences";
+import { dayContext, isBirthdayToday } from "@/lib/absences";
 import { companyDayContext } from "@/lib/company-calendar";
 import {
   annualCycleBounds,
@@ -307,11 +308,32 @@ export default function DashboardPage() {
   const todayStatusTone =
     t.status === "excess" ? "rose" : t.status === "deficit" ? "amber" : t.status === "in-progress" ? "indigo" : "slate";
   const firstName = user.name.split(" ")[0];
+  /* Banner de aniversário: SOMENTE VISUAL (data local dia+mês) — nunca entra
+   * em jornada, saldo, déficit ou qualquer cálculo central. */
+  const birthdayToday = isBirthdayToday(user.birthDate, todayStr);
 
   const recentDays = [...recent].filter((d) => d.entryCount > 0).slice(-7).reverse();
 
   return (
     <div className="space-y-6">
+      {/* H: Felicitação do dia — não altera nenhum número do app */}
+      {birthdayToday && (
+        <div className="flex items-center gap-3 rounded-2xl border border-amber-200 bg-gradient-to-r from-amber-50 via-orange-50 to-amber-50 px-5 py-4 shadow-sm">
+          <span className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-amber-100 text-amber-600">
+            <Cake size={22} aria-hidden />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="text-base font-extrabold text-amber-800">
+              Feliz aniversário, {firstName}! 🎉
+            </p>
+            <p className="text-xs font-medium text-amber-600">
+              Que o seu novo ano seja ótimo. Se quiser, use o Abono de aniversário do ciclo em
+              Férias/Afastamentos (facultativo — sem efeito no saldo de horas).
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Cabeçalho */}
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
@@ -578,6 +600,8 @@ export default function DashboardPage() {
             companyCalendars={companyCalendars}
             settings={settings}
             period={period}
+            faltas={faltas}
+            today={todayStr}
             height={150}
           />
         </Card>

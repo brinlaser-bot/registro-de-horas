@@ -12,6 +12,7 @@ export const DEFAULT_USER: User = {
   lunchEnd: "13:00",
   maxDailyMinutes: 600,
   autoDeductLunch: true,
+  birthDate: null,
 };
 
 type Pattern = Array<[string, "entrada" | "saida"]>;

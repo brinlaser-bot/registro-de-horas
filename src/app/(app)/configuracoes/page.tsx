@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Clock3, Database, Download, Info, Save, Trash2, Upload, UserRound } from "lucide-react";
+import Link from "next/link";
+import { Cake, Clock3, Database, Download, Info, Pencil, Save, Trash2, Upload, UserRound } from "lucide-react";
 import {
   actions,
   getAppData,
@@ -11,6 +12,7 @@ import {
   useIsClient,
 } from "@/lib/store";
 import { buildBackupPayload } from "@/lib/backup";
+import { abonoInCycle } from "@/lib/absences";
 import {
   buildCompanyCalendar,
   CALENDAR_HEADER,
@@ -29,9 +31,9 @@ import { useToast } from "@/components/toast";
 export default function ConfiguracoesPage() {
   const toast = useToast();
   const mounted = useIsClient();
-  const { user, entries, compensations, companyCalendars } = useAppData();
+  const { user, entries, compensations, absences, companyCalendars } = useAppData();
 
-  const [profile, setProfile] = useState({ name: "", email: "" });
+  const [profile, setProfile] = useState({ name: "", email: "", birthDate: "" });
   const [schedule, setSchedule] = useState({
     workStart: "08:00",
     workEnd: "17:00",
@@ -51,7 +53,7 @@ export default function ConfiguracoesPage() {
 
   useEffect(() => {
     if (!mounted) return;
-    setProfile({ name: user.name, email: user.email });
+    setProfile({ name: user.name, email: user.email, birthDate: user.birthDate ?? "" });
     setSchedule({
       workStart: user.workStart,
       workEnd: user.workEnd,
@@ -69,7 +71,12 @@ export default function ConfiguracoesPage() {
     }
     setBusyProfile(true);
     await new Promise((r) => setTimeout(r, 250));
-    actions.updateUser({ name: profile.name.trim(), email: profile.email.trim().toLowerCase() });
+    actions.updateUser({
+      name: profile.name.trim(),
+      email: profile.email.trim().toLowerCase(),
+      // Data LOCAL (yyyy-mm-dd) — alimenta o banner de aniversário e a sugestão do Abono.
+      birthDate: profile.birthDate || null,
+    });
     setBusyProfile(false);
     toast.show("Perfil atualizado!");
   };
@@ -212,6 +219,60 @@ export default function ConfiguracoesPage() {
         <div className="grid gap-4 sm:grid-cols-2">
           <Input label="Nome completo" value={profile.name} onChange={(e) => setProfile({ ...profile, name: e.target.value })} />
           <Input label="E-mail" type="email" value={profile.email} onChange={(e) => setProfile({ ...profile, email: e.target.value })} />
+          <div className="sm:col-span-2">
+            {/* G: data LOCAL (sem fuso) — usada SOMENTE para o banner de aniversário
+                (somente visual) e a sugestão do Abono de aniversário. Nunca entra nos cálculos. */}
+            <Input
+              label="Data de nascimento (opcional)"
+              type="date"
+              className="sm:max-w-64"
+              value={profile.birthDate}
+              onChange={(e) => setProfile({ ...profile, birthDate: e.target.value })}
+            />
+            <p className="mt-1 text-[11px] text-slate-400">
+              Usada para a felicitação do dia (somente visual) e para sugerir a data do Abono de
+              aniversário — nunca altera horas ou saldos.
+            </p>
+          </div>
+        </div>
+
+        {/* L: atalho do Abono de aniversário do ciclo anual — a fonte única do
+            evento é o fluxo de Férias/Afastamentos (/ferias). */}
+        <div className="mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-amber-200 bg-amber-50/60 px-4 py-3">
+          <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-amber-100 text-amber-600">
+            <Cake size={18} aria-hidden />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-bold uppercase tracking-wide text-amber-500">
+              Abono de aniversário do ciclo
+            </p>
+            {(() => {
+              const abono = abonoInCycle(absences ?? [], todayString());
+              return abono ? (
+                <p className="text-sm font-extrabold text-amber-800">
+                  Definido para {formatDateBR(abono.startDate)} 🎂
+                  <span className="ml-2 text-xs font-medium text-amber-600">
+                    (um por ciclo anual · dia integral · jornada 0 · saldo neutro)
+                  </span>
+                </p>
+              ) : (
+                <p className="text-sm font-semibold text-amber-700/80">
+                  Ainda não definido para este ciclo anual.
+                </p>
+              );
+            })()}
+          </div>
+          <Link href="/ferias" className="shrink-0">
+            {abonoInCycle(absences ?? [], todayString()) ? (
+              <Button variant="secondary" size="sm">
+                <Pencil size={13} /> Alterar
+              </Button>
+            ) : (
+              <Button variant="secondary" size="sm">
+                <Cake size={13} /> Definir
+              </Button>
+            )}
+          </Link>
         </div>
       </Card>
 

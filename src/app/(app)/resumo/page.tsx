@@ -3,11 +3,12 @@
 import { useMemo, useState } from "react";
 import { BarChart3, ChevronLeft, ChevronRight, Download } from "lucide-react";
 import { settingsOf, useAppData, useIsClient } from "@/lib/store";
-import { formatMinutes, isWeekend, weekdayShort } from "@/lib/time";
+import { formatMinutes, isWeekend, todayString, weekdayShort } from "@/lib/time";
 import {
   absenceLabel,
   absenceOnDate,
 } from "@/lib/absences";
+import { faltaOnDate, faltaStatusOf } from "@/lib/faltas";
 import {
   getNextPointPeriod,
   getPointPeriod,
@@ -33,13 +34,16 @@ interface DayRow {
   eventLabel: string | null;
   /** Contribuição central deste dia ao Saldo do período. */
   balanceContribution: number;
+  /** Falta do dia: \"efetiva\" vale (saldo/déficit); \"prevista\" mascarada. */
+  faltaStatus: "efetiva" | "prevista" | null;
   absence: Absence | undefined;
 }
 
 export default function ResumoPage() {
   const mounted = useIsClient();
-  const { user, entries, compensations, absences, companyCalendars } = useAppData();
+  const { user, entries, compensations, absences, companyCalendars, faltas } = useAppData();
   const settings = settingsOf(user);
+  const todayStr = todayString();
   const [period, setPeriod] = useState<PointPeriod>(() => getPointPeriod(new Date().toISOString().slice(0, 10)));
 
   const allDays: DayRow[] = useMemo(() => {
@@ -48,6 +52,8 @@ export default function ResumoPage() {
         const cctx = companyDayContext(date, entries, absences, companyCalendars, settings);
         const ctx = cctx.ctx;
         const absence = absenceOnDate(absences, date);
+        const falta = faltaOnDate(faltas, date);
+        const faltaStatus = falta ? faltaStatusOf(date, todayStr) : null;
         return {
           date,
           workedMinutes: ctx.day.workedMinutes,
@@ -55,27 +61,40 @@ export default function ResumoPage() {
           balanceMinutes: cctx.regularBalance,
           excessMinutes: ctx.day.excessMinutes,
           registrableMinutes: ctx.day.registrableMinutes,
-          status: absence
-            ? absence.kind === "ferias"
-              ? "ferias"
-              : "afastamento"
-            : ctx.day.open
-              ? "in-progress"
-              : ctx.day.excessMinutes > 0
-                ? "excess"
-                : ctx.adjustedDeficit > 0
-                  ? "deficit"
-                  : ctx.day.entries.length > 0
-                    ? "ok"
-                    : "empty",
+          status: faltaStatus === "efetiva"
+            ? "falta"
+            : absence
+              ? absence.kind === "ferias"
+                ? "ferias"
+                : "afastamento"
+              : ctx.day.open
+                ? "in-progress"
+                : ctx.day.excessMinutes > 0
+                  ? "excess"
+                  : ctx.adjustedDeficit > 0
+                    ? "deficit"
+                    : ctx.day.entries.length > 0
+                      ? "ok"
+                      : "empty",
           entryCount: ctx.day.entries.length,
-          eventLabel: cctx.label ?? (absence ? absenceLabel(absence) : null),
-          balanceContribution: companyBalanceContribution(cctx),
+          eventLabel:
+            cctx.label ??
+            (absence ? absenceLabel(absence) : null) ??
+            (faltaStatus === "efetiva" ? "Falta" : faltaStatus === "prevista" ? "Falta prevista" : null),
+          /* Falta EFETIVA rompe a guarda de "dia vazio = 0": ela É a ocorrência
+           * do dia (−jornada efetiva). Falta PREVISTA mascarada em 0 até chegar. */
+          balanceContribution:
+            faltaStatus === "efetiva"
+              ? cctx.adjustedBalance
+              : faltaStatus === "prevista"
+                ? 0
+                : companyBalanceContribution(cctx),
+          faltaStatus,
           absence,
         };
       })
       .filter((d) => d.entryCount > 0 || d.eventLabel || !isWeekend(d.date));
-  }, [entries, absences, settings, period]);
+  }, [entries, absences, companyCalendars, faltas, settings, period, todayStr]);
 
   const totals = useMemo(
     () =>
@@ -185,6 +204,8 @@ export default function ResumoPage() {
           companyCalendars={companyCalendars}
           settings={settings}
           period={period}
+          faltas={faltas}
+          today={todayStr}
           height={210}
         />
       </Card>
@@ -216,7 +237,7 @@ export default function ResumoPage() {
                     </td>
                     <td className="py-2.5 pr-3">
                       {d.eventLabel ? (
-                        <Badge tone="sky">{d.eventLabel}</Badge>
+                        <Badge tone={d.eventLabel === "Falta" ? "rose" : "sky"}>{d.eventLabel}</Badge>
                       ) : d.status === "excess" ? (
                         <Badge tone="rose">Acima do limite</Badge>
                       ) : d.status === "deficit" ? (
@@ -244,9 +265,11 @@ export default function ResumoPage() {
                             : "text-slate-400"
                       }`}
                     >
-                      {d.entryCount > 0 || d.eventLabel
-                        ? `${d.balanceMinutes >= 0 ? "+" : ""}${formatMinutes(d.balanceMinutes)}`
-                        : "—"}
+                      {d.faltaStatus === "prevista"
+                        ? "—"
+                        : d.entryCount > 0 || d.eventLabel
+                          ? `${d.balanceMinutes >= 0 ? "+" : ""}${formatMinutes(d.balanceMinutes)}`
+                          : "—"}
                     </td>
                     <td className="py-2.5 pr-3 text-right font-semibold tabular-nums text-indigo-600">
                       {d.entryCount > 0 ? formatMinutes(d.registrableMinutes) : "—"}

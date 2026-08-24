@@ -432,7 +432,7 @@ export const actions = {
   ): ActionResult {
     let result: ActionResult = OK;
     mutate((d) => {
-      const v = validateAbsence(draft, d.absences, d.entries);
+      const v = validateAbsence(draft, d.absences, d.entries, undefined, d.faltas);
       if (!v.ok) {
         result = { ok: false, code: v.code, error: v.error, split: v.split };
         return d;
@@ -453,7 +453,7 @@ export const actions = {
         return d;
       }
       const next = { ...target, ...patch };
-      const v = validateAbsence(next, d.absences, d.entries, id);
+      const v = validateAbsence(next, d.absences, d.entries, id, d.faltas);
       if (!v.ok) {
         result = { ok: false, code: v.code, error: v.error, split: v.split };
         return d;

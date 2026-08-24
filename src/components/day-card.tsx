@@ -4,6 +4,7 @@ import { useState } from "react";
 import {
   ArrowLeftRight,
   Ban,
+  Cake,
   CalendarDays,
   CheckCircle2,
   ChevronDown,
@@ -48,11 +49,20 @@ function absenceIcon(absence: Absence, size: number) {
   if (absence.kind === "ferias") return <Umbrella size={size} className={cls} aria-hidden />;
   if (absence.kind === "saude") return <HeartPulse size={size} className={cls} aria-hidden />;
   if (absence.kind === "acordado") return <Handshake size={size} className={cls} aria-hidden />;
+  if (absence.kind === "abono") return <Cake size={size} className={cls} aria-hidden />;
   return <CalendarDays size={size} className={cls} aria-hidden />;
 }
 
 /** Badge do card recolhido: ícone perceptível + texto completo. */
 function absenceBadge(absence: Absence) {
+  if (absence.kind === "abono") {
+    return (
+      <Badge tone="amber" className="shrink-0 gap-1.5 py-1">
+        {absenceIcon(absence, 14)}
+        <span>Abono de aniversário 🎂</span>
+      </Badge>
+    );
+  }
   if (absence.kind === "ferias") {
     return (
       <Badge tone="sky" className="shrink-0 gap-1.5 py-1">
@@ -567,8 +577,11 @@ export function DayCard({
             </div>
           )}
 
-          {/* Atalho: déficit comum pendente → quitar com hora extra */}
-          {shortcuts?.canCompensate && shortcuts.acordoMinutes === 0 && shortcuts.deficitRemaining > 0 && (
+          {/* Atalho: déficit comum pendente → quitar com hora extra.
+              Coexiste com o atalho do acordo: quando o dia tem acorda parcial a
+              compensar SEM batidas, o restante da jornada é déficit comum
+              (acordo 4h + déficit 4h — nunca uma dívida única de 8h). */}
+          {shortcuts?.canCompensate && shortcuts.deficitRemaining > 0 && (
             <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5">
               <p className="flex-1 text-xs font-medium text-amber-800">
                 Déficit pendente: <b>{formatMinutes(shortcuts.deficitRemaining)}</b> ainda pendentes

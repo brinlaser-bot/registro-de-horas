@@ -13,6 +13,9 @@ export interface User {
   lunchEnd: string;
   maxDailyMinutes: number;
   autoDeductLunch: boolean;
+  /** Data de nascimento (YYYY-MM-DD, data local) — usada no banner de
+   *  aniversário e na SUGESTÃO de data do Abono de aniversário. Opcional. */
+  birthDate?: string | null;
 }
 
 export interface TimeEntry {

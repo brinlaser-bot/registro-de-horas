@@ -1,6 +1,6 @@
 "use client";
 
-import { CalendarDays, Handshake, HeartPulse, Umbrella } from "lucide-react";
+import { Ban, Cake, CalendarDays, Handshake, HeartPulse, Umbrella } from "lucide-react";
 import { formatMinutes, weekdayShort } from "@/lib/time";
 
 /* ── Anel de progresso (SVG) ────────────────────────────── */
@@ -149,6 +149,8 @@ export type ChartAbsenceMarker =
   | "saude"
   | "acordado-dispensado"
   | "acordado-compensar"
+  | "abono-aniversario"
+  | "falta"
   | "outro"
   | "folga"
   | "trabalho-folga"
@@ -182,6 +184,8 @@ const MARKER_ICON: Record<ChartAbsenceMarker, typeof Umbrella> = {
   saude: HeartPulse,
   "acordado-dispensado": Handshake,
   "acordado-compensar": Handshake,
+  "abono-aniversario": Cake,
+  falta: Ban,
   outro: CalendarDays,
   folga: CalendarDays,
   "trabalho-folga": CalendarDays,
@@ -197,6 +201,8 @@ const MARKER_TONE: Record<ChartAbsenceMarker, string> = {
   saude: "text-rose-600",
   "acordado-dispensado": "text-emerald-600",
   "acordado-compensar": "text-violet-600",
+  "abono-aniversario": "text-amber-500",
+  falta: "text-rose-600",
   outro: "text-slate-500",
   folga: "text-slate-400",
   "trabalho-folga": "text-emerald-600",
@@ -212,6 +218,8 @@ const MARKER_LEGEND: Array<{ marker: ChartAbsenceMarker; label: string }> = [
   { marker: "saude", label: "Saúde" },
   { marker: "acordado-dispensado", label: "Folga/abono acordado" },
   { marker: "acordado-compensar", label: "Folga a compensar" },
+  { marker: "abono-aniversario", label: "Abono de aniversário 🎂" },
+  { marker: "falta", label: "Falta" },
   { marker: "folga", label: "Folga" },
   { marker: "feriado", label: "Feriado" },
   { marker: "abono", label: "Abono" },

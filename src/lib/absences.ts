@@ -7,10 +7,10 @@
 //    (não são déficit comum), compensáveis com hora extra no mesmo ciclo.
 // ─────────────────────────────────────────────────────────────
 import { computeDay, expectedMinutesOf, toMinutes } from "./time";
-import { annualCycleClose, getAnnualPointCycle, nextCycleStart, sameAnnualCycle } from "./periods";
-import type { DayResult, TimeEntry, WorkSettings } from "./types";
+import { annualCycleClose, annualCycleBounds, getAnnualPointCycle, nextCycleStart, sameAnnualCycle } from "./periods";
+import type { DayResult, Falta, TimeEntry, WorkSettings } from "./types";
 
-export type AbsenceKind = "ferias" | "saude" | "acordado" | "outro";
+export type AbsenceKind = "ferias" | "saude" | "acordado" | "abono" | "outro";
 export type AbsenceDuration = "integral" | "parcial";
 export type AbsenceTreatment = "dispensado" | "compensar";
 
@@ -35,6 +35,7 @@ export const ABSENCE_LABELS: Record<AbsenceKind, string> = {
   ferias: "Férias",
   saude: "Afastamento por saúde",
   acordado: "Afastamento acordado",
+  abono: "Abono de aniversário",
   outro: "Outro afastamento justificado",
 };
 
@@ -248,6 +249,7 @@ export function validateAbsence(
   allAbsences: Absence[],
   entries: TimeEntry[],
   excludeId?: number,
+  faltas: Falta[] = [],
 ): AbsenceValidation {
   const { startDate, endDate } = draft;
   if (!startDate || !endDate) return { ok: false, code: "invalid", error: "Informe as datas." };
@@ -266,7 +268,35 @@ export function validateAbsence(
     return { ok: false, code: "invalid", error: "Informe como tratar as horas do afastamento acordado." };
   }
 
-  // Barreira do fechamento anual: evento não pode atravessar 30/04 → 01/05
+  // Regra do ABONO DE ANIVERSÁRIO: sempre dia inteiro (não existe parcial).
+  if (draft.kind === "abono" && draft.duration !== "integral") {
+    return {
+      ok: false,
+      code: "invalid",
+      error: "O Abono de aniversário é sempre um dia inteiro.",
+    };
+  }
+  // O Abono é um benefício de UM único dia (nunca abrange 2+ dias).
+  if (draft.kind === "abono" && startDate !== endDate) {
+    return {
+      ok: false,
+      code: "invalid",
+      error: "O Abono de aniversário é de um único dia — mantenha as datas inicial e final iguais.",
+    };
+  }
+
+  // Parte A: FÉRIAS nunca atravessam o fechamento anual (30/04 → 01/05).
+  // Diferente de saúde/acordado/outro, NÃO se oferece divisão: ajuste das datas.
+  if (draft.kind === "ferias" && !sameAnnualCycle(startDate, endDate)) {
+    return {
+      ok: false,
+      code: "cross-cycle",
+      error:
+        "As férias não podem ultrapassar o fechamento do ciclo anual em 30/04. Ajuste a data final para até 30/04. A partir de 01/05 inicia-se um novo ciclo anual.",
+    };
+  }
+
+  // Barreira do fechamento anual: saúde/acordado/outro podem ser divididos.
   if (!sameAnnualCycle(startDate, endDate)) {
     const cycle = getAnnualPointCycle(startDate);
     return {
@@ -279,6 +309,41 @@ export function validateAbsence(
         second: { startDate: nextCycleStart(cycle), endDate },
       },
     };
+  }
+
+  // Regra do ABONO: um benefício por ciclo anual (resolução central do ciclo,
+  // nunca ano-calendário). Mostra a data já cadastrada para orientar a edição.
+  if (draft.kind === "abono") {
+    const existing = allAbsences.find(
+      (a) => a.kind === "abono" && a.id !== excludeId && sameAnnualCycle(a.startDate, startDate),
+    );
+    if (existing) {
+      return {
+        ok: false,
+        code: "overlap",
+        error: `Já existe um Abono de aniversário neste ciclo anual, em ${existing.startDate.slice(8, 10)}/${existing.startDate.slice(5, 7)}/${existing.startDate.slice(0, 4)}. Altere o evento existente ou exclua-o para cadastrar outra data.`,
+      };
+    }
+    // K6: dia com Falta/Falta prevista — conflito explícito, nunca converte em silêncio
+    const faltaNoDia = faltas.some((f) => f.date >= startDate && f.date <= endDate);
+    if (faltaNoDia) {
+      return {
+        ok: false,
+        code: "overlap",
+        error:
+          "Esta data possui uma falta registrada. Exclua a falta (ou a falta prevista) antes de usar o dia para o Abono de aniversário.",
+      };
+    }
+    // K7: dia com batidas — exigir resolução explícita (nunca abono sobre dia trabalhado)
+    const punchNoDia = entries.some((e) => e.date >= startDate && e.date <= endDate);
+    if (punchNoDia) {
+      return {
+        ok: false,
+        code: "overlap",
+        error:
+          "Esta data possui registros de ponto. Exclua os registros ou escolha outra data para o Abono de aniversário.",
+      };
+    }
   }
 
   // Sobreposição com outro evento existente → bloqueio
@@ -301,4 +366,45 @@ export function validateAbsence(
       : undefined;
 
   return { ok: true, warning };
+}
+
+/* ── ABONO DE ANIVERSÁRIO & DATA DE NASCIMENTO ─────────────
+ * O Abono é um benefício próprio da empresa: dia inteiro, jornada efetiva 0h,
+ * saldo 0, déficit 0, sem obrigação de compensação, NO MÁXIMO um por ciclo.
+ */
+
+/** Verdadeiro se hoje (data local) é o aniversário (dia+mês) do nascimento. */
+export function isBirthdayToday(birthDate: string | null | undefined, today: string): boolean {
+  if (!birthDate) return false;
+  // Compara somente mês e dia — data LOCAL (strings YYYY-MM-DD), nunca UTC.
+  return birthDate.slice(5, 10) === today.slice(5, 10);
+}
+
+/**
+ * Data SUGERIDA do Abono: o aniversário que cai dentro do ciclo anual da data
+ * de referência (01/05 → 30/04). Ex.: nascimento 15/08 + ciclo 2026/2027 →
+ * 15/08/2026; nascimento 10/01 + mesmo ciclo → 10/01/2027.
+ * 29/02 em ciclo sem 29/02 → 01/03. É só sugestão — a escolha final é LIVRE.
+ */
+export function suggestedAbonoDate(birthDate: string | null | undefined, referenceDate: string): string | null {
+  if (!birthDate) return null;
+  const bounds = annualCycleBounds(getAnnualPointCycle(referenceDate));
+  const startYear = Number(bounds.from.slice(0, 4));
+  const mm = birthDate.slice(5, 7);
+  const dd = birthDate.slice(8, 10);
+  // mm-dd >= "05-01" → mesmo ano do início do ciclo; senão, ano de término
+  const year = `${mm}-${dd}` >= "05-01" ? startYear : startYear + 1;
+  // Edge 29/02: se o ano alvo não é bissexto, sugerir 01/03
+  if (mm === "02" && dd === "29") {
+    const leap = (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+    return leap ? `${year}-02-29` : `${year}-03-01`;
+  }
+  return `${year}-${mm}-${dd}`;
+}
+
+/** Abono já cadastrado no mesmo ciclo anual da data (para UI de atalho). */
+export function abonoInCycle(absences: Absence[], referenceDate: string): Absence | undefined {
+  return absences.find(
+    (a) => a.kind === "abono" && sameAnnualCycle(a.startDate, referenceDate),
+  );
 }

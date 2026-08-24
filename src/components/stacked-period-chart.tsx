@@ -10,12 +10,13 @@
  */
 import { useMemo } from "react";
 import { BarChart3 } from "lucide-react";
-import { expectedMinutesOf, formatMinutes, isWeekend, stackedSegments } from "@/lib/time";
+import { expectedMinutesOf, formatMinutes, isWeekend, stackedSegments, todayString } from "@/lib/time";
 import { absenceLabel, absenceOnDate, type Absence } from "@/lib/absences";
 import { acordoViewOf, appliedOnDate, buildDebtDays, type AcordoView } from "@/lib/debt";
 import { companyDayContext, type CompanyCalendars } from "@/lib/company-calendar";
+import { faltaOnDate } from "@/lib/faltas";
 import { listDaysBetween, type PointPeriod } from "@/lib/periods";
-import type { Compensation, TimeEntry, WorkSettings } from "@/lib/types";
+import type { Compensation, Falta, TimeEntry, WorkSettings } from "@/lib/types";
 import { StackedBarsChart, type ChartAbsenceMarker, type StackedDatum } from "@/components/charts";
 import { EmptyState } from "@/components/ui";
 
@@ -26,6 +27,7 @@ function markerOf(a: Absence): ChartAbsenceMarker {
   if (a.kind === "acordado") {
     return a.treatment === "compensar" ? "acordado-compensar" : "acordado-dispensado";
   }
+  if (a.kind === "abono") return "abono-aniversario";
   return "outro";
 }
 
@@ -37,6 +39,10 @@ export interface StackedPeriodParams {
   settings: WorkSettings;
   /** Período de ponto JÁ resolvido pelo helper central (21→20, com os especiais do fechamento anual). */
   period: PointPeriod;
+  /** Faltas registradas (marcador informativo; efetiva = data <= hoje). */
+  faltas?: Falta[];
+  /** Data local de hoje (yyyy-mm-dd) — resolve a falta efetiva sem depender do relógio do teste. */
+  today?: string;
 }
 
 /**
@@ -51,7 +57,10 @@ export function buildStackedPeriodData({
   companyCalendars,
   settings,
   period,
+  faltas = [],
+  today,
 }: StackedPeriodParams): StackedDatum[] {
+  const todayStr = today ?? todayString();
   // Visão central dos acordos do período (original/compensado/planejado/restante)
   const acordoByDate = new Map<string, AcordoView>();
   for (const d of buildDebtDays(entries, compensations, settings, period, absences, companyCalendars)) {
@@ -63,10 +72,18 @@ export function buildStackedPeriodData({
       const cctx = companyDayContext(date, entries, absences, companyCalendars, settings);
       const ctx = cctx.ctx;
       const absence = absenceOnDate(absences, date);
-      const eventLabel = cctx.label ?? (absence ? absenceLabel(absence) : null);
-      return { date, cctx, ctx, absence, eventLabel };
+      // Falta só ganha marcador quando EFETIVA (data <= hoje); prevista não contamina.
+      const faltaEf = (() => {
+        const f = faltaOnDate(faltas, date);
+        return f && f.date <= todayStr ? f : undefined;
+      })();
+      const eventLabel =
+        cctx.label ??
+        (absence ? absenceLabel(absence) : null) ??
+        (faltaEf ? "Falta" : null);
+      return { date, cctx, ctx, absence, eventLabel, faltaEf };
     })
-    .filter((d) => d.ctx.day.entries.length > 0 || d.eventLabel || !isWeekend(d.date))
+    .filter((d) => d.ctx.day.entries.length > 0 || d.eventLabel || d.faltaEf || !isWeekend(d.date))
     .map((d) => {
       const worked = d.ctx.day.workedMinutes;
       const expected = d.cctx.expectedRegular;
@@ -86,6 +103,13 @@ export function buildStackedPeriodData({
             d.absence.medicalCert ? "Atestado apresentado" : "Atestado não apresentado",
           );
         }
+        if (d.absence.kind === "abono") {
+          lines.push("Jornada 0h · saldo neutro (não gera crédito nem déficit)");
+        }
+      } else if (d.faltaEf) {
+        lines.push(
+          `Jornada do dia: ${formatMinutes(d.cctx.effectiveExpected)} — déficit integral`,
+        );
       } else if (d.eventLabel) {
         lines.push(d.eventLabel);
       }
@@ -109,7 +133,7 @@ export function buildStackedPeriodData({
         extra: seg.extra,
         excess: seg.excess,
         compensated: Math.max(0, Math.min(used, Math.max(0, expected - worked))),
-        marker: d.absence ? markerOf(d.absence) : d.cctx.marker ?? undefined,
+        marker: d.absence ? markerOf(d.absence) : d.faltaEf ? "falta" : d.cctx.marker ?? undefined,
         markerLabel: d.eventLabel ?? undefined,
         markerLines: lines.length > 0 ? lines : undefined,
         regularBalance: d.cctx.regularBalance,
@@ -125,11 +149,13 @@ export function StackedPeriodChart({
   companyCalendars,
   settings,
   period,
+  faltas = [],
+  today,
   height = 210,
 }: StackedPeriodParams & { height?: number }) {
   const data = useMemo(
-    () => buildStackedPeriodData({ entries, compensations, absences, companyCalendars, settings, period }),
-    [entries, compensations, absences, companyCalendars, settings, period],
+    () => buildStackedPeriodData({ entries, compensations, absences, companyCalendars, settings, period, faltas, today }),
+    [entries, compensations, absences, companyCalendars, settings, period, faltas, today],
   );
   if (data.length === 0) {
     return (

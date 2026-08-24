@@ -560,3 +560,24 @@ export function companyDayBalanceView(view: CalendarDayView): DayBalanceView {
     adjustedDeficit: view.adjustedDeficit,
   };
 }
+
+/* ── Aviso de data para o Abono de aniversário (K1/K2/K3) ──
+ * Warnings NÃO bloqueantes — a escolha da data é livre; bloqueios duros
+ * (falta, batidas, outro evento integral) ficam em validateAbsence.
+ */
+export function abonoDateAdvisory(
+  date: string,
+  calendars: CompanyCalendars | undefined,
+): string | null {
+  const calEntry = entryOnDate(calendars, date);
+  if (calEntry?.tratamento === "ABONADO") {
+    return "Esta data já está abonada pelo calendário. Como o dia já está dispensado, recomendamos escolher outra data para aproveitar o Abono de aniversário.";
+  }
+  if (calEntry?.tratamento === "COMPENSAR") {
+    return "Esta data já possui uma obrigação de compensação do calendário. Recomendamos escolher outra data para aproveitar o Abono de aniversário — o abono NÃO abate a obrigação.";
+  }
+  if (isWeekendDate(date)) {
+    return "Esta data já é uma folga e não possui jornada regular. Considere escolher outro dia para aproveitar o Abono de aniversário.";
+  }
+  return null;
+}

@@ -65,7 +65,9 @@ function validUser(v: unknown): v is User {
     isTime(u.lunchStart) &&
     isTime(u.lunchEnd) &&
     isNum(u.maxDailyMinutes) &&
-    isBool(u.autoDeductLunch)
+    isBool(u.autoDeductLunch) &&
+    // birthDate é opcional (backups v1/v2/v3 antigos não o tinham)
+    (u.birthDate === undefined || u.birthDate === null || isDate(u.birthDate))
   );
 }
 
@@ -100,7 +102,7 @@ function validAbsence(v: unknown): v is Absence {
   const a = v as Record<string, unknown>;
   return (
     isNum(a.id) &&
-    (a.kind === "ferias" || a.kind === "saude" || a.kind === "acordado" || a.kind === "outro") &&
+    (a.kind === "ferias" || a.kind === "saude" || a.kind === "acordado" || a.kind === "abono" || a.kind === "outro") &&
     isDate(a.startDate) &&
     isDate(a.endDate) &&
     (a.duration === "integral" || a.duration === "parcial") &&
