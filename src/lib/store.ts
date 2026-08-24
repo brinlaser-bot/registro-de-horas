@@ -508,10 +508,13 @@ export const actions = {
         result = { ok: false, code: "invalid", error: "Informe a data do Abono." };
         return d;
       }
+      // Ao ALTERAR, o próprio Abono não pode ser contado como conflito da data
+      const existingAbonoId = abonoInCycle(d.absences, p.date)?.id;
       const decision = abonoDayDecision(p.date, {
         absences: d.absences,
         entries: d.entries,
         faltas: d.faltas,
+        excludeAbsenceId: existingAbonoId,
       });
       if (decision.status === "blocked") {
         result = { ok: false, code: decision.code, error: decision.error };

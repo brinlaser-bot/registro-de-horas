@@ -105,7 +105,6 @@ export function AbonoModal({ open, onClose }: Props) {
       open={open}
       onClose={onClose}
       title={existing ? "Alterar Abono de aniversário" : "Definir Abono de aniversário"}
-      subtitle="Benefício de um dia — sem efeito em horas ou saldos."
       footer={
         <>
           <Button variant="secondary" onClick={onClose}>Cancelar</Button>

@@ -192,6 +192,10 @@ export function DayCard({
   // de ponto é oferecido (formulário, atalhos, Smart Exit) — o card fica
   // somente leitura (Falta prevista, métricas e Cancelar falta permanecem).
   const futureDay = isFutureDate(d.date);
+  // ABONO DE ANIVERSÁRIO: dia coberto pelo benefício é SOMENTE INFORMATIVO —
+  // nenhum controle de batida (formulário/atalhos) é oferecido no card.
+  // (Regra específica de kind === "abono" — NÃO generalizar para outros eventos.)
+  const abonoDay = absence?.kind === "abono";
 
   const add = async (type?: EntryType, time?: string) => {
     if (busy) return;
@@ -664,8 +668,17 @@ export function DayCard({
               ),
             )}
 
-            {/* Formulário adicionar — NUNCA em data futura (card vira somente leitura) */}
-            {!futureDay && (showAdd ? (
+            {/* Informação no dia de Abono: registro só volta ao mover o Abono
+                para outra data (Configurações → Alterar). */}
+            {abonoDay && (
+              <p className="text-xs text-slate-400">
+                Dia coberto pelo Abono de aniversário — para trabalhar nesta data, altere a data
+                do Abono em Configurações.
+              </p>
+            )}
+
+            {/* Formulário adicionar — NUNCA em data futura nem em dia de Abono (card vira somente leitura) */}
+            {!futureDay && !abonoDay && (showAdd ? (
               <div className="flex flex-wrap items-end gap-2 rounded-xl border border-dashed border-slate-300 bg-white p-3">
                 <Select
                   label="Tipo"
@@ -693,8 +706,8 @@ export function DayCard({
             ))}
           </div>
 
-          {/* Atalhos — NUNCA em data futura */}
-          {!futureDay && (
+          {/* Atalhos — NUNCA em data futura nem em dia de Abono */}
+          {!futureDay && !abonoDay && (
             <div className="mt-3 flex flex-wrap items-center gap-2">
               <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Atalhos:</span>
               <Button variant="ghost" size="sm" onClick={() => add("entrada", nowTimeString())}>
