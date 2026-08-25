@@ -102,6 +102,22 @@ export function canAllocateExcess(
   return { ok: true };
 }
 
+/**
+ * Disparo AUTOMÁTICO do modal de motivo: só após uma MUTATION que FECHA o
+ * dia acima de 10h sem motivo. Não dispara em render/abertura da página
+ * (excedente antigo mostra ⚠ + [Registrar motivo]) e não reabre se o dia
+ * já estava encerrado com excedente (usuário postergou).
+ */
+export function shouldPromptExcessReason(opts: {
+  beforeExcessMinutes: number;
+  beforeOpen: boolean;
+  after: Pick<DayResult, "open" | "excessMinutes">;
+  hasReason: boolean;
+}): boolean {
+  if (opts.after.open || opts.after.excessMinutes <= 0 || opts.hasReason) return false;
+  return opts.beforeExcessMinutes <= 0 || opts.beforeOpen;
+}
+
 /* ── Camada de CRÉDITO por dia (realizado x destinado) ─────── */
 
 export interface DayCreditView {

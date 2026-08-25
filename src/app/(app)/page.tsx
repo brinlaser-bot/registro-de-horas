@@ -37,7 +37,7 @@ import {
 } from "@/lib/periods";
 import { activeAcordos, canCompleteComp, extraCapacityForDate, kindOf, usesHourExtra } from "@/lib/debt";
 import { canRegisterFalta, dayBalanceContribution, faltaConfirmText, faltaOnDate } from "@/lib/faltas";
-import { excessReasonOnDate } from "@/lib/hour-bank";
+import { excessReasonOnDate, shouldPromptExcessReason } from "@/lib/hour-bank";
 import { HourBankCard } from "@/components/hour-bank-card";
 import { ExcessReasonModal } from "@/components/excess-reason-modal";
 import type { CompKind, DayResult, DaySummary } from "@/lib/types";
@@ -195,18 +195,32 @@ export default function DashboardPage() {
     return true;
   };
 
-  /** §10: após registrar batida, se o dia FECHOU acima de 10h e ainda não há
-   *  motivo, abre automaticamente o modal do motivo (pode ser adiado). */
-  const promptExcessReasonIfNeeded = (date: string) => {
+  /** Snapshot do dia ANTES da mutation — o modal só abre na transição para >10h. */
+  const snapshotDay = (date: string) => {
     const snap = getAppData();
-    const s = settingsOf(snap.user);
-    const day = computeDay(
+    return computeDay(
       snap.entries.filter((e) => e.date === date),
-      s,
+      settingsOf(snap.user),
     );
-    if (day.open || day.excessMinutes <= 0) return;
-    if (excessReasonOnDate(snap.excessReasons, date)) return;
-    setReasonDate(date);
+  };
+
+  /** §10: após MUTATION que fecha o dia acima de 10h sem motivo. Sem loop em render. */
+  const promptExcessReasonIfNeeded = (date: string, before: { excessMinutes: number; open: boolean }) => {
+    const snap = getAppData();
+    const after = computeDay(
+      snap.entries.filter((e) => e.date === date),
+      settingsOf(snap.user),
+    );
+    if (
+      shouldPromptExcessReason({
+        beforeExcessMinutes: before.excessMinutes,
+        beforeOpen: before.open,
+        after,
+        hasReason: !!excessReasonOnDate(snap.excessReasons, date),
+      })
+    ) {
+      setReasonDate(date);
+    }
   };
 
   const onAddEntry = async (p: { date: string; time: string; type: EntryType; note: string | null }) => {
@@ -216,13 +230,14 @@ export default function DashboardPage() {
       return { ok: false as const, error: FUTURE_DATE_ERROR };
     }
     if (!resolveFaltaConflict(p.date)) return { ok: false as const };
+    const before = snapshotDay(p.date);
     const res = actions.addEntry(p);
     // §7: rejeição da validação central de sequência chega aqui (toast + erro)
     if (!res.ok) {
       toast.show(res.error ?? FUTURE_DATE_ERROR, "error");
       return res;
     }
-    promptExcessReasonIfNeeded(p.date);
+    promptExcessReasonIfNeeded(p.date, before);
     return res;
   };
 
@@ -239,10 +254,14 @@ export default function DashboardPage() {
    *  cronológica final e guarda de compensação concluída vivem no store. O
    *  resultado volta ao modal: erro → toast e o modal PERMANECE aberto. */
   const onUpdateEntry = async (id: number, patch: { time?: string; note?: string | null }) => {
+    const target = entries.find((e) => e.id === id);
+    const before = target ? snapshotDay(target.date) : { excessMinutes: 0, open: false };
     const res = actions.updateEntry(id, patch);
     if (!res.ok) {
       toast.show(res.error ?? "Não foi possível editar o registro.", "error");
+      return res;
     }
+    if (target) promptExcessReasonIfNeeded(target.date, before);
     return res;
   };
 

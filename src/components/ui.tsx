@@ -5,7 +5,7 @@ import { Loader2, X } from "lucide-react";
 
 /* ── Button ─────────────────────────────────────────────── */
 
-type ButtonVariant = "primary" | "secondary" | "ghost" | "danger" | "subtle";
+type ButtonVariant = "primary" | "secondary" | "ghost" | "danger" | "subtle" | "warning";
 type ButtonSize = "sm" | "md" | "lg";
 
 const variantClasses: Record<ButtonVariant, string> = {
@@ -16,6 +16,7 @@ const variantClasses: Record<ButtonVariant, string> = {
   ghost: "text-slate-600 hover:bg-slate-100 active:bg-slate-200",
   danger: "bg-rose-600 text-white hover:bg-rose-700 shadow-sm shadow-rose-600/20",
   subtle: "bg-emerald-50 text-emerald-700 hover:bg-emerald-100 active:bg-emerald-200",
+  warning: "bg-amber-500 text-white hover:bg-amber-600 active:bg-amber-700 shadow-sm shadow-amber-500/20",
 };
 
 const sizeClasses: Record<ButtonSize, string> = {

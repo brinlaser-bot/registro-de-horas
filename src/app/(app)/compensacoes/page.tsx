@@ -569,6 +569,7 @@ export default function CompensacoesPage() {
 
       {/* ── §21 GRUPO 1: EXCEDENTES >10h — PRIORIDADE ──────────── */}
       {excessReserves.length > 0 && (
+        <div id="excedentes-prioridade" className="scroll-mt-20">
         <Card
           title={
             <>
@@ -621,6 +622,7 @@ export default function CompensacoesPage() {
             })}
           </ul>
         </Card>
+        </div>
       )}
 
       {/* ── §21 GRUPO 2: ATRASADAS ──────────────────────────────── */}

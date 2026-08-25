@@ -143,7 +143,10 @@ export function QuickPunch({
     }
   };
 
-  /** §11 "Registrar falta" — SEMPRE hoje; gate inválido → toast com o motivo central. */
+  /** §11 "Registrar falta" — só com ZERO batidas e gate central ok.
+   *  Com batidas o botão NÃO renderiza (o gate continua protegendo o store). */
+  const showRegistrarFalta =
+    today.entries.length === 0 && !faltaRegistrada && (faltaGate?.ok ?? true);
   const clickFalta = () => {
     if (faltaGate && !faltaGate.ok) {
       toast.show(faltaGate.error ?? "Não é possível registrar falta nesta data.", "error");
@@ -275,63 +278,60 @@ export function QuickPunch({
         </div>
       </div>
 
-      {/* Linha do tempo de hoje — chips com Editar (lápis) + Excluir (lixeira) */}
-      {today.entries.length > 0 && (
+      {/* Mesmo bloco: chips das batidas OU Registrar falta (zero batidas).
+          Com 1+ batidas o botão NÃO renderiza. Sem batidas e gate ok → âmbar.
+          Cobertura incompatível (férias/abono/…) → o bloco some. */}
+      {(today.entries.length > 0 || showRegistrarFalta || faltaRegistrada) && (
         <div className={`${embedded ? "mt-2.5 pt-2.5" : "mt-4 pt-4"} border-t border-slate-100`}>
-          <div className="flex flex-wrap items-center gap-2">
-            {today.entries.map((e) => (
-              <span
-                key={e.id}
-                className="group inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white py-1 pl-3 pr-1.5 text-xs font-semibold text-slate-700 shadow-sm"
-              >
+          {today.entries.length > 0 ? (
+            <div className="flex flex-wrap items-center gap-2">
+              {today.entries.map((e) => (
                 <span
-                  className={`h-2 w-2 rounded-full ${e.type === "entrada" ? "bg-emerald-500" : "bg-indigo-500"}`}
-                />
-                {e.time} · {e.type === "entrada" ? "entrada" : "saída"}
-                {e.note && <span className="text-slate-400">· {e.note}</span>}
-                {e.edited && <span className="text-slate-400">· editado</span>}
-                <button
-                  onClick={() => startEdit(e)}
-                  className="rounded-full p-1 text-slate-300 transition-colors hover:bg-slate-100 hover:text-slate-600 cursor-pointer"
-                  aria-label="Editar registro"
+                  key={e.id}
+                  className="group inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white py-1 pl-3 pr-1.5 text-xs font-semibold text-slate-700 shadow-sm"
                 >
-                  <Pencil size={12} />
-                </button>
-                <button
-                  onClick={() => remove(e.id)}
-                  className="rounded-full p-1 text-slate-300 transition-colors hover:bg-rose-50 hover:text-rose-500 cursor-pointer"
-                  aria-label="Remover registro"
-                >
-                  <Trash2 size={12} />
-                </button>
-              </span>
-            ))}
-          </div>
+                  <span
+                    className={`h-2 w-2 rounded-full ${e.type === "entrada" ? "bg-emerald-500" : "bg-indigo-500"}`}
+                  />
+                  {e.time} · {e.type === "entrada" ? "entrada" : "saída"}
+                  {e.note && <span className="text-slate-400">· {e.note}</span>}
+                  {e.edited && <span className="text-slate-400">· editado</span>}
+                  <button
+                    onClick={() => startEdit(e)}
+                    className="rounded-full p-1 text-slate-300 transition-colors hover:bg-slate-100 hover:text-slate-600 cursor-pointer"
+                    aria-label="Editar registro"
+                  >
+                    <Pencil size={12} />
+                  </button>
+                  <button
+                    onClick={() => remove(e.id)}
+                    className="rounded-full p-1 text-slate-300 transition-colors hover:bg-rose-50 hover:text-rose-500 cursor-pointer"
+                    aria-label="Remover registro"
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                </span>
+              ))}
+            </div>
+          ) : faltaRegistrada ? (
+            <p className="flex items-center gap-2 text-xs text-slate-400">
+              <Ban size={12} className="text-rose-500" />
+              Falta registrada hoje — o déficit corresponde à jornada efetiva do dia.
+              <button
+                type="button"
+                className="font-semibold text-rose-500 underline-offset-2 hover:underline cursor-pointer"
+                onClick={() => void onRemoveFalta?.()}
+              >
+                Excluir falta
+              </button>
+            </p>
+          ) : (
+            <Button variant="warning" size="md" onClick={clickFalta}>
+              <Ban size={15} /> Registrar falta
+            </Button>
+          )}
         </div>
       )}
-
-      {/* §11 Ação secundária e discreta: "Registrar falta" — SEMPRE hoje (sem
-          seletor de data). Gate central inválido (batidas, folga, abonado,
-          Abono…) → toast com a mensagem central; nunca esconder a ação. */}
-      <div className={`${embedded ? "mt-2.5 pt-2" : "mt-4 pt-3"} border-t border-slate-100`}>
-        {faltaRegistrada ? (
-          <p className="flex items-center gap-2 text-xs text-slate-400">
-            <Ban size={12} className="text-rose-500" />
-            Falta registrada hoje — o déficit corresponde à jornada efetiva do dia.
-            <button
-              type="button"
-              className="font-semibold text-rose-500 underline-offset-2 hover:underline cursor-pointer"
-              onClick={() => void onRemoveFalta?.()}
-            >
-              Excluir falta
-            </button>
-          </p>
-        ) : (
-          <Button variant="ghost" size="sm" onClick={clickFalta}>
-            <Ban size={13} /> Registrar falta
-          </Button>
-        )}
-      </div>
 
       {/* §8 Modal de edição — tipo FIXO (no título); edita Horário + Observação. */}
       <Modal

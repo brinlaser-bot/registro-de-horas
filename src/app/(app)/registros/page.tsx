@@ -35,10 +35,12 @@ import {
 } from "@/lib/periods";
 import { acordoViewOf, buildDebtDays, checkSourceOverflow, extraCapacityForDate } from "@/lib/debt";
 import { dayBalanceContribution, effectiveFaltas, faltaOnDate, faltaStatusOf } from "@/lib/faltas";
+import { dayCreditView, excessReasonOnDate, shouldPromptExcessReason } from "@/lib/hour-bank";
 import type { CompKind, DayResult, WorkSettings } from "@/lib/types";
 import { DayCard } from "@/components/day-card";
 import { ManualEntryModal, type ManualPairData } from "@/components/manual-entry-modal";
 import { FaltaModal } from "@/components/falta-modal";
+import { ExcessReasonModal } from "@/components/excess-reason-modal";
 import { Badge, Button, Card, EmptyState, Skeleton } from "@/components/ui";
 import { useToast } from "@/components/toast";
 
@@ -65,7 +67,7 @@ interface RangeSummary {
 export default function RegistrosPage() {
   const toast = useToast();
   const mounted = useIsClient();
-  const { user, entries, compensations, absences, companyCalendars, faltas } = useAppData();
+  const { user, entries, compensations, absences, companyCalendars, faltas, excessReasons } = useAppData();
   const todayStr = todayString();
 
   const settings: WorkSettings = settingsOf(user);
@@ -77,6 +79,7 @@ export default function RegistrosPage() {
   const [queryDraft, setQueryDraft] = useState({ from: "", to: "" });
   const [manualOpen, setManualOpen] = useState(false);
   const [faltaOpen, setFaltaOpen] = useState(false);
+  const [reasonDate, setReasonDate] = useState<string | null>(null);
 
   // Faltas que JÁ valem (date <= hoje) — previstas não geram déficit/saldo
   const effectiveFaltaList = useMemo(() => effectiveFaltas(faltas, todayStr), [faltas, todayStr]);
@@ -208,6 +211,32 @@ export default function RegistrosPage() {
 
   /* ── Handlers (preservam comportamento validado) ── */
 
+  const snapshotDay = (date: string) => {
+    const snap = getAppData();
+    return computeDay(
+      snap.entries.filter((e) => e.date === date),
+      settingsOf(snap.user),
+    );
+  };
+
+  const promptExcessReasonIfNeeded = (date: string, before: { excessMinutes: number; open: boolean }) => {
+    const snap = getAppData();
+    const after = computeDay(
+      snap.entries.filter((e) => e.date === date),
+      settingsOf(snap.user),
+    );
+    if (
+      shouldPromptExcessReason({
+        beforeExcessMinutes: before.excessMinutes,
+        beforeOpen: before.open,
+        after,
+        hasReason: !!excessReasonOnDate(snap.excessReasons, date),
+      })
+    ) {
+      setReasonDate(date);
+    }
+  };
+
   const reconcileDay = (date: string) => {
     const snap = getAppData();
     const s = settingsOf(snap.user);
@@ -234,22 +263,28 @@ export default function RegistrosPage() {
       return;
     }
     if (!resolveFaltaConflict(p.date)) return;
+    const before = snapshotDay(p.date);
     const res = actions.addEntry(p);
     if (!res.ok) {
       toast.show(res.error ?? FUTURE_DATE_ERROR, "error");
       return;
     }
+    promptExcessReasonIfNeeded(p.date, before);
     reconcileDay(p.date);
   };
 
   const updateEntry = async (id: number, patch: { time?: string; type?: EntryType; note?: string | null; date?: string }) => {
     const target = entries.find((e) => e.id === id);
+    const before = target ? snapshotDay(target.date) : { excessMinutes: 0, open: false };
     const res = actions.updateEntry(id, patch);
     if (!res.ok) {
       toast.show(res.error ?? "Não foi possível editar o registro.", "error");
       return;
     }
-    if (target) reconcileDay(target.date);
+    if (target) {
+      promptExcessReasonIfNeeded(target.date, before);
+      reconcileDay(target.date);
+    }
   };
 
   const deleteEntry = async (id: number) => {
@@ -370,6 +405,7 @@ export default function RegistrosPage() {
       return;
     }
     if (!resolveFaltaConflict(data.date)) return;
+    const before = snapshotDay(data.date);
     const r1 = actions.addEntry({ date: data.date, time: data.entrada, type: "entrada", note: data.note || null, source: "manual" });
     if (!r1.ok) {
       toast.show(r1.error ?? FUTURE_DATE_ERROR, "error");
@@ -380,6 +416,7 @@ export default function RegistrosPage() {
       toast.show(r2.error ?? FUTURE_DATE_ERROR, "error");
       return;
     }
+    promptExcessReasonIfNeeded(data.date, before);
     reconcileDay(data.date);
     toast.show("Lançamento manual registrado!");
   };
@@ -584,6 +621,23 @@ export default function RegistrosPage() {
       </Card>
 
       <ManualEntryModal open={manualOpen} onClose={() => setManualOpen(false)} onSave={addManualPair} />
+      {reasonDate &&
+        (() => {
+          const reasonDay = computeDay(
+            entries.filter((e) => e.date === reasonDate),
+            settings,
+          );
+          return (
+            <ExcessReasonModal
+              open
+              onClose={() => setReasonDate(null)}
+              date={reasonDate}
+              workedMinutes={reasonDay.workedMinutes}
+              excessMinutes={reasonDay.excessMinutes}
+              existing={excessReasonOnDate(excessReasons, reasonDate)}
+            />
+          );
+        })()}
       <FaltaModal
         open={faltaOpen}
         onClose={() => setFaltaOpen(false)}

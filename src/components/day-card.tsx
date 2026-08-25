@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import {
   ArrowLeftRight,
   Ban,
@@ -29,6 +30,7 @@ import { CompensationForm, type CompFormData } from "@/components/compensation-f
 import { SmartExit } from "@/components/smart-exit";
 import { allocatedForSource, overflowForSource, type ExtraCapacity } from "@/lib/debt";
 import { absenceLabel, type Absence, type DayBalanceView } from "@/lib/absences";
+import { excessReasonLabel, type DayCreditView } from "@/lib/hour-bank";
 import type { CompKind } from "@/lib/types";
 
 export function statusBadge(d: DayResult) {
@@ -143,6 +145,10 @@ interface Props {
   };
   /** Capacidade de hora extra por dia de destino (função central). */
   getCapacity?: (targetDate: string) => ExtraCapacity;
+  /** Decomposição central (dayCreditView) — crédito regular × excedente especial. */
+  creditView?: DayCreditView;
+  /** Abre o modal existente de motivo do excedente >10h. */
+  onRegisterReason?: (date: string) => void;
 }
 
 export function DayCard({
@@ -166,6 +172,8 @@ export function DayCard({
   calendarLabel,
   shortcuts,
   getCapacity,
+  creditView,
+  onRegisterReason,
 }: Props) {
   // Regra: todos os dias iniciam RECOLHIDOS — o usuário expande apenas o dia desejado.
   const [expanded, setExpanded] = useState(false);
@@ -281,6 +289,14 @@ export function DayCard({
   };
 
   const balanceTone = regularBalance > 0 ? "text-emerald-600" : regularBalance < 0 ? "text-rose-600" : "text-slate-500";
+  /* Dia encerrado acima de 10h: NÃO misturar o excedente especial com o
+   * crédito regular. A decomposição vem de dayCreditView (fonte única). */
+  const showSplit = !d.open && !d.empty && (creditView?.excessSpecial ?? d.excessMinutes) > 0;
+  const headerCredit = showSplit && creditView ? creditView.regularExtra : regularBalance;
+  const headerTone =
+    showSplit
+      ? "text-emerald-600"
+      : balanceTone;
 
   return (
     <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -484,7 +500,20 @@ export function DayCard({
               value={formatMinutes(regularExpected)}
               tone="text-slate-500"
             />
-            <MiniStat label="Saldo regular" value={`${regularBalance >= 0 ? "+" : ""}${formatMinutes(regularBalance)}`} tone={balanceTone} />
+            {showSplit && creditView ? (
+              <MiniStat
+                label="Hora extra regular"
+                value={`+${formatMinutes(creditView.regularExtra)}`}
+                tone="text-emerald-600"
+                sub={
+                  creditView.usedRegular > 0
+                    ? `livre ${formatMinutes(creditView.freeRegular)}`
+                    : undefined
+                }
+              />
+            ) : (
+              <MiniStat label="Saldo regular" value={`${regularBalance >= 0 ? "+" : ""}${formatMinutes(regularBalance)}`} tone={balanceTone} />
+            )}
             <MiniStat
               label="No ponto*"
               value={formatMinutes(d.registrableMinutes)}
@@ -493,37 +522,50 @@ export function DayCard({
             />
           </div>
 
-          {/* Aviso de excedente */}
-          {d.excessMinutes > 0 && (
+          {/* Faixa própria do excedente especial — NÃO mistura com crédito regular. */}
+          {showSplit && (
             <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5">
               <TriangleAlert size={16} className="text-rose-500 shrink-0" />
-              <p className="flex-1 text-xs font-medium text-rose-700">
-                Você trabalhou <b>{formatMinutes(d.workedMinutes)}</b>, acima do limite de{" "}
-                <b>{formatMinutes(settings.maxDailyMinutes)}</b>. Registre apenas{" "}
-                <b>{formatMinutes(d.registrableMinutes)}</b> no ponto
-                {remainingExcess > 0 ? (
-                  <>
-                    {" "}e compense <b>{formatMinutes(remainingExcess)}</b> em outro dia.
-                  </>
+              <div className="min-w-0 flex-1 text-xs font-medium text-rose-700">
+                <p>
+                  Você possui <b>{formatMinutes(creditView?.excessSpecial ?? d.excessMinutes)}</b> acima
+                  do limite diário de <b>{formatMinutes(settings.maxDailyMinutes)}</b>. Esse excedente
+                  precisa ser registrado e realocado.
+                </p>
+                <p className="mt-1 font-bold uppercase tracking-wide text-rose-800">
+                  Excedente acima de 10h{" "}
+                  <span className="font-extrabold normal-case tracking-normal">
+                    {formatMinutes(creditView?.excessSpecial ?? d.excessMinutes)} a realocar
+                  </span>
+                </p>
+                {creditView?.reason ? (
+                  <p className="mt-0.5 text-rose-600">Motivo: {excessReasonLabel(creditView.reason)}</p>
                 ) : (
-                  ". Excedente totalmente alocado. ✔"
+                  <p className="mt-0.5 font-bold text-amber-700">⚠ Motivo não informado</p>
+                )}
+                {creditView && creditView.usedRegular > 0 && (
+                  <p className="mt-0.5 text-rose-500">
+                    Crédito regular {formatMinutes(creditView.regularExtra)} · destinado{" "}
+                    {formatMinutes(creditView.usedRegular)} · livre {formatMinutes(creditView.freeRegular)}
+                  </p>
                 )}
                 {allocatedHere > 0 && (
-                  <span className="block text-rose-500">
-                    (excedente original {formatMinutes(d.excessMinutes)} · {formatMinutes(allocatedHere)} já
-                    alocado{remainingExcess > 0 ? ` · restam ${formatMinutes(remainingExcess)}` : ""})
-                  </span>
+                  <p className="mt-0.5 text-rose-500">
+                    Reserva especial: {formatMinutes(d.excessMinutes)} · {formatMinutes(allocatedHere)} já
+                    alocado{remainingExcess > 0 ? ` · restam ${formatMinutes(remainingExcess)}` : " · realocado ✔"}
+                  </p>
                 )}
-              </p>
-              <Button
-                variant="danger"
-                size="sm"
-                onClick={() =>
-                  openComp("excedente", d.excessMinutes, `Compensação do dia ${formatDateShortBR(d.date)}`)
-                }
-              >
-                <ArrowLeftRight size={13} /> Compensar horas
-              </Button>
+              </div>
+              {!creditView?.reason && onRegisterReason && (
+                <Button size="sm" variant="secondary" onClick={() => onRegisterReason(d.date)}>
+                  Registrar motivo
+                </Button>
+              )}
+              <Link href="/compensacoes#excedentes-prioridade">
+                <Button variant="danger" size="sm">
+                  <ArrowLeftRight size={13} /> Gerenciar excedente
+                </Button>
+              </Link>
             </div>
           )}
 
