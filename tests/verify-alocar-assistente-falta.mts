@@ -16,14 +16,17 @@ import {
   parseCompanyCalendarCsv,
 } from "../src/lib/company-calendar.ts";
 import {
+  ALLOCATE_CROSS_CYCLE_MSG,
   ALLOCATE_NO_REASON_MSG,
   dayCreditView,
   deficitViews,
+  eligibleDeficitsForSpecialAllocation,
   hourBankSummary,
   maxAllocatableSpecial,
   previewAllocateSpecialExcess,
   releaseOverlappingPlanned,
 } from "../src/lib/hour-bank.ts";
+import { annualCycleBounds, getAnnualPointCycle, sameAnnualCycle } from "../src/lib/periods.ts";
 import { actions, getAppData } from "../src/lib/store.ts";
 import { buildExitPlan } from "../src/components/smart-exit.tsx";
 import { computeDay } from "../src/lib/time.ts";
@@ -113,10 +116,10 @@ check("A. botão de excedente NÃO abre CompensationForm (sair mais cedo); rótu
 
 /* ── B. Modal próprio lista déficits factuais ─────────────── */
 check("B. modal próprio: origem + déficits com openMinutes > 0 (planejado NÃO quita)", () => {
-  assert.ok(allocSrc.includes("deficitViews("));
-  assert.ok(allocSrc.includes("d.openMinutes > 0"));
+  assert.ok(allocSrc.includes("eligibleDeficitsForSpecialAllocation"));
+  assert.ok(!allocSrc.includes("2000-01-01"), "não varre todos os ciclos desde 2000");
   assert.ok(allocSrc.includes("Restante factual"));
-  assert.ok(allocSrc.includes("Máximo alocável neste déficit"));
+  assert.ok(allocSrc.includes("Máximo alocável agora") || allocSrc.includes("Máximo alocável neste déficit"));
   const entries = [...dayDef15(), ...daySat5(), ...day11h()];
   const comps = [concluded5(), planned10()];
   const views = deficitViews(entries, comps, [], both, [], settings, { from: "2026-08-01", to: TODAY }, TODAY);
@@ -444,6 +447,109 @@ check("Y. Programar hora extra segue no CompensationForm; ciclo 30/04 intacto", 
   assert.ok(panelSrc.includes("Programar hora extra"));
   const storeSrc = srcOf("src/lib/store.ts");
   assert.ok(storeSrc.includes("validateCompCycle(p.deficitDate, p.excessDate)"));
+  reset([...dayDef15()]);
+  const cross = actions.addComp({
+    sourceDate: "2026-04-28", targetDate: "2026-05-06", minutes: 60, note: null, kind: "deficit",
+  });
+  assert.equal(cross.ok, false);
+  assert.equal(cross.code, "cross-cycle");
+});
+
+/* ── ciclo.A–H. filtro pelo MESMO ciclo anual da origem ──── */
+const prevCycleDay = () => [punch("2026-02-18", "08:00", "entrada"), punch("2026-02-18", "10:00", "saida")];
+const closeDay = () => [punch("2026-04-29", "08:00", "entrada"), punch("2026-04-29", "16:45", "saida")];
+
+check("ciclo.A. origem 24/08/2026 — déficit 18/02/2026 NÃO é elegível (ciclo anterior)", () => {
+  const entries = [...prevCycleDay(), ...dayDef15(), ...daySat5(), ...day11h()];
+  const list = eligibleDeficitsForSpecialAllocation(
+    "2026-08-24", entries, [], [], both, [], settings, TODAY,
+  );
+  assert.equal(list.some((d) => d.date === "2026-02-18"), false);
+  assert.equal(sameAnnualCycle("2026-08-24", "2026-02-18"), false);
+});
+
+check("ciclo.B. origem 24/08/2026 — déficit 29/04/2026 NÃO é elegível (ciclo anterior)", () => {
+  const entries = [...closeDay(), ...dayDef15(), ...daySat5(), ...day11h()];
+  const list = eligibleDeficitsForSpecialAllocation(
+    "2026-08-24", entries, [], [], both, [], settings, TODAY,
+  );
+  assert.equal(list.some((d) => d.date === "2026-04-29"), false);
+  assert.equal(sameAnnualCycle("2026-08-24", "2026-04-29"), false);
+  assert.equal(getAnnualPointCycle("2026-04-29"), "2025/2026");
+  assert.equal(getAnnualPointCycle("2026-08-24"), "2026/2027");
+});
+
+check("ciclo.C. origem 24/08/2026 — déficit 21/08/2026 É elegível (mesmo ciclo)", () => {
+  const entries = [...prevCycleDay(), ...closeDay(), ...dayDef15(), ...daySat5(), ...day11h()];
+  const list = eligibleDeficitsForSpecialAllocation(
+    "2026-08-24", entries, [concluded5(), planned10()], [], both, [], settings, TODAY,
+  );
+  const d21 = list.find((d) => d.date === "2026-08-21");
+  assert.ok(d21, "21/08 deve aparecer");
+  assert.equal(sameAnnualCycle("2026-08-24", "2026-08-21"), true);
+});
+
+check("ciclo.D. 21/08 orig 15 / conc 5 / plan 10 → open 10 · max alocável 10", () => {
+  const entries = [...dayDef15(), ...daySat5(), ...day11h()];
+  const comps = [concluded5(), planned10()];
+  const list = eligibleDeficitsForSpecialAllocation(
+    "2026-08-24", entries, comps, [], both, [], settings, TODAY,
+  );
+  const d21 = list.find((d) => d.date === "2026-08-21")!;
+  assert.equal(d21.originalMinutes, 15);
+  assert.equal(d21.compensatedMinutes, 5);
+  assert.equal(d21.plannedMinutes, 10);
+  assert.equal(d21.openMinutes, 10);
+  const cap = maxAllocatableSpecial(
+    "2026-08-24", "2026-08-21", entries, comps, [], both, [], settings, [reason("2026-08-24")], TODAY,
+  );
+  assert.equal(cap.freeSpecial, 60);
+  assert.equal(cap.max, 10, "nunca 60min para um restante factual de 10");
+});
+
+check("ciclo.E. planejado 10 aparece informativamente e NÃO reduz o restante factual", () => {
+  assert.ok(allocSrc.includes("Planejado:"));
+  const entries = [...dayDef15(), ...daySat5(), ...day11h()];
+  const comps = [concluded5(), planned10()];
+  const [dv] = deficitViews(entries, comps, [], both, [], settings, { from: "2026-08-21", to: "2026-08-21" }, TODAY);
+  assert.equal(dv.plannedMinutes, 10);
+  assert.equal(dv.openMinutes, 10, "open = original − concluído; planejado não quita");
+});
+
+check("ciclo.F. ação central rejeita alocação cross-cycle com mensagem clara", () => {
+  reset([...prevCycleDay(), ...day11h()], [], [reason("2026-08-24")]);
+  const res = actions.allocateSpecialExcess({
+    excessDate: "2026-08-24", deficitDate: "2026-02-18", minutes: 10,
+  });
+  assert.equal(res.ok, false);
+  assert.equal(res.code, "cross-cycle");
+  assert.equal(res.error, ALLOCATE_CROSS_CYCLE_MSG);
+  const pre = previewAllocateSpecialExcess(
+    "2026-08-24", "2026-04-29", 10,
+    [...closeDay(), ...day11h()], [], [], both, [], settings, [reason("2026-08-24")], TODAY,
+  );
+  assert.equal(pre.ok, false);
+  assert.equal(pre.error, ALLOCATE_CROSS_CYCLE_MSG);
+});
+
+check("ciclo.G. mesmo ciclo continua alocando normalmente (21/08 ← 24/08)", () => {
+  reset([...dayDef15(), ...daySat5(), ...day11h()], [concluded5(), planned10()], [reason("2026-08-24")]);
+  const res = actions.allocateSpecialExcess({ excessDate: "2026-08-24", deficitDate: "2026-08-21", minutes: 10 });
+  assert.equal(res.ok, true, res.error);
+  const d = getAppData();
+  const [dv] = deficitViews(d.entries, d.compensations, d.absences, both, d.faltas, settings, { from: "2026-08-21", to: "2026-08-21" }, TODAY);
+  assert.equal(dv.openMinutes, 0);
+  assert.equal(dv.compensatedMinutes, 15);
+});
+
+check("ciclo.H. 30/04 permanece barreira absoluta; ordem = Dias com saldo negativo", () => {
+  const bounds = annualCycleBounds(getAnnualPointCycle("2026-08-24"));
+  assert.equal(bounds.from, "2026-05-01");
+  assert.equal(bounds.to, "2027-04-30");
+  const hb = srcOf("src/lib/hour-bank.ts");
+  assert.ok(hb.includes("annualCycleBounds(getAnnualPointCycle(excessDate))"));
+  assert.ok(hb.includes(".reverse()"), "mesma ordem do painel (mais recente primeiro)");
+  assert.ok(panelSrc.includes(").reverse()"), "painel Dias com saldo negativo inalterado");
   reset([...dayDef15()]);
   const cross = actions.addComp({
     sourceDate: "2026-04-28", targetDate: "2026-05-06", minutes: 60, note: null, kind: "deficit",

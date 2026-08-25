@@ -13,6 +13,7 @@
 // PLANEJADO ≠ REALIZADO ≠ COMPENSADO.
 // ─────────────────────────────────────────────────────────────
 import { computeDay, formatMinutes } from "./time";
+import { annualCycleBounds, getAnnualPointCycle, sameAnnualCycle } from "./periods";
 import { companyDayContext, type CompanyCalendars } from "./company-calendar";
 import { dayBalanceContribution } from "./faltas";
 import {
@@ -544,6 +545,33 @@ export function creditUseSummary(parcels: CreditUsePlan["parcels"]): string {
 /* ── Alocação do EXCEDENTE ESPECIAL já realizado ─────────── */
 
 export const ALLOCATE_NO_REASON_MSG = "Registre o motivo do excedente antes de alocá-lo.";
+export const ALLOCATE_CROSS_CYCLE_MSG = "Origem e déficit precisam pertencer ao mesmo ciclo anual.";
+
+/**
+ * Déficits FACTUAIS elegíveis para alocar o excedente especial de `excessDate`:
+ * mesmo CICLO ANUAL da origem (01/05→30/04 — helper central), em aberto
+ * (original − concluído; planejado NÃO quita) e na MESMA ordem de
+ * Visão geral → Dias com saldo negativo (mais recente primeiro).
+ */
+export function eligibleDeficitsForSpecialAllocation(
+  excessDate: string,
+  entries: TimeEntry[],
+  comps: Compensation[],
+  absences: Absence[],
+  calendars: CompanyCalendars | undefined,
+  faltas: Falta[] | undefined,
+  settings: WorkSettings,
+  today: string,
+): DeficitView[] {
+  const bounds = annualCycleBounds(getAnnualPointCycle(excessDate));
+  const to = bounds.to < today ? bounds.to : today;
+  return deficitViews(
+    entries, comps, absences, calendars, faltas, settings,
+    { from: bounds.from, to }, today,
+  )
+    .filter((d) => d.openMinutes > 0 && d.date !== excessDate && sameAnnualCycle(d.date, excessDate))
+    .reverse();
+}
 
 export interface AllocateSpecialPreview {
   ok: boolean;
@@ -644,6 +672,14 @@ export function previewAllocateSpecialExcess(
   const original = deficit?.originalMinutes ?? 0;
   const compensatedNow = deficit?.compensatedMinutes ?? 0;
   const plannedNow = deficit?.plannedMinutes ?? 0;
+  if (!sameAnnualCycle(excessDate, deficitDate)) {
+    return {
+      ok: false, error: ALLOCATE_CROSS_CYCLE_MSG, minutes: 0, maxMinutes: 0,
+      freeSpecial, openDeficit: 0, originalDeficit: original, compensatedNow, plannedNow,
+      plannedToRelease: 0, plannedAfter: plannedNow, remainingDeficitAfter: openDeficit,
+      remainingSpecialAfter: freeSpecial, compensatedAfter: compensatedNow,
+    };
+  }
   if (!credit.reason && credit.excessSpecial > 0) {
     return {
       ok: false, error: ALLOCATE_NO_REASON_MSG, minutes: 0, maxMinutes: max,

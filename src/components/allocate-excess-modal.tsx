@@ -6,8 +6,8 @@ import { Button, Input, Modal } from "@/components/ui";
 import { actions, getAppData, settingsOf } from "@/lib/store";
 import {
   ALLOCATE_NO_REASON_MSG,
-  deficitViews,
   dayCreditView,
+  eligibleDeficitsForSpecialAllocation,
   excessReasonLabel,
   previewAllocateSpecialExcess,
 } from "@/lib/hour-bank";
@@ -54,11 +54,10 @@ export function AllocateExcessModal({
   );
   const deficits = useMemo(
     () =>
-      deficitViews(
-        entries, compensations, absences, companyCalendars, faltas, settings,
-        { from: "2000-01-01", to: today }, today,
-      ).filter((d) => d.openMinutes > 0 && d.date !== excessDate),
-    [entries, compensations, absences, companyCalendars, faltas, settings, today, excessDate],
+      eligibleDeficitsForSpecialAllocation(
+        excessDate, entries, compensations, absences, companyCalendars, faltas, settings, today,
+      ),
+    [excessDate, entries, compensations, absences, companyCalendars, faltas, settings, today],
   );
 
   const [picked, setPicked] = useState<string | null>(null);
@@ -169,15 +168,15 @@ export function AllocateExcessModal({
                     >
                       <p className="text-sm font-bold text-slate-800">{formatDateBR(d.date)}</p>
                       <p className="mt-0.5 text-xs text-slate-500">
-                        Original: <b>{formatMinutes(d.originalMinutes)}</b> · Já compensado:{" "}
+                        Déficit original: <b>{formatMinutes(d.originalMinutes)}</b> · Já compensado:{" "}
                         <b className="text-emerald-600">{formatMinutes(d.compensatedMinutes)}</b> · Restante factual:{" "}
                         <b className="text-amber-700">{formatMinutes(d.openMinutes)}</b>
                         {d.plannedMinutes > 0 && (
-                          <> · Planejado (ainda não realizado): <b className="text-sky-600">{formatMinutes(d.plannedMinutes)}</b></>
+                          <> · Planejado: <b className="text-sky-600">{formatMinutes(d.plannedMinutes)}</b></>
                         )}
                       </p>
                       <p className="mt-0.5 text-[11px] font-semibold text-slate-400">
-                        Máximo alocável neste déficit: {formatMinutes(rowCap)}
+                        Máximo alocável agora: {formatMinutes(rowCap)}
                       </p>
                     </button>
                   </li>

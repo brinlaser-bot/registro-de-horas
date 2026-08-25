@@ -8,6 +8,7 @@ import { buildSeedData, DEFAULT_USER } from "./seed-data";
 import { absencesEqual, compsEqual, entriesEqual, excessReasonsEqual, mergeByIdAndContent } from "./backup";
 import { actualExtraForDate, allocatedForSource, canCompleteComp, concludedForSource, extraCapacityForDate, kindOf, usesHourExtra, acordoLinkedComps } from "./debt";
 import {
+  ALLOCATE_CROSS_CYCLE_MSG,
   ALLOCATE_NO_REASON_MSG,
   canAllocateExcess,
   planRealizedCreditUse,
@@ -1034,6 +1035,10 @@ export const actions = {
   allocateSpecialExcess(p: { excessDate: string; deficitDate: string; minutes: number }): ActionResult {
     let result: ActionResult = OK;
     mutate((d) => {
+      if (!sameAnnualCycle(p.excessDate, p.deficitDate)) {
+        result = { ok: false, code: "cross-cycle", error: ALLOCATE_CROSS_CYCLE_MSG };
+        return d;
+      }
       const settings = settingsOf(d.user);
       const today = todayString();
       const preview = previewAllocateSpecialExcess(
