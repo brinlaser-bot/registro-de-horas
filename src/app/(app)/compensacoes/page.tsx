@@ -34,6 +34,7 @@ import {
   futureCompStatus,
   hourBankSummary,
   deficitViews,
+  specialExcessLedger,
   type FutureCompView,
 } from "@/lib/hour-bank";
 import { annualCycleBounds, getAnnualPointCycle } from "@/lib/periods";
@@ -251,8 +252,7 @@ export default function CompensacoesPage() {
         kind: payload.kind ?? (pendingEditing.kind ?? "excedente"),
         ...(payload.status ? { status: payload.status as "pendente" | "concluida" | "cancelada" } : {}),
       });
-      if (!res.ok) throw new Error(res.error); // modal exibe a mensagem e permanece aberto
-      toast.show("Compensação atualizada.");
+      if (!res.ok) throw new Error(res.error); // modal exibe a mensagem, permanece aberto e libera o botão
     } else {
       // CAUSA RAIZ: sem `kind` explícito, addComp assumia "excedente" e a
       // compensação de acordo deixava de abater o acordo de origem.
@@ -264,7 +264,6 @@ export default function CompensacoesPage() {
         kind: payload.kind ?? formKind,
       });
       if (!res.ok) throw new Error(res.error);
-      toast.show("Compensação criada!");
     }
     setModalOpen(false);
     setEditing(null);
@@ -316,6 +315,13 @@ export default function CompensacoesPage() {
   /** Chip de ORIGEM da compensação (§21) — nunca confunde planejado com realizado. */
   const originChip = (c: CompWithDays) => {
     const k = kindOf(c);
+    if (c.portion === "especial") {
+      return (
+        <span className="rounded-full bg-rose-50 px-1.5 py-0.5 text-[10px] font-bold text-rose-700">
+          {"Excedente >10h realocado"}
+        </span>
+      );
+    }
     const cls =
       k === "deficit"
         ? "bg-emerald-50 text-emerald-700"
@@ -582,7 +588,17 @@ export default function CompensacoesPage() {
         >
           <ul className="space-y-3">
             {excessReserves.map((v) => {
-              const usado = v.usedSpecialViaTarget + v.usedSpecialViaSource;
+              const led = specialExcessLedger(v.date, compensations, v.excessSpecial);
+              const statusBadge =
+                led.status === "tratado" ? (
+                  <Badge tone="emerald">Tratado ✓</Badge>
+                ) : led.status === "parcial" ? (
+                  <Badge tone="sky">Parcialmente realocado</Badge>
+                ) : led.status === "programado" ? (
+                  <Badge tone="indigo">Programado</Badge>
+                ) : (
+                  <Badge tone="amber">Livre</Badge>
+                );
               return (
                 <li
                   key={v.date}
@@ -594,13 +610,14 @@ export default function CompensacoesPage() {
                   <div className="min-w-0 flex-1">
                     <p className="flex flex-wrap items-center gap-2 text-sm font-bold text-slate-800">
                       {formatDateBR(v.date)} — {formatMinutes(v.excessSpecial)} de excedente especial
-                      {v.freeSpecial <= 0 && <Badge tone="emerald">Realocado ✓</Badge>}
+                      {statusBadge}
                       {!v.reason && <Badge tone="amber">⚠ Motivo não informado</Badge>}
                     </p>
                     <p className="mt-0.5 text-xs text-slate-500">
-                      Trabalhado: <b>{formatMinutes(v.day.workedMinutes)}</b> · Utilizado:{" "}
-                      <b className="text-emerald-600">{formatMinutes(usado)}</b> · Restante:{" "}
-                      <b className="text-amber-600">{formatMinutes(v.freeSpecial)}</b>
+                      Trabalhado: <b>{formatMinutes(v.day.workedMinutes)}</b> · Realocado:{" "}
+                      <b className="text-emerald-600">{formatMinutes(led.realized)}</b> · Programado:{" "}
+                      <b className="text-sky-600">{formatMinutes(led.planned)}</b> · Livre:{" "}
+                      <b className="text-amber-600">{formatMinutes(led.free)}</b>
                       {v.reason && (
                         <>
                           {" "}· Motivo: <b>{excessReasonLabel(v.reason)}</b>
@@ -608,8 +625,18 @@ export default function CompensacoesPage() {
                         </>
                       )}
                     </p>
+                    {(led.realizedTo.length > 0 || led.plannedTo.length > 0) && (
+                      <div className="mt-1.5 text-[11px] text-slate-600">
+                        {led.realizedTo.map((t, i) => (
+                          <p key={`r${i}`}>Realizado: {formatMinutes(t.minutes)} → déficit de {formatDateBR(t.date)}</p>
+                        ))}
+                        {led.plannedTo.map((t, i) => (
+                          <p key={`p${i}`}>Programado: {formatMinutes(t.minutes)} → {formatDateBR(t.date)}</p>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                  {v.freeSpecial > 0 && !v.reason && (
+                  {!v.reason && (
                     <Button size="sm" variant="danger" onClick={() => setReasonDate(v.date)}>
                       Registrar motivo
                     </Button>
@@ -619,7 +646,7 @@ export default function CompensacoesPage() {
                       Alterar motivo
                     </Button>
                   )}
-                  {v.reason && v.freeSpecial > 0 && (
+                  {v.reason && led.free > 0 && (
                     <Button size="sm" variant="danger" onClick={() => setAllocateDate(v.date)}>
                       Alocar excedente
                     </Button>

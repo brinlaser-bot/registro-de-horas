@@ -24,13 +24,13 @@ import {
 } from "lucide-react";
 import type { Compensation, DayResult, WorkSettings } from "@/lib/types";
 import type { EntryType, TimeEntryLike } from "@/lib/time";
-import { formatDateShortBR, formatMinutes, isFutureDate, nextWorkday, nowTimeString, todayString, weekdayLong } from "@/lib/time";
+import { formatDateBR, formatDateShortBR, formatMinutes, isFutureDate, nextWorkday, nowTimeString, todayString, weekdayLong } from "@/lib/time";
 import { Badge, Button, Input, Select } from "@/components/ui";
 import { CompensationForm, type CompFormData } from "@/components/compensation-form";
 import { SmartExit } from "@/components/smart-exit";
 import { allocatedForSource, overflowForSource, type ExtraCapacity } from "@/lib/debt";
 import { absenceLabel, type Absence, type DayBalanceView } from "@/lib/absences";
-import { excessReasonLabel, type DayCreditView } from "@/lib/hour-bank";
+import { excessReasonLabel, specialExcessLedger, type DayCreditView } from "@/lib/hour-bank";
 import type { CompKind } from "@/lib/types";
 
 export function statusBadge(d: DayResult) {
@@ -300,7 +300,17 @@ export function DayCard({
     : allocatedHere;
   const excessRemaining = creditView?.freeSpecial ?? remainingExcess;
   const showSplit = !d.open && !d.empty && excessOriginal > 0;
-  const excessTreated = showSplit && excessRemaining <= 0;
+  const specialLed = showSplit ? specialExcessLedger(d.date, allComps ?? [], excessOriginal) : null;
+  const excessTreated = showSplit && (specialLed?.status === "tratado");
+  const deficitParcels = (allComps ?? []).filter(
+    (c) => c.sourceDate === d.date && (c.kind ?? "excedente") === "deficit" && c.status !== "cancelada",
+  );
+  const deficitConcluded = deficitParcels.filter((c) => c.status === "concluida").reduce((s, c) => s + c.minutes, 0);
+  const deficitPlanned = deficitParcels.filter((c) => c.status === "pendente").reduce((s, c) => s + c.minutes, 0);
+  const deficitOriginal = commonDeficit;
+  const deficitOpen = Math.max(0, deficitOriginal - deficitConcluded);
+  const showDeficitFollow =
+    deficitOriginal > 0 && !d.open && (!d.empty || !!falta) && !showSplit;
 
   return (
     <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -378,10 +388,21 @@ export function DayCard({
               )}
             </>
           ) : (
-            <p className={`text-xs font-bold tabular-nums ${balanceTone}`}>
-              {regularBalance >= 0 ? "+" : ""}
-              {formatMinutes(regularBalance)}
-            </p>
+            <>
+              <p className={`text-xs font-bold tabular-nums ${balanceTone}`}>
+                {regularBalance >= 0 ? "+" : ""}
+                {formatMinutes(regularBalance)}
+              </p>
+              {showDeficitFollow && (
+                deficitOpen <= 0 ? (
+                  <p className="mt-0.5 text-[11px] font-semibold text-emerald-700">✓ Déficit quitado</p>
+                ) : deficitConcluded > 0 ? (
+                  <p className="mt-0.5 text-[11px] font-semibold text-amber-700">Parcial · restam {formatMinutes(deficitOpen)}</p>
+                ) : (
+                  <p className="mt-0.5 text-[11px] font-semibold text-rose-600">Em aberto · {formatMinutes(deficitOpen)}</p>
+                )
+              )}
+            </>
           )}
         </div>
         {expanded ? <ChevronUp size={18} className="text-slate-400" /> : <ChevronDown size={18} className="text-slate-400" />}
@@ -548,6 +569,44 @@ export function DayCard({
             />
           </div>
 
+          {showDeficitFollow && (
+            <div className="mt-3 space-y-2 rounded-xl border border-amber-200 bg-amber-50/70 px-3 py-3">
+              <p className="text-[11px] font-extrabold uppercase tracking-wider text-amber-700">
+                Situação do déficit
+              </p>
+              <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs font-medium text-slate-700">
+                <span>Original: <b>{formatMinutes(deficitOriginal)}</b></span>
+                <span>Quitado: <b className="text-emerald-700">{formatMinutes(deficitConcluded)}</b></span>
+                <span>Planejado: <b className="text-sky-700">{formatMinutes(deficitPlanned)}</b></span>
+                <span>Em aberto: <b className="text-amber-800">{formatMinutes(deficitOpen)}</b></span>
+                <span>
+                  Sem programação:{" "}
+                  <b>{formatMinutes(Math.max(0, deficitOpen - deficitPlanned))}</b>
+                </span>
+              </div>
+              <div>
+                <p className="text-[11px] font-extrabold uppercase tracking-wider text-amber-700">
+                  Como foi quitado
+                </p>
+                {deficitParcels.filter((c) => c.status === "concluida").length === 0 ? (
+                  <p className="mt-1 text-xs text-slate-500">Ainda não há quitação realizada.</p>
+                ) : (
+                  <ul className="mt-1 space-y-0.5 text-xs text-slate-700">
+                    {deficitParcels
+                      .filter((c) => c.status === "concluida")
+                      .map((c) => (
+                        <li key={c.id}>
+                          {formatMinutes(c.minutes)}{" "}
+                          {c.portion === "especial" ? "de excedente >10h" : "de crédito regular"}{" "}
+                          em {formatDateBR(c.targetDate)}
+                        </li>
+                      ))}
+                  </ul>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Faixa PRIORITÁRIA do excedente especial — restante a realocar em destaque. */}
           {showSplit && (
             <div
@@ -585,9 +644,14 @@ export function DayCard({
                   <p className="mt-1 font-bold text-amber-700">⚠ Motivo não informado</p>
                 ) : null}
               </div>
-              {!creditView?.reason && !excessTreated && onRegisterReason && (
+              {!creditView?.reason && onRegisterReason && (
                 <Button size="sm" variant="secondary" onClick={() => onRegisterReason(d.date)}>
                   Registrar motivo
+                </Button>
+              )}
+              {creditView?.reason && onRegisterReason && (
+                <Button size="sm" variant="ghost" onClick={() => onRegisterReason(d.date)}>
+                  Alterar motivo
                 </Button>
               )}
               {creditView?.reason && !excessTreated && onAllocateExcess && (

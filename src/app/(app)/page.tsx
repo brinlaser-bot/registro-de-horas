@@ -284,7 +284,6 @@ export default function DashboardPage() {
     });
     if (!res.ok) throw new Error(res.error); // modal exibe a mensagem e permanece aberto
     setCompOpen(false);
-    toast.show("Compensação criada!");
   };
 
   /** Saída em 1 clique: registra a saída (hora atual) e quita compensações de saída antecipada. */
@@ -365,6 +364,13 @@ export default function DashboardPage() {
   const t = today;
   /* Visão geral exige "Folga hoje"; a resolução central usa "Folga" (listas). */
   const todayLabel = todayCtx.type === "folga" ? "Folga hoje" : (todayCtx.label ?? undefined);
+  /* Card HOJE idle: jornada regular vazia, sem falta/ausência — não mostrar −8h. */
+  const todayIdle =
+    todayCtx.type === "regular" &&
+    t.empty &&
+    !faltaHoje &&
+    !todayCtx.ctx.absence &&
+    todayCtx.effectiveExpected > 0;
   const balanceTone = totals.balanceTotal > 0 ? "emerald" : totals.balanceTotal < 0 ? "rose" : "slate";
   const excessTone = totals.excessTotal > 0 ? "rose" : "slate";
   const todayStatusTone =
@@ -407,15 +413,17 @@ export default function DashboardPage() {
               Olá, {firstName}! 👋
             </h2>
             <p className="mt-0.5 text-sm text-slate-500">
-              {todayCtx.type === "folga"
-                ? "Folga hoje. Se você registrar trabalho, as horas serão contabilizadas como trabalho em folga."
-                : todayCtx.type === "trabalho-folga"
-                  ? "Trabalho em folga registrado hoje."
-                  : t.empty
-                    ? "Você ainda não bateu o ponto hoje. Registre sua entrada abaixo."
-                    : t.open
-                      ? "Seu ponto de hoje está em andamento."
-                      : "Seu ponto de hoje está fechado."}
+              {faltaHoje
+                ? "Falta registrada para hoje."
+                : todayCtx.type === "folga"
+                  ? "Folga hoje. Se você registrar trabalho, as horas serão contabilizadas como trabalho em folga."
+                  : todayCtx.type === "trabalho-folga"
+                    ? "Trabalho em folga registrado hoje."
+                    : t.empty
+                      ? "Você ainda não bateu o ponto hoje. Registre sua entrada abaixo."
+                      : t.open
+                        ? "Seu ponto de hoje está em andamento."
+                        : "Seu ponto de hoje está fechado."}
             </p>
           </div>
           <Link href="/registros" className="shrink-0">
@@ -439,11 +447,26 @@ export default function DashboardPage() {
                     `expected || jornada` engolvia base 0min (0 é falsy → 8h). */}
                 {todayCtx.type === "folga" || todayCtx.type === "trabalho-folga"
                   ? `${todayLabel} · esperado ${formatMinutes(todayCtx.effectiveExpected)}`
-                  : `base ${formatMinutes(todayCtx.effectiveExpected)}`} ·{" "}
-                <span className={t.balanceMinutes >= 0 ? "text-emerald-600" : "text-rose-600"}>
-                  {t.balanceMinutes >= 0 ? "+" : ""}
-                  {formatMinutes(t.balanceMinutes)}
-                </span>
+                  : `base ${formatMinutes(todayCtx.effectiveExpected)}`}
+                {todayIdle ? (
+                  <> · jornada não iniciada</>
+                ) : faltaHoje ? (
+                  <>
+                    {" "}·{" "}
+                    <span className="text-rose-600">
+                      {t.balanceMinutes >= 0 ? "+" : ""}
+                      {formatMinutes(t.balanceMinutes)}
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    {" "}·{" "}
+                    <span className={t.balanceMinutes >= 0 ? "text-emerald-600" : "text-rose-600"}>
+                      {t.balanceMinutes >= 0 ? "+" : ""}
+                      {formatMinutes(t.balanceMinutes)}
+                    </span>
+                  </>
+                )}
               </>
             }
             tone={todayStatusTone}

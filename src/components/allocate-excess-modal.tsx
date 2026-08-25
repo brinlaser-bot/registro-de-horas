@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { TriangleAlert } from "lucide-react";
 import { Button, Input, Modal } from "@/components/ui";
 import { actions, getAppData, settingsOf } from "@/lib/store";
@@ -64,6 +64,7 @@ export function AllocateExcessModal({
   const [minutes, setMinutes] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const inflight = useRef(false);
 
   const selected = deficits.find((d) => d.date === picked) ?? deficits[0];
   const cap = selected ? Math.min(credit.freeSpecial, selected.openMinutes) : 0;
@@ -85,7 +86,7 @@ export function AllocateExcessModal({
   };
 
   const confirm = () => {
-    if (!selected || busy) return;
+    if (!selected || busy || inflight.current) return;
     const snap = getAppData();
     const s = settingsOf(snap.user);
     const pre = previewAllocateSpecialExcess(
@@ -97,6 +98,7 @@ export function AllocateExcessModal({
       setError(pre.error ?? ALLOCATE_NO_REASON_MSG);
       return;
     }
+    inflight.current = true;
     setBusy(true);
     try {
       const res = actions.allocateSpecialExcess({
@@ -111,6 +113,7 @@ export function AllocateExcessModal({
       toast.show(res.warning ?? "Excedente alocado.");
       onClose();
     } finally {
+      inflight.current = false;
       setBusy(false);
     }
   };
@@ -125,8 +128,8 @@ export function AllocateExcessModal({
       footer={
         <>
           <Button variant="ghost" onClick={onClose}>Cancelar</Button>
-          <Button onClick={confirm} loading={busy} disabled={!selected || !preview?.ok}>
-            Confirmar alocação
+          <Button onClick={confirm} loading={busy} disabled={!selected || !preview?.ok || busy}>
+            {busy ? "Alocando…" : "Confirmar alocação"}
           </Button>
         </>
       }
@@ -201,18 +204,25 @@ export function AllocateExcessModal({
           />
         )}
 
-        {preview && preview.ok && preview.plannedToRelease > 0 && (
-          <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-            <p className="font-bold">Este déficit possui {formatMinutes(preview.plannedNow)} planejados para compensação futura.</p>
-            <p className="mt-1">
-              Ao usar o excedente já realizado agora, essa programação será liberada/cancelada
-              na mesma proporção para evitar dupla compensação.
-            </p>
+        {preview && preview.ok && (
+          <div className={`rounded-xl border px-4 py-3 text-sm ${preview.plannedToRelease > 0 ? "border-amber-300 bg-amber-50 text-amber-800" : "border-slate-200 bg-slate-50 text-slate-700"}`}>
+            <p className="font-bold">Prévia da alocação</p>
+            {preview.plannedToRelease > 0 && (
+              <p className="mt-1">
+                Este déficit possui {formatMinutes(preview.plannedNow)} planejados. A programação
+                será liberada na parte que ultrapassar o novo restante factual.
+              </p>
+            )}
             <ul className="mt-2 space-y-0.5 text-xs">
               <li>Vai alocar agora: <b>{formatMinutes(preview.minutes)}</b></li>
-              <li>Planejamento que será liberado: <b>{formatMinutes(preview.plannedToRelease)}</b></li>
-              <li>Restante do déficit: <b>{formatMinutes(preview.remainingDeficitAfter)}</b></li>
+              <li>Excedente disponível antes: <b>{formatMinutes(preview.freeSpecial)}</b></li>
               <li>Excedente que restará: <b>{formatMinutes(preview.remainingSpecialAfter)}</b></li>
+              <li>Déficit factual antes: <b>{formatMinutes(preview.openDeficit)}</b></li>
+              <li>Déficit factual depois: <b>{formatMinutes(preview.remainingDeficitAfter)}</b></li>
+              <li>Planejado atual: <b>{formatMinutes(preview.plannedNow)}</b></li>
+              <li>Planejamento que será liberado: <b>{formatMinutes(preview.plannedToRelease)}</b></li>
+              <li>Planejamento que continuará ativo: <b>{formatMinutes(preview.plannedAfter)}</b></li>
+              <li>Sem programação depois: <b>{formatMinutes(Math.max(0, preview.remainingDeficitAfter - preview.plannedAfter))}</b></li>
             </ul>
           </div>
         )}

@@ -17,7 +17,7 @@ import {
   suggestTargets,
   totalsOf,
 } from "@/lib/debt";
-import { deficitViews, excessReasonOnDate } from "@/lib/hour-bank";
+import { dayCreditView, deficitViews, excessReasonOnDate, specialExcessLedger } from "@/lib/hour-bank";
 import { actions } from "@/lib/store";
 import { useToast } from "@/components/toast";
 import { formatDateBR, formatDateShortBR, formatMinutes, todayString, weekdayShort } from "@/lib/time";
@@ -148,7 +148,21 @@ export function ExcessPanel({
   const excessOpen = excessDays.filter((d) => d.openMinutes > 0);
   const deficitOpen = deficits.filter((d) => d.openMinutes > 0);
   const openDeficitTotal = deficitOpen.reduce((s, d) => s + d.openMinutes, 0);
-  const openExcessTotal = excessOpen.reduce((s, d) => s + d.openMinutes, 0);
+  const specialBook = useMemo(() => {
+    const dates = [...new Set(entries.filter((e) => e.date >= range.from && e.date <= range.to && e.date <= today).map((e) => e.date))];
+    let original = 0;
+    let realized = 0;
+    let free = 0;
+    for (const date of dates) {
+      const v = dayCreditView(date, entries, compensations, absences, companyCalendars, settings, excessReasons);
+      if (v.excessSpecial <= 0 || v.day.open || v.day.empty) continue;
+      const led = specialExcessLedger(date, compensations, v.excessSpecial);
+      original += led.original;
+      realized += led.realized;
+      free += led.free;
+    }
+    return { original, realized, free };
+  }, [entries, compensations, absences, companyCalendars, settings, excessReasons, range, today]);
   // §19: expansão das parcelas de um déficit consolidado (estado local, visual).
   const [expandedDeficit, setExpandedDeficit] = useState<string | null>(null);
 
@@ -158,23 +172,23 @@ export function ExcessPanel({
         <StatCard
           /* §5: cálculo usa o período oficial 21→20 — rótulo alinhado (era "do mês") */
           label="Excedente do período"
-          value={formatMinutes(excessTotals.debtTotal)}
+          value={formatMinutes(specialBook.original)}
           sub={`acima de ${formatMinutes(settings.maxDailyMinutes)}/dia · ${monthLabel}`}
-          tone={excessTotals.debtTotal > 0 ? "rose" : "slate"}
+          tone={specialBook.original > 0 ? "rose" : "slate"}
           icon={<TriangleAlert size={16} />}
         />
         <StatCard
-          label="Já compensado"
-          value={formatMinutes(excessTotals.concluded)}
-          sub={`${Math.round(excessTotals.percent)}% do excedente quitado`}
+          label="Já realocado"
+          value={formatMinutes(specialBook.realized)}
+          sub={specialBook.original > 0 ? `${formatMinutes(specialBook.realized)} de ${formatMinutes(specialBook.original)} tratados` : "nenhum excedente especial"}
           tone="emerald"
           icon={<CheckCircle2 size={16} />}
         />
         <StatCard
-          label="Ainda a compensar"
-          value={formatMinutes(openExcessTotal)}
-          sub={`${excessOpen.length} dia(s) com excedente em aberto (>10h)`}
-          tone={openExcessTotal > 0 ? "amber" : "slate"}
+          label="Ainda a realocar"
+          value={formatMinutes(specialBook.free)}
+          sub="reserva especial livre (planejado não conta como realocado)"
+          tone={specialBook.free > 0 ? "amber" : "slate"}
           icon={<ArrowLeftRight size={16} />}
         />
         <StatCard

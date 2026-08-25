@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ArrowLeftRight, CalendarClock, Sparkles } from "lucide-react";
 import { Button, Input, Modal, Select } from "@/components/ui";
 import { useToast } from "@/components/toast";
@@ -94,6 +94,7 @@ export function CompensationForm({
     note: "",
   });
   const [busy, setBusy] = useState(false);
+  const inflight = useRef(false);
   const copy = COPY[kind];
 
   useEffect(() => {
@@ -132,6 +133,7 @@ export function CompensationForm({
             : null;
 
   const submit = async () => {
+    if (inflight.current || busy) return;
     if (invalidReason) {
       toast.show(invalidReason, "error");
       return;
@@ -147,16 +149,19 @@ export function CompensationForm({
         return;
       }
     }
+    inflight.current = true;
     setBusy(true);
     try {
       await onSave({ ...form, minutes: Math.round(form.minutes), kind });
       toast.show(editingId ? "Compensação atualizada." : "Compensação criada!");
+      onClose();
     } catch (err) {
       toast.show(
         err instanceof Error && err.message ? err.message : "Não foi possível salvar.",
         "error",
       );
     } finally {
+      inflight.current = false;
       setBusy(false);
     }
   };
@@ -179,8 +184,8 @@ export function CompensationForm({
       footer={
         <>
           <Button variant="secondary" onClick={onClose}>Cancelar</Button>
-          <Button onClick={submit} loading={busy} disabled={!!invalidReason}>
-            <ArrowLeftRight size={15} /> {editingId ? "Salvar alterações" : copy.cta}
+          <Button onClick={submit} loading={busy} disabled={!!invalidReason || busy}>
+            {busy ? (editingId ? "Salvando…" : "Criando…") : <><ArrowLeftRight size={15} /> {editingId ? "Salvar alterações" : copy.cta}</>}
           </Button>
         </>
       }
