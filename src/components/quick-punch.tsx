@@ -29,6 +29,8 @@ interface Props {
   onDeleteEntry: (id: number) => Promise<{ ok: boolean } | undefined>;
   /** §11 Falta de hoje já registrada → a ação vira "Excluir falta". */
   faltaRegistrada?: boolean;
+  /** Jornada efetiva do dia (resolução central) — déficit da falta, nunca 8h fixas. */
+  jornadaMinutes?: number;
   /** Gate central (canRegisterFalta) de hoje — inválido → toast com o motivo. */
   faltaGate?: FaltaGate;
   onRegisterFalta?: () => Promise<void> | void;
@@ -50,6 +52,7 @@ export function QuickPunch({
   onUpdateEntry,
   onDeleteEntry,
   faltaRegistrada,
+  jornadaMinutes,
   faltaGate,
   onRegisterFalta,
   onRemoveFalta,
@@ -199,6 +202,44 @@ export function QuickPunch({
     </div>
   );
 
+  /* Falta já registrada: substitui os controles de ponto (horário, observação,
+   * Registrar entrada/saída, agora, Próximo, chips, Registrar falta) pelo
+   * estado destacado — mesmo espaço, sem inflar o card. */
+  if (faltaRegistrada) {
+    const banner = (
+      <div className="flex flex-col gap-3 rounded-xl border border-rose-300 bg-rose-50 px-3 py-2.5 ring-1 ring-rose-200 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <p className="flex items-center gap-1.5 text-sm font-extrabold uppercase tracking-wide text-rose-700">
+            <Ban size={16} className="shrink-0" aria-hidden />
+            ⚠ FALTA REGISTRADA HOJE
+          </p>
+          <p className="mt-1 text-xs font-medium text-rose-800">
+            O déficit gerado corresponde à jornada prevista para este dia.
+          </p>
+          {jornadaMinutes != null && jornadaMinutes > 0 && (
+            <p className="mt-0.5 text-xs text-rose-700">
+              Déficit gerado: <b>{formatMinutes(jornadaMinutes)}</b>
+            </p>
+          )}
+        </div>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="shrink-0 !text-rose-600 hover:!bg-rose-100"
+          onClick={() => void onRemoveFalta?.()}
+        >
+          <Trash2 size={13} /> Excluir falta
+        </Button>
+      </div>
+    );
+    if (embedded) return <div>{banner}</div>;
+    return (
+      <Card title="Registro rápido" subtitle={`${dayLabel ? `${dayLabel} · ` : ""}Falta registrada hoje`}>
+        {banner}
+      </Card>
+    );
+  }
+
   const body = (
     <>
       {/* §12 faixa de contexto compacta — só no modo embutido (o Card próprio
@@ -280,8 +321,9 @@ export function QuickPunch({
 
       {/* Mesmo bloco: chips das batidas OU Registrar falta (zero batidas).
           Com 1+ batidas o botão NÃO renderiza. Sem batidas e gate ok → âmbar.
-          Cobertura incompatível (férias/abono/…) → o bloco some. */}
-      {(today.entries.length > 0 || showRegistrarFalta || faltaRegistrada) && (
+          Cobertura incompatível (férias/abono/…) → o bloco some.
+          Falta já registrada substitui este bloco inteiro (banner acima). */}
+      {(today.entries.length > 0 || showRegistrarFalta) && (
         <div className={`${embedded ? "mt-2.5 pt-2.5" : "mt-4 pt-4"} border-t border-slate-100`}>
           {today.entries.length > 0 ? (
             <div className="flex flex-wrap items-center gap-2">
@@ -313,18 +355,6 @@ export function QuickPunch({
                 </span>
               ))}
             </div>
-          ) : faltaRegistrada ? (
-            <p className="flex items-center gap-2 text-xs text-slate-400">
-              <Ban size={12} className="text-rose-500" />
-              Falta registrada hoje — o déficit corresponde à jornada efetiva do dia.
-              <button
-                type="button"
-                className="font-semibold text-rose-500 underline-offset-2 hover:underline cursor-pointer"
-                onClick={() => void onRemoveFalta?.()}
-              >
-                Excluir falta
-              </button>
-            </p>
           ) : (
             <Button variant="warning" size="md" onClick={clickFalta}>
               <Ban size={15} /> Registrar falta

@@ -508,6 +508,7 @@ export default function DashboardPage() {
                 onUpdateEntry={onUpdateEntry}
                 onDeleteEntry={onDeleteEntry}
                 faltaRegistrada={!!faltaHoje}
+                jornadaMinutes={todayCtx.effectiveExpected}
                 faltaGate={faltaHojeGate}
                 onRegisterFalta={registerFaltaHoje}
                 onRemoveFalta={removeFaltaHoje}
@@ -528,6 +529,14 @@ export default function DashboardPage() {
                 onConfirmComps={confirmComps}
                 isToday
                 effectiveExpected={todayCtx.effectiveExpected}
+                faltaRegistrada={!!faltaHoje}
+                contextLabel={todayCtx.label}
+                punchBlocked={
+                  todayCtx.marker === "abono" ||
+                  todayCtx.ctx.absence?.kind === "ferias" ||
+                  todayCtx.ctx.absence?.kind === "saude" ||
+                  todayCtx.ctx.absence?.kind === "abono"
+                }
               />
             </section>
           </div>

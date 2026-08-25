@@ -28,6 +28,7 @@ import { effectiveFaltas } from "@/lib/faltas";
 import type { CompKind, Compensation, ExcessReason, Falta, TimeEntry, WorkSettings } from "@/lib/types";
 import { Badge, Button, Card, EmptyState, ProgressBar, StatCard } from "@/components/ui";
 import { CompensationForm, type CompFormData } from "@/components/compensation-form";
+import { AllocateExcessModal } from "@/components/allocate-excess-modal";
 
 interface Props {
   entries: TimeEntry[];
@@ -64,6 +65,7 @@ export function ExcessPanel({
   const [modalOpen, setModalOpen] = useState(false);
   const [draft, setDraft] = useState<(CompFormData & { kind?: CompKind }) | undefined>();
   const [draftDebt, setDraftDebt] = useState<number | undefined>();
+  const [allocateDate, setAllocateDate] = useState<string | null>(null);
 
   const { excessDays, excessTotals, deficitTotals, deficits } = useMemo(() => {
     const all = buildDebtDays(
@@ -255,9 +257,9 @@ export function ExcessPanel({
                             Registrar motivo
                           </Button>
                         )}
-                        <Button size="sm" variant="danger" onClick={() => openFor(d.date, "excedente")} disabled={!reason}
-                          title={reason ? undefined : "Registre o motivo antes de realocar (regra central)"}>
-                          <ArrowLeftRight size={13} /> Compensar agora
+                        <Button size="sm" variant="danger" onClick={() => setAllocateDate(d.date)} disabled={!reason}
+                          title={reason ? undefined : "Registre o motivo do excedente antes de alocá-lo."}>
+                          <ArrowLeftRight size={13} /> Alocar excedente
                         </Button>
                       </div>
                     </div>
@@ -448,6 +450,21 @@ export function ExcessPanel({
           ) : undefined
         }
       />
+
+      {allocateDate && (
+        <AllocateExcessModal
+          open
+          onClose={() => setAllocateDate(null)}
+          excessDate={allocateDate}
+          entries={entries}
+          compensations={compensations}
+          absences={absences}
+          companyCalendars={companyCalendars}
+          faltas={faltas}
+          excessReasons={excessReasons}
+          settings={settings}
+        />
+      )}
     </>
   );
 }

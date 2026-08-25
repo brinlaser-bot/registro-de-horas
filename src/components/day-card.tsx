@@ -149,6 +149,8 @@ interface Props {
   creditView?: DayCreditView;
   /** Abre o modal existente de motivo do excedente >10h. */
   onRegisterReason?: (date: string) => void;
+  /** Abre o fluxo próprio de alocação do excedente especial já realizado. */
+  onAllocateExcess?: (date: string) => void;
 }
 
 export function DayCard({
@@ -174,6 +176,7 @@ export function DayCard({
   getCapacity,
   creditView,
   onRegisterReason,
+  onAllocateExcess,
 }: Props) {
   // Regra: todos os dias iniciam RECOLHIDOS — o usuário expande apenas o dia desejado.
   const [expanded, setExpanded] = useState(false);
@@ -399,6 +402,13 @@ export function DayCard({
                 onConfirmComps={confirmComps}
                 isToday={isToday}
                 effectiveExpected={effectiveExpected}
+                faltaRegistrada={!!falta && falta.status === "efetiva"}
+                contextLabel={calendarLabel ?? (absence ? absenceLabel(absence) : null)}
+                punchBlocked={
+                  absence?.kind === "ferias" ||
+                  absence?.kind === "saude" ||
+                  absence?.kind === "abono"
+                }
               />
             </div>
           )}
@@ -578,6 +588,11 @@ export function DayCard({
               {!creditView?.reason && !excessTreated && onRegisterReason && (
                 <Button size="sm" variant="secondary" onClick={() => onRegisterReason(d.date)}>
                   Registrar motivo
+                </Button>
+              )}
+              {creditView?.reason && !excessTreated && onAllocateExcess && (
+                <Button size="sm" variant="danger" onClick={() => onAllocateExcess(d.date)}>
+                  <ArrowLeftRight size={13} /> Alocar excedente
                 </Button>
               )}
               <Link href="/compensacoes#excedentes-prioridade">

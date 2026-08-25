@@ -7,7 +7,13 @@ import { computeDay, formatMinutes, FUTURE_DATE_ERROR, insertPunchError, isFutur
 import { buildSeedData, DEFAULT_USER } from "./seed-data";
 import { absencesEqual, compsEqual, entriesEqual, excessReasonsEqual, mergeByIdAndContent } from "./backup";
 import { actualExtraForDate, allocatedForSource, canCompleteComp, concludedForSource, extraCapacityForDate, kindOf, usesHourExtra, acordoLinkedComps } from "./debt";
-import { canAllocateExcess, planRealizedCreditUse } from "./hour-bank";
+import {
+  ALLOCATE_NO_REASON_MSG,
+  canAllocateExcess,
+  planRealizedCreditUse,
+  previewAllocateSpecialExcess,
+  releaseOverlappingPlanned,
+} from "./hour-bank";
 import { abonoDayDecision, abonoInCycle, validateAbsence, type Absence, type AbsenceSplit } from "./absences";
 import { canRegisterFalta } from "./faltas";
 import { sameAnnualCycle } from "./periods";
@@ -1014,6 +1020,66 @@ export const actions = {
             : `Aplicação parcial: ${formatMinutes(usedTotal)} vinculados; restam ${formatMinutes(toUse - usedTotal)} sem programação.`,
       };
       return { ...d, compensations: [...d.compensations, ...created] };
+    });
+    return result;
+  },
+
+  /**
+   * ALOCAÇÃO DO EXCEDENTE ESPECIAL JÁ REALIZADO: vincula minutos da reserva
+   * >10h de `excessDate` a um déficit FACTUAL de `deficitDate`. Nasce
+   * CONCLUÍDA, consome SOMENTE a porção especial (nunca o crédito regular)
+   * e libera o planejado futuro sobreposto na mesma proporção.
+   * NÃO altera batidas nem o Saldo realizado.
+   */
+  allocateSpecialExcess(p: { excessDate: string; deficitDate: string; minutes: number }): ActionResult {
+    let result: ActionResult = OK;
+    mutate((d) => {
+      const settings = settingsOf(d.user);
+      const today = todayString();
+      const preview = previewAllocateSpecialExcess(
+        p.excessDate, p.deficitDate, p.minutes,
+        d.entries, d.compensations, d.absences, d.companyCalendars, d.faltas,
+        settings, d.excessReasons, today,
+      );
+      if (!preview.ok) {
+        result = { ok: false, code: "invalid", error: preview.error ?? ALLOCATE_NO_REASON_MSG };
+        return d;
+      }
+      const cycleCheck = validateCompCycle(p.deficitDate, p.excessDate);
+      if (!cycleCheck.ok) {
+        result = cycleCheck;
+        return d;
+      }
+      const gate = canAllocateExcess(p.excessDate, d.entries, settings, d.excessReasons);
+      if (!gate.ok) {
+        result = { ok: false, code: "invalid", error: ALLOCATE_NO_REASON_MSG };
+        return d;
+      }
+      const created: Compensation = {
+        id: nextId(d.compensations),
+        sourceDate: p.deficitDate,
+        targetDate: p.excessDate,
+        minutes: preview.minutes,
+        status: "concluida",
+        note: "Alocado excedente acima de 10h (realizado)",
+        kind: "deficit",
+        portion: "especial",
+        createdAt: Date.now(),
+      };
+      const withNew = [...d.compensations, created];
+      const { comps, released } = releaseOverlappingPlanned(
+        withNew,
+        p.deficitDate,
+        preview.remainingDeficitAfter,
+      );
+      result = {
+        ok: true,
+        warning:
+          released > 0
+            ? `${formatMinutes(preview.minutes)} alocados do excedente. ${formatMinutes(released)} de planejamento futuro foram liberados para evitar dupla compensação.`
+            : `${formatMinutes(preview.minutes)} alocados do excedente já realizado.`,
+      };
+      return { ...d, compensations: comps };
     });
     return result;
   },

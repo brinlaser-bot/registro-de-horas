@@ -41,6 +41,7 @@ import { DayCard } from "@/components/day-card";
 import { ManualEntryModal, type ManualPairData } from "@/components/manual-entry-modal";
 import { FaltaModal } from "@/components/falta-modal";
 import { ExcessReasonModal } from "@/components/excess-reason-modal";
+import { AllocateExcessModal } from "@/components/allocate-excess-modal";
 import { Badge, Button, Card, EmptyState, Skeleton } from "@/components/ui";
 import { useToast } from "@/components/toast";
 
@@ -80,6 +81,7 @@ export default function RegistrosPage() {
   const [manualOpen, setManualOpen] = useState(false);
   const [faltaOpen, setFaltaOpen] = useState(false);
   const [reasonDate, setReasonDate] = useState<string | null>(null);
+  const [allocateDate, setAllocateDate] = useState<string | null>(null);
 
   // Faltas que JÁ valem (date <= hoje) — previstas não geram déficit/saldo
   const effectiveFaltaList = useMemo(() => effectiveFaltas(faltas, todayStr), [faltas, todayStr]);
@@ -599,6 +601,7 @@ export default function RegistrosPage() {
               onRemoveFalta={removeFalta}
               creditView={dayCreditView(date, entries, compensations, absences, companyCalendars, settings, excessReasons)}
               onRegisterReason={(d) => setReasonDate(d)}
+              onAllocateExcess={(d) => setAllocateDate(d)}
             />
           ))}
         </div>
@@ -640,6 +643,20 @@ export default function RegistrosPage() {
             />
           );
         })()}
+      {allocateDate && (
+        <AllocateExcessModal
+          open
+          onClose={() => setAllocateDate(null)}
+          excessDate={allocateDate}
+          entries={entries}
+          compensations={compensations}
+          absences={absences}
+          companyCalendars={companyCalendars}
+          faltas={faltas}
+          excessReasons={excessReasons}
+          settings={settings}
+        />
+      )}
       <FaltaModal
         open={faltaOpen}
         onClose={() => setFaltaOpen(false)}

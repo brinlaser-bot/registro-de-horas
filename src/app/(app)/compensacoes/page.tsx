@@ -40,6 +40,7 @@ import { annualCycleBounds, getAnnualPointCycle } from "@/lib/periods";
 import { Badge, Button, Card, EmptyState, Skeleton } from "@/components/ui";
 import { CompensationForm } from "@/components/compensation-form";
 import { ExcessReasonModal } from "@/components/excess-reason-modal";
+import { AllocateExcessModal } from "@/components/allocate-excess-modal";
 import { useToast } from "@/components/toast";
 
 export default function CompensacoesPage() {
@@ -51,6 +52,7 @@ export default function CompensacoesPage() {
   const [editing, setEditing] = useState<number | null>(null);
   // §10: modal do motivo do excedente a partir da lista de reservas >10h
   const [reasonDate, setReasonDate] = useState<string | null>(null);
+  const [allocateDate, setAllocateDate] = useState<string | null>(null);
   // §21: grupos finais recolhidos (Concluídas/Canceladas) — estado local visual
   const [doneOpen, setDoneOpen] = useState(false);
   const [canceledOpen, setCanceledOpen] = useState(false);
@@ -617,6 +619,11 @@ export default function CompensacoesPage() {
                       Alterar motivo
                     </Button>
                   )}
+                  {v.reason && v.freeSpecial > 0 && (
+                    <Button size="sm" variant="danger" onClick={() => setAllocateDate(v.date)}>
+                      Alocar excedente
+                    </Button>
+                  )}
                 </li>
               );
             })}
@@ -866,6 +873,20 @@ export default function CompensacoesPage() {
 
       {/* §10 Modal de motivo do excedente — fecha livremente; sem motivo o dia
           mantém "⚠ Motivo não informado" e a reserva fica indisponível. */}
+      {allocateDate && (
+        <AllocateExcessModal
+          open
+          onClose={() => setAllocateDate(null)}
+          excessDate={allocateDate}
+          entries={entries}
+          compensations={compensations}
+          absences={absences}
+          companyCalendars={companyCalendars}
+          faltas={faltas}
+          excessReasons={excessReasons}
+          settings={settings}
+        />
+      )}
       {reasonDate &&
         (() => {
           const day = computeDay(

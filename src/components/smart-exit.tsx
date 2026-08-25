@@ -2,13 +2,13 @@
 
 import { useMemo, useState, type ReactNode } from "react";
 import {
+  Ban,
   CheckCircle2,
   Clock3,
   Compass,
   LogOut,
   Timer,
   TrendingUp,
-  Zap,
 } from "lucide-react";
 import type { Compensation, DayResult, WorkSettings } from "@/lib/types";
 import { expectedMinutesOf, formatMinutes, plannedExitTime, toMinutes } from "@/lib/time";
@@ -117,6 +117,16 @@ interface Props {
    * As regras/estados do assistente são idênticas (§11) — muda só a casca.
    */
   embedded?: boolean;
+  /** Falta efetiva registrada hoje — o assistente não prevê saída. */
+  faltaRegistrada?: boolean;
+  /** Rótulo da resolução central (Folga, Feriado, Abono, Férias…). */
+  contextLabel?: string | null;
+  /**
+   * Dia bloqueado para ponto (férias/saúde/Abono): NÃO vira "Trabalho em folga".
+   * Folga de calendário/fim de semana/feriado abonado com trabalho permitido
+   * ficam de fora.
+   */
+  punchBlocked?: boolean;
 }
 
 export function SmartExit({
@@ -130,6 +140,9 @@ export function SmartExit({
   isToday: _isToday,
   effectiveExpected,
   embedded = false,
+  faltaRegistrada = false,
+  contextLabel = null,
+  punchBlocked = false,
 }: Props) {
   const plan = useMemo(
     () => buildExitPlan(day, settings, comps, nowMinutes, date, effectiveExpected),
@@ -177,21 +190,146 @@ export function SmartExit({
     }
   };
 
+  const pad = embedded ? "px-3 py-2" : "px-4 py-3";
+  const baseExpected = effectiveExpected ?? day.expectedMinutes ?? expectedMinutesOf(settings);
+  const offDuty = baseExpected <= 0;
+
+  /* ── Falta registrada: sem previsão de saída ─────────── */
+  if (faltaRegistrada) {
+    return shell(
+      <div className={`flex items-start gap-3 rounded-xl border border-rose-200 bg-rose-50 ${pad}`}>
+        <Ban size={18} className="mt-0.5 shrink-0 text-rose-500" />
+        <div>
+          <p className="text-sm font-bold text-rose-800">Falta registrada</p>
+          <p className="mt-0.5 text-sm text-slate-600">
+            Não há previsão de saída. O déficit corresponde à jornada prevista para este dia.
+          </p>
+        </div>
+      </div>,
+      {
+        subtitle: "Assistente de jornada",
+        actions: <Badge tone="rose">Falta registrada</Badge>,
+      },
+    );
+  }
+
+  /* ── BASE 0: folga / feriado / calendário — NÃO é "meta atingida" ── */
+  if (offDuty) {
+    if (plan.state === "no-punch") {
+      if (punchBlocked) {
+        return shell(
+          <div className={`flex items-start gap-3 rounded-xl bg-slate-50 ${pad}`}>
+            <Compass size={18} className="mt-0.5 shrink-0 text-slate-400" />
+            <p className="text-sm text-slate-600">
+              {contextLabel ? <><b>{contextLabel}</b>. </> : null}
+              Não há jornada obrigatória hoje.
+            </p>
+          </div>,
+          { subtitle: "Assistente de jornada" },
+        );
+      }
+      return shell(
+        <div className={`flex items-start gap-3 rounded-xl bg-slate-50 ${pad}`}>
+          <Compass size={18} className="mt-0.5 shrink-0 text-slate-400" />
+          <p className="text-sm text-slate-600">
+            Hoje é <b>folga</b>. Não há jornada obrigatória. Se você registrar trabalho, as horas
+            realizadas serão contabilizadas como <b>trabalho em folga</b>.
+          </p>
+        </div>,
+        { subtitle: "Assistente de jornada" },
+      );
+    }
+
+    const finishedOffDuty = plan.state === "finished" || (!day.open && day.entries.length > 0);
+    if (finishedOffDuty) {
+      if (punchBlocked) {
+        return shell(
+          <div className={`flex items-start gap-3 rounded-xl bg-slate-50 ${pad}`}>
+            <CheckCircle2 size={18} className="mt-0.5 shrink-0 text-slate-400" />
+            <p className="text-sm text-slate-600">
+              {contextLabel ? <b>{contextLabel}</b> : "Dia sem jornada obrigatória"}
+              {day.workedMinutes > 0 && (
+                <> · <b>{formatMinutes(day.workedMinutes)}</b> registradas</>
+              )}
+            </p>
+          </div>,
+          { subtitle: "Assistente de jornada" },
+        );
+      }
+      const credit = Math.max(0, day.balanceMinutes);
+      return shell(
+        <div className={`flex items-start gap-3 rounded-xl bg-emerald-50 ${pad}`}>
+          <CheckCircle2 size={18} className="mt-0.5 shrink-0 text-emerald-500" />
+          <p className="text-sm text-slate-600">
+            Trabalho em folga encerrado ✓ · <b>{formatMinutes(day.workedMinutes)}</b> trabalhadas
+            {credit > 0 && (
+              <>
+                {" "}· crédito{" "}
+                <b className="text-emerald-600">+{formatMinutes(credit)}</b>
+              </>
+            )}
+          </p>
+        </div>,
+        {
+          subtitle: "Assistente de jornada",
+          actions: <Badge tone="emerald">Trabalho em folga encerrado ✓</Badge>,
+        },
+      );
+    }
+
+    if (punchBlocked) {
+      return shell(
+        <div className={`flex items-start gap-3 rounded-xl bg-slate-50 ${pad}`}>
+          <Compass size={18} className="mt-0.5 shrink-0 text-slate-400" />
+          <p className="text-sm text-slate-600">
+            {contextLabel ? <b>{contextLabel}</b> : "Dia sem jornada obrigatória"}. Sem meta de
+            jornada hoje.
+          </p>
+        </div>,
+        { subtitle: "Assistente de jornada" },
+      );
+    }
+
+    const openLabel =
+      contextLabel && contextLabel !== "Folga" && !contextLabel.startsWith("Folga")
+        ? contextLabel
+        : "Trabalho em folga";
+    return shell(
+      <div className={`flex flex-wrap items-center ${embedded ? "gap-3" : "gap-4"}`}>
+        <div className="min-w-[200px] flex-1">
+          <p className="text-sm font-semibold text-indigo-700">
+            {openLabel} · Em andamento
+          </p>
+          <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500">
+            <span>
+              Trabalhado: <b className="text-slate-700">{formatMinutes(day.workedMinutes)}</b>
+            </span>
+            <span>Sem meta de jornada hoje</span>
+          </div>
+        </div>
+        <Button size="lg" loading={busy} onClick={registerNow}>
+          <LogOut size={17} /> Registrar saída agora
+        </Button>
+      </div>,
+      {
+        subtitle: "Assistente de jornada",
+        actions: (
+          <div className="flex items-center gap-2">
+            <Badge tone="slate">{openLabel}</Badge>
+            <Badge tone="indigo">Em andamento</Badge>
+          </div>
+        ),
+      },
+    );
+  }
+
   /* ── Estado: sem batidas ─────────────────────────────── */
   if (plan.state === "no-punch") {
-    const base = effectiveExpected ?? day.expectedMinutes ?? expectedMinutesOf(settings);
     return shell(
-      <div className={`flex items-start gap-3 rounded-xl bg-slate-50 ${embedded ? "px-3 py-2" : "px-4 py-3"}`}>
+      <div className={`flex items-start gap-3 rounded-xl bg-slate-50 ${pad}`}>
         <Compass size={18} className="mt-0.5 shrink-0 text-slate-400" />
         <p className="text-sm text-slate-600">
-          {base <= 0 ? (
-            <>
-              Hoje é <b>folga</b>. Se você registrar trabalho, as horas realizadas serão
-              contabilizadas como <b>trabalho em folga</b>.
-            </>
-          ) : (
-            <>Registre sua entrada para calcular a previsão de saída.</>
-          )}
+          Registre sua entrada para calcular a previsão de saída.
         </p>
       </div>,
       { subtitle: "Assistente de jornada" },

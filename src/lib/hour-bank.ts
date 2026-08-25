@@ -540,3 +540,151 @@ export function creditUseSummary(parcels: CreditUsePlan["parcels"]): string {
   const targets = [...new Set(parcels.map((p) => p.targetDate))];
   return `${formatMinutes(total)} usados de ${targets.length === 1 ? "1 dia" : `${targets.length} dias`}`;
 }
+
+/* ── Alocação do EXCEDENTE ESPECIAL já realizado ─────────── */
+
+export const ALLOCATE_NO_REASON_MSG = "Registre o motivo do excedente antes de alocá-lo.";
+
+export interface AllocateSpecialPreview {
+  ok: boolean;
+  error?: string;
+  /** Minutos que SERÃO alocados (já limitado ao máximo). */
+  minutes: number;
+  /** teto = min(especial livre, déficit factual restante). */
+  maxMinutes: number;
+  freeSpecial: number;
+  openDeficit: number;
+  originalDeficit: number;
+  compensatedNow: number;
+  plannedNow: number;
+  /** Planejado que será liberado/cancelado para evitar sobrecompensação. */
+  plannedToRelease: number;
+  plannedAfter: number;
+  remainingDeficitAfter: number;
+  remainingSpecialAfter: number;
+  compensatedAfter: number;
+}
+
+/**
+ * Teto da alocação originada no card de excedente >10h:
+ * min(reserva especial LIVRE da origem, déficit FACTUAL restante do destino).
+ * Déficit factual = original − CONCLUÍDO (planejado NÃO reduz o restante).
+ */
+export function maxAllocatableSpecial(
+  excessDate: string,
+  deficitDate: string,
+  entries: TimeEntry[],
+  comps: Compensation[],
+  absences: Absence[],
+  calendars: CompanyCalendars | undefined,
+  faltas: Falta[] | undefined,
+  settings: WorkSettings,
+  reasons: ExcessReason[] | undefined,
+  today: string,
+): { max: number; freeSpecial: number; openDeficit: number; credit: DayCreditView; deficit: DeficitView | undefined } {
+  const credit = dayCreditView(excessDate, entries, comps, absences, calendars, settings, reasons);
+  const views = deficitViews(entries, comps, absences, calendars, faltas, settings, { from: deficitDate, to: deficitDate }, today);
+  const deficit = views.find((d) => d.date === deficitDate);
+  const openDeficit = deficit?.openMinutes ?? 0;
+  const max = Math.max(0, Math.min(credit.freeSpecial, openDeficit));
+  return { max, freeSpecial: credit.freeSpecial, openDeficit, credit, deficit };
+}
+
+/**
+ * Libera/cancela parcelas PENDENTES de déficit (nunca concluídas) para que o
+ * planejado ativo não ultrapasse `remainingNeeded` (original − concluído).
+ * Libera as mais recentes primeiro. Histórico: cancela (não apaga) ou reduz
+ * minutos. Nunca toca parcelas concluídas nem déficits de outras datas.
+ */
+export function releaseOverlappingPlanned(
+  comps: Compensation[],
+  deficitDate: string,
+  remainingNeeded: number,
+): { comps: Compensation[]; released: number } {
+  const pending = comps
+    .map((c, idx) => ({ c, idx }))
+    .filter(({ c }) => c.sourceDate === deficitDate && kindOf(c) === "deficit" && c.status === "pendente")
+    .sort((a, b) => b.c.createdAt - a.c.createdAt || b.c.id - a.c.id);
+  const totalPending = pending.reduce((s, p) => s + p.c.minutes, 0);
+  let toRelease = Math.max(0, totalPending - Math.max(0, remainingNeeded));
+  let released = 0;
+  const next = [...comps];
+  for (const { c, idx } of pending) {
+    if (toRelease <= 0) break;
+    if (c.minutes <= toRelease) {
+      next[idx] = { ...c, status: "cancelada" };
+      released += c.minutes;
+      toRelease -= c.minutes;
+    } else {
+      next[idx] = { ...c, minutes: c.minutes - toRelease };
+      released += toRelease;
+      toRelease = 0;
+    }
+  }
+  return { comps: next, released };
+}
+
+/** Prévia pura da alocação (modal + testes). NÃO altera estado. */
+export function previewAllocateSpecialExcess(
+  excessDate: string,
+  deficitDate: string,
+  requestedMinutes: number,
+  entries: TimeEntry[],
+  comps: Compensation[],
+  absences: Absence[],
+  calendars: CompanyCalendars | undefined,
+  faltas: Falta[] | undefined,
+  settings: WorkSettings,
+  reasons: ExcessReason[] | undefined,
+  today: string,
+): AllocateSpecialPreview {
+  const { max, freeSpecial, openDeficit, credit, deficit } = maxAllocatableSpecial(
+    excessDate, deficitDate, entries, comps, absences, calendars, faltas, settings, reasons, today,
+  );
+  const original = deficit?.originalMinutes ?? 0;
+  const compensatedNow = deficit?.compensatedMinutes ?? 0;
+  const plannedNow = deficit?.plannedMinutes ?? 0;
+  if (!credit.reason && credit.excessSpecial > 0) {
+    return {
+      ok: false, error: ALLOCATE_NO_REASON_MSG, minutes: 0, maxMinutes: max,
+      freeSpecial, openDeficit, originalDeficit: original, compensatedNow, plannedNow,
+      plannedToRelease: 0, plannedAfter: plannedNow, remainingDeficitAfter: openDeficit,
+      remainingSpecialAfter: freeSpecial, compensatedAfter: compensatedNow,
+    };
+  }
+  if (!Number.isFinite(requestedMinutes) || requestedMinutes <= 0) {
+    return {
+      ok: false, error: "Quantidade de minutos inválida.", minutes: 0, maxMinutes: max,
+      freeSpecial, openDeficit, originalDeficit: original, compensatedNow, plannedNow,
+      plannedToRelease: 0, plannedAfter: plannedNow, remainingDeficitAfter: openDeficit,
+      remainingSpecialAfter: freeSpecial, compensatedAfter: compensatedNow,
+    };
+  }
+  if (requestedMinutes > max) {
+    return {
+      ok: false,
+      error: `Só é possível alocar ${formatMinutes(max)} neste déficit (excedente livre ${formatMinutes(freeSpecial)} · restante factual ${formatMinutes(openDeficit)}).`,
+      minutes: 0, maxMinutes: max, freeSpecial, openDeficit, originalDeficit: original,
+      compensatedNow, plannedNow, plannedToRelease: 0, plannedAfter: plannedNow,
+      remainingDeficitAfter: openDeficit, remainingSpecialAfter: freeSpecial, compensatedAfter: compensatedNow,
+    };
+  }
+  const compensatedAfter = compensatedNow + requestedMinutes;
+  const remainingDeficitAfter = Math.max(0, original - compensatedAfter);
+  const plannedAfter = Math.min(plannedNow, remainingDeficitAfter);
+  return {
+    ok: true,
+    minutes: requestedMinutes,
+    maxMinutes: max,
+    freeSpecial,
+    openDeficit,
+    originalDeficit: original,
+    compensatedNow,
+    plannedNow,
+    plannedToRelease: plannedNow - plannedAfter,
+    plannedAfter,
+    remainingDeficitAfter,
+    remainingSpecialAfter: freeSpecial - requestedMinutes,
+    compensatedAfter,
+  };
+}
