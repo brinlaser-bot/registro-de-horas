@@ -35,6 +35,23 @@ export interface ActionResult {
   warning?: string;
 }
 
+export const DUPLICATE_SUBMIT_MSG = "Compensação já está sendo registrada.";
+const CREATE_DEDUP_MS = 600;
+let lastCreateKey = "";
+let lastCreateAt = 0;
+
+function isDuplicateCreate(key: string): boolean {
+  return key === lastCreateKey && Date.now() - lastCreateAt < CREATE_DEDUP_MS;
+}
+function rememberCreate(key: string) {
+  lastCreateKey = key;
+  lastCreateAt = Date.now();
+}
+function resetCreateGuard() {
+  lastCreateKey = "";
+  lastCreateAt = 0;
+}
+
 const OK: ActionResult = { ok: true };
 
 const CROSS_CYCLE_MSG =
@@ -347,6 +364,11 @@ export const actions = {
     let result: ActionResult = OK;
     mutate((d) => {
       const kind = p.kind ?? "excedente";
+      const createKey = `add:${kind}|${p.sourceDate}|${p.targetDate}|${p.minutes}|${p.status ?? "pendente"}`;
+      if (isDuplicateCreate(createKey)) {
+        result = { ok: false, code: "invalid", error: DUPLICATE_SUBMIT_MSG };
+        return d;
+      }
       if (!Number.isFinite(p.minutes) || p.minutes <= 0) {
         result = { ok: false, code: "invalid", error: "Quantidade de minutos inválida." };
         return d;
@@ -386,6 +408,7 @@ export const actions = {
           return d; // rejeita sem modificar nada
         }
       }
+      rememberCreate(createKey);
       return {
         ...d,
         compensations: [
@@ -1035,6 +1058,11 @@ export const actions = {
   allocateSpecialExcess(p: { excessDate: string; deficitDate: string; minutes: number }): ActionResult {
     let result: ActionResult = OK;
     mutate((d) => {
+      const createKey = `alloc:${p.excessDate}|${p.deficitDate}|${p.minutes}`;
+      if (isDuplicateCreate(createKey)) {
+        result = { ok: false, code: "invalid", error: DUPLICATE_SUBMIT_MSG };
+        return d;
+      }
       if (!sameAnnualCycle(p.excessDate, p.deficitDate)) {
         result = { ok: false, code: "cross-cycle", error: ALLOCATE_CROSS_CYCLE_MSG };
         return d;
@@ -1084,6 +1112,7 @@ export const actions = {
             ? `${formatMinutes(preview.minutes)} alocados do excedente. ${formatMinutes(released)} de planejamento futuro foram liberados para evitar dupla compensação.`
             : `${formatMinutes(preview.minutes)} alocados do excedente já realizado.`,
       };
+      rememberCreate(createKey);
       return { ...d, compensations: comps };
     });
     return result;
@@ -1157,11 +1186,13 @@ export const actions = {
 
   /** Substitui tudo pelos dados de exemplo. */
   reseed() {
+    resetCreateGuard();
     mutate(() => buildSeedData());
   },
 
   /** Apaga registros, compensações e motivos de excedente (mantém o perfil/jornada). */
   clearAll() {
+    resetCreateGuard();
     mutate((d) => ({ ...d, entries: [], compensations: [], excessReasons: [] }));
   },
 
@@ -1175,6 +1206,7 @@ export const actions = {
     faltas?: Falta[];
     excessReasons?: ExcessReason[];
   }) {
+    resetCreateGuard();
     mutate(() => ({
       user: p.user,
       entries: p.entries,

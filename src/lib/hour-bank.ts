@@ -724,3 +724,69 @@ export function previewAllocateSpecialExcess(
     compensatedAfter,
   };
 }
+
+/* ── Contabilidade do excedente ESPECIAL (realizado × programado) ─ */
+
+export type SpecialExcessStatus = "livre" | "programado" | "parcial" | "tratado";
+
+export interface SpecialExcessLedger {
+  original: number;
+  /** Parcelas CONCLUÍDAS que consomem a reserva (não inclui planejado). */ 
+  realized: number;
+  /** Destinação futura ainda pendente. */
+  planned: number;
+  /** Livre para nova alocação (original − realizado − planejado). */
+  free: number;
+  status: SpecialExcessStatus;
+  /** Destinos CONCLUÍDOS: déficit ← este dia. */
+  realizedTo: { date: string; minutes: number; portion: "especial" | "regular" }[];
+  /** Destinos apenas PLANEJADOS. */
+  plannedTo: { date: string; minutes: number }[];
+}
+
+function consumesSpecialFrom(date: string, c: Compensation): boolean {
+  if (c.status === "cancelada") return false;
+  if (c.targetDate === date && c.portion === "especial") return true;
+  if (c.sourceDate === date && kindOf(c) === "excedente") return true;
+  return false;
+}
+
+/** Status derivado: planejado NUNCA conta como realocado/tratado. */
+export function specialExcessStatusOf(original: number, realized: number, planned: number): SpecialExcessStatus {
+  if (original <= 0) return "livre";
+  if (realized >= original) return "tratado";
+  if (realized > 0) return "parcial";
+  if (planned > 0) return "programado";
+  return "livre";
+}
+
+/** Livro-caixa do excedente >10h de UM dia — fonte da Gestão/Compensações. */
+export function specialExcessLedger(date: string, comps: Compensation[], original: number): SpecialExcessLedger {
+  const related = comps.filter((c) => consumesSpecialFrom(date, c));
+  const realizedTo: SpecialExcessLedger["realizedTo"] = [];
+  const plannedTo: SpecialExcessLedger["plannedTo"] = [];
+  let realized = 0;
+  let planned = 0;
+  for (const c of related) {
+    if (c.status === "concluida") {
+      realized += c.minutes;
+      realizedTo.push({
+        date: kindOf(c) === "excedente" ? c.targetDate : c.sourceDate,
+        minutes: c.minutes,
+        portion: c.portion === "especial" ? "especial" : "regular",
+      });
+    } else if (c.status === "pendente") {
+      planned += c.minutes;
+      plannedTo.push({ date: kindOf(c) === "excedente" ? c.targetDate : c.sourceDate, minutes: c.minutes });
+    }
+  }
+  return {
+    original,
+    realized,
+    planned,
+    free: Math.max(0, original - realized - planned),
+    status: specialExcessStatusOf(original, realized, planned),
+    realizedTo,
+    plannedTo,
+  };
+}
