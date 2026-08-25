@@ -133,6 +133,13 @@ export function dayBalanceContribution(
   date: string,
   today: string,
 ): number {
+  /* §2 REGRA TEMPORAL CENTRAL: data FUTURA NÃO é fato realizado. Batidas
+   * cadastradas em date > today permanecem no dataset, mas antes da data NÃO
+   * entram em nenhum "realizado" — Saldo do período (Visão), Banco de horas,
+   * Registros e Resumo convergem para o MESMO corte temporal aqui na fonte
+   * compartilhada (PLANEJADO ≠ REALIZADO). Quando `today` alcança a data, a
+   * contagem passa a valer normalmente. */
+  if (date > today) return 0;
   const f = faltaOnDate(faltas, date);
   if (f) return f.date <= today ? view.adjustedBalance : 0;
   return companyBalanceContribution(view);

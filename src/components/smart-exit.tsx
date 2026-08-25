@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import {
   CheckCircle2,
   Clock3,
@@ -111,6 +111,12 @@ interface Props {
   isToday?: boolean;
   /** Jornada esperada efetiva (com ausências já descontadas), quando houver. */
   effectiveExpected?: number;
+  /**
+   * §7 REGISTRO DE HOJE: modo embutido — renderiza SOMENTE o conteúdo (sem o
+   * Card/título próprios) na área "Assistente de jornada" do card unificado.
+   * As regras/estados do assistente são idênticas (§11) — muda só a casca.
+   */
+  embedded?: boolean;
 }
 
 export function SmartExit({
@@ -123,6 +129,7 @@ export function SmartExit({
   onConfirmComps,
   isToday,
   effectiveExpected,
+  embedded = false,
 }: Props) {
   const plan = useMemo(
     () => buildExitPlan(day, settings, comps, nowMinutes, date, effectiveExpected),
@@ -131,6 +138,20 @@ export function SmartExit({
 
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState(false);
+
+  /** Casca condicional: Card próprio (padrão/atual) ou conteúdo embutido no
+   * card "Registro de hoje" (§7/§12 — sem título/subtítulo duplicados). */
+  const shell = (body: ReactNode, opts?: { subtitle?: ReactNode; actions?: ReactNode }) =>
+    embedded ? (
+      <div className="space-y-3">
+        {opts?.actions && <div className="flex flex-wrap items-center gap-2">{opts.actions}</div>}
+        {body}
+      </div>
+    ) : (
+      <Card title="Previsão de saída" subtitle={opts?.subtitle} actions={opts?.actions}>
+        {body}
+      </Card>
+    );
 
   const deficitComps = plan.comps.filter((c) => kindOf(c) === "deficit");
   const earlyComps = plan.comps.filter((c) => kindOf(c) === "excedente");
@@ -159,49 +180,46 @@ export function SmartExit({
   /* ── Estado: sem batidas ─────────────────────────────── */
   if (plan.state === "no-punch") {
     const base = effectiveExpected ?? day.expectedMinutes ?? expectedMinutesOf(settings);
-    return (
-      <Card title="Previsão de saída" subtitle="Assistente de jornada">
-        <div className="flex items-start gap-3 rounded-xl bg-slate-50 px-4 py-3">
-          <Compass size={18} className="mt-0.5 shrink-0 text-slate-400" />
-          <p className="text-sm text-slate-600">
-            {base <= 0 ? (
-              <>
-                Hoje é <b>folga</b>. Se você registrar trabalho, as horas realizadas serão
-                contabilizadas como <b>trabalho em folga</b>.
-              </>
-            ) : (
-              <>
-                Registre sua <b>entrada</b> para o app calcular a previsão de saída
-                {isToday ? " de hoje" : ""}. Com base na jornada de{" "}
-                <b>{formatMinutes(base)}</b>, a saída prevista é <b>{plan.plannedExit}</b>.
-              </>
-            )}
-          </p>
-        </div>
-      </Card>
+    return shell(
+      <div className="flex items-start gap-3 rounded-xl bg-slate-50 px-4 py-3">
+        <Compass size={18} className="mt-0.5 shrink-0 text-slate-400" />
+        <p className="text-sm text-slate-600">
+          {base <= 0 ? (
+            <>
+              Hoje é <b>folga</b>. Se você registrar trabalho, as horas realizadas serão
+              contabilizadas como <b>trabalho em folga</b>.
+            </>
+          ) : (
+            <>
+              Registre sua <b>entrada</b> para o app calcular a previsão de saída
+              {isToday ? " de hoje" : ""}. Com base na jornada de{" "}
+              <b>{formatMinutes(base)}</b>, a saída prevista é <b>{plan.plannedExit}</b>.
+            </>
+          )}
+        </p>
+      </div>,
+      { subtitle: "Assistente de jornada" },
     );
   }
 
   /* ── Estado: jornada encerrada ───────────────────────── */
   if (plan.state === "finished") {
-    return (
-      <Card
-        title="Previsão de saída"
-        subtitle="Assistente de jornada"
-        actions={<Badge tone="slate">Jornada encerrada</Badge>}
-      >
-        <div className="flex items-start gap-3 rounded-xl bg-slate-50 px-4 py-3">
-          <CheckCircle2 size={18} className="mt-0.5 shrink-0 text-emerald-500" />
-          <p className="text-sm text-slate-600">
-            Jornada encerrada com <b>{formatMinutes(day.workedMinutes)}</b> trabalhadas. Saldo do
-            dia:{" "}
-            <b className={day.balanceMinutes >= 0 ? "text-emerald-600" : "text-rose-600"}>
-              {day.balanceMinutes >= 0 ? "+" : ""}
-              {formatMinutes(day.balanceMinutes)}
-            </b>
-          </p>
-        </div>
-      </Card>
+    return shell(
+      <div className="flex items-start gap-3 rounded-xl bg-slate-50 px-4 py-3">
+        <CheckCircle2 size={18} className="mt-0.5 shrink-0 text-emerald-500" />
+        <p className="text-sm text-slate-600">
+          Jornada encerrada com <b>{formatMinutes(day.workedMinutes)}</b> trabalhadas. Saldo do
+          dia:{" "}
+          <b className={day.balanceMinutes >= 0 ? "text-emerald-600" : "text-rose-600"}>
+            {day.balanceMinutes >= 0 ? "+" : ""}
+            {formatMinutes(day.balanceMinutes)}
+          </b>
+        </p>
+      </div>,
+      {
+        subtitle: "Assistente de jornada",
+        actions: <Badge tone="slate">Jornada encerrada</Badge>,
+      },
     );
   }
 
@@ -249,9 +267,8 @@ export function SmartExit({
         ? `Trabalhe até ${plan.plannedExit} para abater ${formatMinutes(plan.extraMinutes)} da sua pendência (limite de ${formatMinutes(settings.maxDailyMinutes)}/dia).`
         : `Para completar sua jornada de ${formatMinutes(plan.targetMinutes)}, a saída planejada é ${plan.plannedExit}.`;
 
-  return (
-    <Card title="Previsão de saída" subtitle="Planejada a partir das suas batidas — não do relógio" actions={actions}>
-      <div className="flex flex-wrap items-center gap-4">
+  return shell(
+    <div className="flex flex-wrap items-center gap-4">
         {/* Horário planejado */}
         <div className="flex items-center gap-3 rounded-xl border border-slate-100 bg-slate-50/70 px-4 py-3">
           <div
@@ -367,7 +384,10 @@ export function SmartExit({
             </Button>
           )}
         </div>
-      </div>
-    </Card>
+      </div>,
+    {
+      subtitle: "Planejada a partir das suas batidas — não do relógio",
+      actions,
+    },
   );
 }

@@ -36,6 +36,20 @@ import type {
   WorkSettings,
 } from "./types";
 
+/* ── Regra temporal central (§2) ───────────────────────────── */
+
+/**
+ * REALIZADO = somente dados com date <= hoje (fatos efetivamente ocorridos).
+ * Batidas cadastradas em data futura podem existir no dataset, mas antes da
+ * data: não entram no banco, não viram crédito livre, não servem à quitação
+ * imediata e não alteram o saldo realizado. A contribuição diária usa a mesma
+ * guarda na fonte compartilhada (dayBalanceContribution — Visão/Resumo/
+ * Registros/Banco); créditos/planos filtram as datas por este predicado.
+ */
+export function isRealizedDate(date: string, today: string): boolean {
+  return date <= today;
+}
+
 /* ── Motivo do excedente >10h (§10) ────────────────────────── */
 
 export const EXCESS_REASON_OPTIONS: { code: ExcessReasonCode; label: string }[] = [
@@ -219,11 +233,13 @@ export function hourBankSummary(
   );
 
   // Saldo realizado: soma da contribuição central por dia (FATOS — faltas
-  // previstas e planejamentos ficam de fora por construção).
+  // previstas e planejamentos ficam de fora por construção). §2: o loop para
+  // em `today` — dias futuros NÃO são realizados (a guarda central de
+  // dayBalanceContribution zera qualquer contribuição futura de qualquer forma).
   let realizedBalance = 0;
   {
     let cur = range.from;
-    while (cur <= range.to) {
+    while (cur <= range.to && isRealizedDate(cur, today)) {
       const cctx = companyDayContext(cur, entries, absences, calendars ?? [], settings);
       realizedBalance += dayBalanceContribution(cctx, faltas, cur, today);
       cur = nextDay(cur);
@@ -235,7 +251,11 @@ export function hourBankSummary(
   let excessWithoutReason = 0;
   const creditDates = new Set<string>();
   for (const e of entries) {
-    if (e.date >= range.from && e.date <= range.to) creditDates.add(e.date);
+    // §2: crédito realizado/livre só de datas JÁ OCORRIDAS — batida futura
+    // fica no dataset, mas não vira crédito antes do dia chegar.
+    if (isRealizedDate(e.date, today) && e.date >= range.from && e.date <= range.to) {
+      creditDates.add(e.date);
+    }
   }
   for (const date of creditDates) {
     const v = dayCreditView(date, entries, comps, absences, calendars, settings, reasons);
@@ -450,7 +470,7 @@ export function planRealizedCreditUse(
 ): CreditUsePlan {
   if (minutes <= 0) return { ok: false, error: "Quantidade de minutos inválida.", parcels: [], appliedMinutes: 0 };
 
-  const views = [...new Set(entries.filter((e) => e.date <= today).map((e) => e.date))]
+  const views = [...new Set(entries.filter((e) => isRealizedDate(e.date, today)).map((e) => e.date))]
     .map((date) => dayCreditView(date, entries, comps, absences, calendars, settings, reasons))
     .sort((a, b) => a.date.localeCompare(b.date));
 

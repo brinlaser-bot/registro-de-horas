@@ -154,7 +154,8 @@ export function ExcessPanel({
     <>
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard
-          label="Excedente do mês"
+          /* §5: cálculo usa o período oficial 21→20 — rótulo alinhado (era "do mês") */
+          label="Excedente do período"
           value={formatMinutes(excessTotals.debtTotal)}
           sub={`acima de ${formatMinutes(settings.maxDailyMinutes)}/dia · ${monthLabel}`}
           tone={excessTotals.debtTotal > 0 ? "rose" : "slate"}

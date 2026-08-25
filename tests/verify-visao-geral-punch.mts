@@ -93,8 +93,10 @@ const visaoGeralBalance = (period: { from: string; to: string }, today: string) 
 let passed = 0;
 const check = (id: string, fn: () => void) => { fn(); passed++; console.log(`✔ ${id}`); };
 
-/* ══ Cenário canônico (+4h50): 21/08 −15 · 22/08 sáb +120 · 23/08 dom +60 ·
-      24/08 +5 · falta PREVISTA 31/08 = 0 · 07/09 ABONADO trabalhado +120 ══ */
+/* ══ Cenário canônico: 21/08 −15 · 22/08 sáb +120 · 23/08 dom +60 · 24/08 +5 ·
+   falta PREVISTA 31/08 = 0 · 07/09 ABONADO trabalhado +120.
+   Saldo realizado: em 23/08 ⇒ +2h45 (165) · em 24/08 ⇒ +2h50 · em 07/09 ⇒ +4h50
+   — datas futuras entram SOMENTE quando chegam (§1–§3, rodada HOTFIX). ══ */
 const mountScenario = () => {
   nextId = 1;
   actions.replaceAll({
@@ -114,15 +116,25 @@ const mountScenario = () => {
   });
 };
 
-/* ── A. Saldo do período: Visão geral = Resumo = +4h50 ─────── */
-check("A. cenário canônico ⇒ Saldo do período +4h50 (290min) nas três telas — mesma fonte central", () => {
+/* ── A. Saldo do período: Visão geral = Resumo; corte temporal central ── */
+check("A. cenário canônico ⇒ mesmo cálculo por dia + corte temporal central (futuro só conta quando chega)", () => {
   mountScenario();
   const period = getPointPeriod(TODAY); // 2026-08-21 → 2026-09-20
   assert.equal(period.from, "2026-08-21");
   assert.equal(period.to, "2026-09-20");
+  // §1–§3 (HOTFIX banco realizado): TODAY=23/08 → 24/08 (+5min) e 07/09
+  // feriado abonado trabalhado (+2h) ainda NÃO aconteceram. A FÓRMULA diária
+  // é idêntica (folga/fim de semana/abonado trabalhado = +crédito; nunca
+  // "trabalhado − 8h"); o que mudou é SÓ o corte temporal.
   const total = visaoGeralBalance(period, TODAY);
-  assert.equal(total, 290, `saldo do período = ${formatMinutes(total)}`);
-  assert.equal(formatMinutes(total), "4h50");
+  assert.equal(total, 165, `em 23/08: −15 + 2h + 1h = +2h45 (24/08 e 07/09 são futuros)`);
+  assert.equal(formatMinutes(total), "2h45");
+  // Progressão temporal limpa: a falta prevista de 31/08 só vira efetiva no
+  // dia e mascara a leitura (−jornada — verificado em D); sem ela, cada data
+  // futura entra EXATAMENTE quando chega.
+  actions.replaceAll({ ...getAppData(), faltas: [] });
+  assert.equal(visaoGeralBalance(period, "2026-08-24"), 170, "chegando 24/08: entra +5min → +2h50");
+  assert.equal(visaoGeralBalance(period, "2026-09-07"), 290, "chegando 07/09: entra +2h → +4h50");
   // Bug original documentado: soma diária "trabalhado − 8h" sem calendário
   // (só dias com batidas) dava −19h10 para o mesmo cenário.
   const st = getAppData();

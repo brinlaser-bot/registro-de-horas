@@ -16,7 +16,6 @@ import { actions, enrichComp, getAppData, settingsOf, useAppData, useIsClient } 
 import {
   addDays,
   computeDay,
-  expectedMinutesOf,
   formatDateShortBR,
   formatMinutes,
   FUTURE_DATE_ERROR,
@@ -407,9 +406,13 @@ export default function DashboardPage() {
           value={formatMinutes(t.workedMinutes)}
           sub={
             <>
+              {/* §4 rodada HOTFIX: o card HOJE usa a MESMA base efetiva central
+                  do Registro rápido (companyDayContext.effectiveExpected — 0 em
+                  folga/feriado/"folga a compensar"). O antigo fallback
+                  `expected || jornada` engolvia base 0min (0 é falsy → 8h). */}
               {todayCtx.type === "folga" || todayCtx.type === "trabalho-folga"
-                ? `${todayLabel} · esperado ${formatMinutes(t.expectedMinutes)}`
-                : `base ${formatMinutes(t.expectedMinutes || expectedMinutesOf(settings))}`} ·{" "}
+                ? `${todayLabel} · esperado ${formatMinutes(todayCtx.effectiveExpected)}`
+                : `base ${formatMinutes(todayCtx.effectiveExpected)}`} ·{" "}
               <span className={t.balanceMinutes >= 0 ? "text-emerald-600" : "text-rose-600"}>
                 {t.balanceMinutes >= 0 ? "+" : ""}
                 {formatMinutes(t.balanceMinutes)}
@@ -446,7 +449,60 @@ export default function DashboardPage() {
         />
       </div>
 
-      {/* §2/§4 BANCO DE HORAS — consulta do saldo realizado (só fatos) */}
+      {/* §7–§14 REGISTRO DE HOJE — Ponto + Assistente de jornada em UM ÚNICO
+          card, imediatamente após os indicadores (§8: bater o ponto é a ação
+          nº1 da Visão geral — fica acima da dobra). Componentes reutilizados
+          no modo embutido (§7: sem duplicar componentes nem lógica; §10/§11:
+          todas as funções do Registro rápido e do Smart Exit preservadas). */}
+      <Card
+        title="Registro de hoje"
+        /* §13 subtítulo contextual pela MESMA fonte central (companyDayContext.label):
+           "Folga a compensar — Calendário", "Feriado — …", "Abono…" etc. */
+        subtitle={todayCtx.label ?? `Jornada regular · base ${formatMinutes(todayCtx.effectiveExpected)}`}
+      >
+        {/* §9 desktop: Ponto | Assistente lado a lado · §14 mobile: empilha
+            (Ponto sempre primeiro), sem overflow horizontal. */}
+        <div className="grid gap-6 lg:grid-cols-2">
+          <section className="min-w-0">
+            <h3 className="mb-3 text-[11px] font-extrabold uppercase tracking-wider text-slate-400">
+              Ponto
+            </h3>
+            <QuickPunch
+              embedded
+              today={t}
+              todayStr={todayStr}
+              settings={settings}
+              dayLabel={todayCtx.type === "regular" ? undefined : todayLabel}
+              onAddEntry={onAddEntry}
+              onUpdateEntry={onUpdateEntry}
+              onDeleteEntry={onDeleteEntry}
+              faltaRegistrada={!!faltaHoje}
+              faltaGate={faltaHojeGate}
+              onRegisterFalta={registerFaltaHoje}
+              onRemoveFalta={removeFaltaHoje}
+            />
+          </section>
+          <section className="min-w-0 lg:border-l lg:border-slate-100 lg:pl-6">
+            <h3 className="mb-3 text-[11px] font-extrabold uppercase tracking-wider text-slate-400">
+              Assistente de jornada
+            </h3>
+            <SmartExit
+              embedded
+              date={todayStr}
+              day={t}
+              settings={settings}
+              comps={compensations}
+              nowMinutes={nowMinutes}
+              onSmartExit={smartExit}
+              onConfirmComps={confirmComps}
+              isToday
+              effectiveExpected={todayCtx.effectiveExpected}
+            />
+          </section>
+        </div>
+      </Card>
+
+      {/* §15 BANCO DE HORAS — mesmo conteúdo, agora DEPOIS do Registro de hoje */}
       <HourBankCard
         entries={entries}
         compensations={compensations}
@@ -458,33 +514,6 @@ export default function DashboardPage() {
         range={period}
         today={todayStr}
         onRegisterReason={(date) => setReasonDate(date)}
-      />
-
-      {/* Assistente de saída + Registro rápido */}
-      <SmartExit
-        date={todayStr}
-        day={t}
-        settings={settings}
-        comps={compensations}
-        nowMinutes={nowMinutes}
-        onSmartExit={smartExit}
-        onConfirmComps={confirmComps}
-        isToday
-        effectiveExpected={todayCtx.effectiveExpected}
-      />
-
-      <QuickPunch
-        today={t}
-        todayStr={todayStr}
-        settings={settings}
-        dayLabel={todayCtx.type === "regular" ? undefined : todayLabel}
-        onAddEntry={onAddEntry}
-        onUpdateEntry={onUpdateEntry}
-        onDeleteEntry={onDeleteEntry}
-        faltaRegistrada={!!faltaHoje}
-        faltaGate={faltaHojeGate}
-        onRegisterFalta={registerFaltaHoje}
-        onRemoveFalta={removeFaltaHoje}
       />
 
       {/* Gestão de excedentes */}

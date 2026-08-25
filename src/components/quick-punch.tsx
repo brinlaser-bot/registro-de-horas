@@ -33,6 +33,12 @@ interface Props {
   faltaGate?: FaltaGate;
   onRegisterFalta?: () => Promise<void> | void;
   onRemoveFalta?: () => Promise<void> | void;
+  /**
+   * §7 REGISTRO DE HOJE: modo embutido — renderiza SOMENTE o conteúdo (sem o
+   * Card/título próprios) para compor o card unificado da Visão geral junto
+   * do Assistente de jornada. Nenhuma lógica/funcionalidade muda (§10).
+   */
+  embedded?: boolean;
 }
 
 export function QuickPunch({
@@ -47,6 +53,7 @@ export function QuickPunch({
   faltaGate,
   onRegisterFalta,
   onRemoveFalta,
+  embedded = false,
 }: Props) {
   const toast = useToast();
   // §6.2 Campo de horário MANUAL permanece: vazio → segue o relógio; quando o
@@ -165,31 +172,42 @@ export function QuickPunch({
       { id: -2, date: todayStr, time: settings.lunchEnd, type: "entrada" as const, note: null },
     ]).ok;
 
-  return (
-    <Card
-      title="Registro rápido"
-      subtitle={`${dayLabel ? `${dayLabel} · ` : ""}${today.entries.length === 0 ? "Nenhuma batida hoje ainda" : `${today.entries.length} batida(s) hoje`} · agora são ${clock}`}
-      actions={
-        <div className="flex items-center gap-2">
-          <input
-            type="time"
-            value={manualTime || clock}
-            onChange={(e) => setManualTime(e.target.value)}
-            className={`h-8 rounded-lg border px-2 text-xs font-semibold text-slate-700 outline-none focus:border-emerald-500 ${
-              manualTime ? "border-amber-400 bg-amber-50" : "border-slate-300"
-            }`}
-            aria-label="Horário do registro"
-          />
-          <input
-            type="text"
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            placeholder="Observação (opcional)"
-            className="hidden h-8 w-44 rounded-lg border border-slate-300 px-2 text-xs text-slate-700 outline-none focus:border-emerald-500 sm:block"
-          />
+  // Campos de horário/observação — no Card próprio vão no cabeçalho; no modo
+  // embutido (Registro de hoje) aparecem na faixa compacta de contexto.
+  const headerFields = (
+    <div className="flex items-center gap-2">
+      <input
+        type="time"
+        value={manualTime || clock}
+        onChange={(e) => setManualTime(e.target.value)}
+        className={`h-8 rounded-lg border px-2 text-xs font-semibold text-slate-700 outline-none focus:border-emerald-500 ${
+          manualTime ? "border-amber-400 bg-amber-50" : "border-slate-300"
+        }`}
+        aria-label="Horário do registro"
+      />
+      <input
+        type="text"
+        value={note}
+        onChange={(e) => setNote(e.target.value)}
+        placeholder="Observação (opcional)"
+        className="hidden h-8 w-44 rounded-lg border border-slate-300 px-2 text-xs text-slate-700 outline-none focus:border-emerald-500 sm:block"
+      />
+    </div>
+  );
+
+  const body = (
+    <>
+      {/* §12 faixa de contexto compacta — só no modo embutido (o Card próprio
+          já carrega a mesma informação no subtítulo, sem duplicar). */}
+      {embedded && (
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+          <p className="text-xs text-slate-500">
+            {today.entries.length === 0 ? "Nenhuma batida hoje ainda" : `${today.entries.length} batida(s) hoje`}
+            {" · agora são "}{clock}
+          </p>
+          {headerFields}
         </div>
-      }
-    >
+      )}
       <div className="grid gap-4 sm:grid-cols-[auto_1fr]">
         {/* Resumo do dia */}
         <div className="flex items-center gap-4 rounded-xl border border-slate-100 bg-slate-50/70 p-4">
@@ -346,6 +364,20 @@ export function QuickPunch({
           />
         </div>
       </Modal>
+    </>
+  );
+
+  // §7/§12 Modo embutido: sem Card/título próprios (o card "Registro de hoje"
+  // provê o cabeçalho único) — conteúdo e lógica idênticos.
+  if (embedded) return <div>{body}</div>;
+
+  return (
+    <Card
+      title="Registro rápido"
+      subtitle={`${dayLabel ? `${dayLabel} · ` : ""}${today.entries.length === 0 ? "Nenhuma batida hoje ainda" : `${today.entries.length} batida(s) hoje`} · agora são ${clock}`}
+      actions={headerFields}
+    >
+      {body}
     </Card>
   );
 }
