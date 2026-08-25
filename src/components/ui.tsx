@@ -142,6 +142,7 @@ export function Card({
   children,
   className = "",
   padded = true,
+  compact = false,
 }: {
   title?: ReactNode;
   subtitle?: ReactNode;
@@ -149,11 +150,17 @@ export function Card({
   children: ReactNode;
   className?: string;
   padded?: boolean;
+  /** Menor padding/gap do cabeçalho e do corpo — sem reduzir controles. */
+  compact?: boolean;
 }) {
   return (
     <section className={`rounded-2xl border border-slate-200 bg-white shadow-sm ${className}`}>
       {(title || actions) && (
-        <header className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-5 py-4">
+        <header
+          className={`flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 ${
+            compact ? "px-4 py-2.5 lg:px-5 lg:py-3" : "px-5 py-4"
+          }`}
+        >
           <div>
             {title && <h2 className="text-sm font-bold text-slate-900">{title}</h2>}
             {subtitle && <p className="mt-0.5 text-xs text-slate-500">{subtitle}</p>}
@@ -161,7 +168,7 @@ export function Card({
           {actions && <div className="flex items-center gap-2">{actions}</div>}
         </header>
       )}
-      <div className={padded ? "p-5" : ""}>{children}</div>
+      <div className={padded ? (compact ? "p-3 lg:p-4" : "p-5") : ""}>{children}</div>
     </section>
   );
 }
@@ -293,6 +300,7 @@ export function StatCard({
   tone = "slate",
   icon,
   onClick,
+  compact = false,
 }: {
   label: string;
   value: ReactNode;
@@ -300,6 +308,8 @@ export function StatCard({
   tone?: "emerald" | "rose" | "amber" | "slate" | "indigo";
   icon?: ReactNode;
   onClick?: () => void;
+  /** Menor padding vertical e gap interno — ícone e número permanecem iguais. */
+  compact?: boolean;
 }) {
   const tones: Record<string, string> = {
     emerald: "text-emerald-600",
@@ -318,7 +328,9 @@ export function StatCard({
   return (
     <div
       onClick={onClick}
-      className={`rounded-2xl border border-slate-200 bg-white p-4 shadow-sm ${onClick ? "cursor-pointer transition-shadow hover:shadow-md" : ""}`}
+      className={`rounded-2xl border border-slate-200 bg-white shadow-sm ${
+        compact ? "px-3 py-2.5" : "p-4"
+      } ${onClick ? "cursor-pointer transition-shadow hover:shadow-md" : ""}`}
     >
       <div className="flex items-start justify-between gap-2">
         <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">{label}</p>
@@ -328,8 +340,8 @@ export function StatCard({
           </span>
         )}
       </div>
-      <p className={`mt-1.5 text-2xl font-extrabold tabular-nums tracking-tight ${tones[tone]}`}>{value}</p>
-      {sub && <div className="mt-1 text-xs text-slate-500">{sub}</div>}
+      <p className={`${compact ? "mt-0.5" : "mt-1.5"} text-2xl font-extrabold tabular-nums tracking-tight ${tones[tone]}`}>{value}</p>
+      {sub && <div className={`${compact ? "mt-0.5" : "mt-1"} text-xs text-slate-500`}>{sub}</div>}
     </div>
   );
 }

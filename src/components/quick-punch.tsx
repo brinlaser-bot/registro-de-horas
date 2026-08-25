@@ -174,13 +174,14 @@ export function QuickPunch({
 
   // Campos de horário/observação — no Card próprio vão no cabeçalho; no modo
   // embutido (Registro de hoje) aparecem na faixa compacta de contexto.
+  // Observação permanece visível no mobile (item funcional — não some).
   const headerFields = (
-    <div className="flex items-center gap-2">
+    <div className="flex min-w-0 flex-1 items-center gap-2 sm:flex-none">
       <input
         type="time"
         value={manualTime || clock}
         onChange={(e) => setManualTime(e.target.value)}
-        className={`h-8 rounded-lg border px-2 text-xs font-semibold text-slate-700 outline-none focus:border-emerald-500 ${
+        className={`h-8 shrink-0 rounded-lg border px-2 text-xs font-semibold text-slate-700 outline-none focus:border-emerald-500 ${
           manualTime ? "border-amber-400 bg-amber-50" : "border-slate-300"
         }`}
         aria-label="Horário do registro"
@@ -190,7 +191,7 @@ export function QuickPunch({
         value={note}
         onChange={(e) => setNote(e.target.value)}
         placeholder="Observação (opcional)"
-        className="hidden h-8 w-44 rounded-lg border border-slate-300 px-2 text-xs text-slate-700 outline-none focus:border-emerald-500 sm:block"
+        className="h-8 min-w-0 flex-1 rounded-lg border border-slate-300 px-2 text-xs text-slate-700 outline-none focus:border-emerald-500 sm:w-44 sm:flex-none"
       />
     </div>
   );
@@ -200,7 +201,7 @@ export function QuickPunch({
       {/* §12 faixa de contexto compacta — só no modo embutido (o Card próprio
           já carrega a mesma informação no subtítulo, sem duplicar). */}
       {embedded && (
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+        <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
           <p className="text-xs text-slate-500">
             {today.entries.length === 0 ? "Nenhuma batida hoje ainda" : `${today.entries.length} batida(s) hoje`}
             {" · agora são "}{clock}
@@ -208,9 +209,9 @@ export function QuickPunch({
           {headerFields}
         </div>
       )}
-      <div className="grid gap-4 sm:grid-cols-[auto_1fr]">
+      <div className={`grid ${embedded ? "gap-2.5" : "gap-4"} sm:grid-cols-[auto_1fr]`}>
         {/* Resumo do dia */}
-        <div className="flex items-center gap-4 rounded-xl border border-slate-100 bg-slate-50/70 p-4">
+        <div className={`flex items-center gap-4 rounded-xl border border-slate-100 bg-slate-50/70 ${embedded ? "px-3 py-2" : "p-4"}`}>
           <Timer size={26} className="text-emerald-600" />
           <div>
             <p className="text-2xl font-extrabold tabular-nums text-slate-900">
@@ -229,8 +230,8 @@ export function QuickPunch({
         {/* §5.2 Botão principal DINÂMICO: muda automaticamente para a próxima
             ação — entrada (verde) quando o dia está fechado/vazio, saída
             (vermelha) quando há uma entrada aberta. */}
-        <div className="flex flex-col gap-3">
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_auto]">
+        <div className={`flex flex-col ${embedded ? "gap-2" : "gap-3"}`}>
+          <div className={`grid grid-cols-1 ${embedded ? "gap-2" : "gap-3"} sm:grid-cols-[1fr_auto]`}>
             <Button
               variant={nextIsEntrada ? "primary" : "danger"}
               size="lg"
@@ -276,7 +277,7 @@ export function QuickPunch({
 
       {/* Linha do tempo de hoje — chips com Editar (lápis) + Excluir (lixeira) */}
       {today.entries.length > 0 && (
-        <div className="mt-4 border-t border-slate-100 pt-4">
+        <div className={`${embedded ? "mt-2.5 pt-2.5" : "mt-4 pt-4"} border-t border-slate-100`}>
           <div className="flex flex-wrap items-center gap-2">
             {today.entries.map((e) => (
               <span
@@ -312,7 +313,7 @@ export function QuickPunch({
       {/* §11 Ação secundária e discreta: "Registrar falta" — SEMPRE hoje (sem
           seletor de data). Gate central inválido (batidas, folga, abonado,
           Abono…) → toast com a mensagem central; nunca esconder a ação. */}
-      <div className="mt-4 border-t border-slate-100 pt-3">
+      <div className={`${embedded ? "mt-2.5 pt-2" : "mt-4 pt-3"} border-t border-slate-100`}>
         {faltaRegistrada ? (
           <p className="flex items-center gap-2 text-xs text-slate-400">
             <Ban size={12} className="text-rose-500" />

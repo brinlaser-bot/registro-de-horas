@@ -127,7 +127,7 @@ export function SmartExit({
   nowMinutes,
   onSmartExit,
   onConfirmComps,
-  isToday,
+  isToday: _isToday,
   effectiveExpected,
   embedded = false,
 }: Props) {
@@ -143,7 +143,7 @@ export function SmartExit({
    * card "Registro de hoje" (§7/§12 — sem título/subtítulo duplicados). */
   const shell = (body: ReactNode, opts?: { subtitle?: ReactNode; actions?: ReactNode }) =>
     embedded ? (
-      <div className="space-y-3">
+      <div className="space-y-2">
         {opts?.actions && <div className="flex flex-wrap items-center gap-2">{opts.actions}</div>}
         {body}
       </div>
@@ -181,7 +181,7 @@ export function SmartExit({
   if (plan.state === "no-punch") {
     const base = effectiveExpected ?? day.expectedMinutes ?? expectedMinutesOf(settings);
     return shell(
-      <div className="flex items-start gap-3 rounded-xl bg-slate-50 px-4 py-3">
+      <div className={`flex items-start gap-3 rounded-xl bg-slate-50 ${embedded ? "px-3 py-2" : "px-4 py-3"}`}>
         <Compass size={18} className="mt-0.5 shrink-0 text-slate-400" />
         <p className="text-sm text-slate-600">
           {base <= 0 ? (
@@ -190,11 +190,7 @@ export function SmartExit({
               contabilizadas como <b>trabalho em folga</b>.
             </>
           ) : (
-            <>
-              Registre sua <b>entrada</b> para o app calcular a previsão de saída
-              {isToday ? " de hoje" : ""}. Com base na jornada de{" "}
-              <b>{formatMinutes(base)}</b>, a saída prevista é <b>{plan.plannedExit}</b>.
-            </>
+            <>Registre sua entrada para calcular a previsão de saída.</>
           )}
         </p>
       </div>,
@@ -205,7 +201,7 @@ export function SmartExit({
   /* ── Estado: jornada encerrada ───────────────────────── */
   if (plan.state === "finished") {
     return shell(
-      <div className="flex items-start gap-3 rounded-xl bg-slate-50 px-4 py-3">
+      <div className={`flex items-start gap-3 rounded-xl bg-slate-50 ${embedded ? "px-3 py-2" : "px-4 py-3"}`}>
         <CheckCircle2 size={18} className="mt-0.5 shrink-0 text-emerald-500" />
         <p className="text-sm text-slate-600">
           Jornada encerrada com <b>{formatMinutes(day.workedMinutes)}</b> trabalhadas. Saldo do
@@ -268,9 +264,9 @@ export function SmartExit({
         : `Para completar sua jornada de ${formatMinutes(plan.targetMinutes)}, a saída planejada é ${plan.plannedExit}.`;
 
   return shell(
-    <div className="flex flex-wrap items-center gap-4">
+    <div className={`flex flex-wrap items-center ${embedded ? "gap-3" : "gap-4"}`}>
         {/* Horário planejado */}
-        <div className="flex items-center gap-3 rounded-xl border border-slate-100 bg-slate-50/70 px-4 py-3">
+        <div className={`flex items-center gap-3 rounded-xl border border-slate-100 bg-slate-50/70 ${embedded ? "px-3 py-2" : "px-4 py-3"}`}>
           <div
             className={`flex h-11 w-11 items-center justify-center rounded-xl ${
               plan.kind === "earlier"

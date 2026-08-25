@@ -327,12 +327,15 @@ export default function DashboardPage() {
 
   if (!mounted) {
     return (
-      <div className="space-y-6">
-        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-          {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-28" />)}
+      <div className="flex flex-col gap-4 lg:gap-5">
+        <div className="flex flex-col gap-3 lg:gap-4">
+          <Skeleton className="h-12" />
+          <div className="grid grid-cols-2 gap-2 lg:grid-cols-4 lg:gap-3">
+            {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-20" />)}
+          </div>
+          <Skeleton className="h-52" />
         </div>
-        <Skeleton className="h-56" />
-        <div className="grid gap-6 lg:grid-cols-2">
+        <div className="grid gap-4 lg:grid-cols-2 lg:gap-5">
           <Skeleton className="h-64" />
           <Skeleton className="h-64" />
         </div>
@@ -355,10 +358,10 @@ export default function DashboardPage() {
   const recentDays = [...recent].filter((d) => d.entryCount > 0).slice(-7).reverse();
 
   return (
-    <div className="space-y-6">
+    <div className="flex flex-col gap-4 lg:gap-5">
       {/* H: Felicitação do dia — não altera nenhum número do app */}
       {birthdayToday && (
-        <div className="flex items-center gap-3 rounded-2xl border border-amber-200 bg-gradient-to-r from-amber-50 via-orange-50 to-amber-50 px-5 py-4 shadow-sm">
+        <div className="flex items-center gap-3 rounded-2xl border border-amber-200 bg-gradient-to-r from-amber-50 via-orange-50 to-amber-50 px-4 py-3 shadow-sm">
           <span className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-amber-100 text-amber-600">
             <Cake size={22} aria-hidden />
           </span>
@@ -374,133 +377,143 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* Cabeçalho */}
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h2 className="text-xl font-extrabold tracking-tight text-slate-900">
-            Olá, {firstName}! 👋
-          </h2>
-          <p className="text-sm text-slate-500">
-            {todayCtx.type === "folga"
-              ? "Folga hoje. Se você registrar trabalho, as horas serão contabilizadas como trabalho em folga."
-              : todayCtx.type === "trabalho-folga"
-                ? "Trabalho em folga registrado hoje."
-                : t.empty
-                  ? "Você ainda não bateu o ponto hoje. Registre sua entrada abaixo."
-                  : t.open
-                    ? "Seu ponto de hoje está em andamento."
-                    : "Seu ponto de hoje está fechado."}
-          </p>
+      {/* Bloco reordenável: no mobile o Registro de hoje sobe (bater o ponto
+          sem rolagem); no desktop a ordem clássica é preservada
+          (saudação → 4 cards → Registro de hoje). */}
+      <div className="flex flex-col gap-3 lg:gap-4">
+        {/* Cabeçalho */}
+        <div className="order-1 flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
+          <div className="min-w-0 flex-1">
+            <h2 className="text-xl font-extrabold tracking-tight text-slate-900">
+              Olá, {firstName}! 👋
+            </h2>
+            <p className="mt-0.5 text-sm text-slate-500">
+              {todayCtx.type === "folga"
+                ? "Folga hoje. Se você registrar trabalho, as horas serão contabilizadas como trabalho em folga."
+                : todayCtx.type === "trabalho-folga"
+                  ? "Trabalho em folga registrado hoje."
+                  : t.empty
+                    ? "Você ainda não bateu o ponto hoje. Registre sua entrada abaixo."
+                    : t.open
+                      ? "Seu ponto de hoje está em andamento."
+                      : "Seu ponto de hoje está fechado."}
+            </p>
+          </div>
+          <Link href="/registros" className="shrink-0">
+            <Button variant="secondary">
+              <CalendarClock size={15} /> Ver registros
+            </Button>
+          </Link>
         </div>
-        <Link href="/registros">
-          <Button variant="secondary">
-            <CalendarClock size={15} /> Ver registros
-          </Button>
-        </Link>
-      </div>
 
-      {/* Indicadores */}
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <StatCard
-          label="Hoje"
-          value={formatMinutes(t.workedMinutes)}
-          sub={
-            <>
-              {/* §4 rodada HOTFIX: o card HOJE usa a MESMA base efetiva central
-                  do Registro rápido (companyDayContext.effectiveExpected — 0 em
-                  folga/feriado/"folga a compensar"). O antigo fallback
-                  `expected || jornada` engolvia base 0min (0 é falsy → 8h). */}
-              {todayCtx.type === "folga" || todayCtx.type === "trabalho-folga"
-                ? `${todayLabel} · esperado ${formatMinutes(todayCtx.effectiveExpected)}`
-                : `base ${formatMinutes(todayCtx.effectiveExpected)}`} ·{" "}
-              <span className={t.balanceMinutes >= 0 ? "text-emerald-600" : "text-rose-600"}>
-                {t.balanceMinutes >= 0 ? "+" : ""}
-                {formatMinutes(t.balanceMinutes)}
-              </span>
-            </>
-          }
-          tone={todayStatusTone}
-          icon={<Timer size={16} />}
-        />
-        <StatCard
-          label="Saldo do período"
-          value={`${totals.balanceTotal >= 0 ? "+" : ""}${formatMinutes(totals.balanceTotal)}`}
-          sub={totals.balanceTotal >= 0 ? "horas a seu favor (crédito)" : "horas em débito — atenção"}
-          tone={balanceTone}
-          icon={<Wallet size={16} />}
-        />
-        <StatCard
-          label="Excedente do período"
-          value={formatMinutes(totals.excessTotal)}
-          sub={`acima de ${formatMinutes(settings.maxDailyMinutes)}/dia · ${totals.trackedDays} dia(s) registrados`}
-          tone={excessTone}
-          icon={<TriangleAlert size={16} />}
-        />
-        <StatCard
-          label="Compensações pendentes"
-          value={pending.length}
-          sub={
-            pending.length > 0
-              ? `${formatMinutes(pending.reduce((s, c) => s + c.minutes, 0))} a compensar`
-              : "tudo em dia 🎉"
-          }
-          tone={pending.length > 0 ? "indigo" : "slate"}
-          icon={<ArrowLeftRight size={16} />}
-        />
-      </div>
-
-      {/* §7–§14 REGISTRO DE HOJE — Ponto + Assistente de jornada em UM ÚNICO
-          card, imediatamente após os indicadores (§8: bater o ponto é a ação
-          nº1 da Visão geral — fica acima da dobra). Componentes reutilizados
-          no modo embutido (§7: sem duplicar componentes nem lógica; §10/§11:
-          todas as funções do Registro rápido e do Smart Exit preservadas). */}
-      <Card
-        title="Registro de hoje"
-        /* §13 subtítulo contextual pela MESMA fonte central (companyDayContext.label):
-           "Folga a compensar — Calendário", "Feriado — …", "Abono…" etc. */
-        subtitle={todayCtx.label ?? `Jornada regular · base ${formatMinutes(todayCtx.effectiveExpected)}`}
-      >
-        {/* §9 desktop: Ponto | Assistente lado a lado · §14 mobile: empilha
-            (Ponto sempre primeiro), sem overflow horizontal. */}
-        <div className="grid gap-6 lg:grid-cols-2">
-          <section className="min-w-0">
-            <h3 className="mb-3 text-[11px] font-extrabold uppercase tracking-wider text-slate-400">
-              Ponto
-            </h3>
-            <QuickPunch
-              embedded
-              today={t}
-              todayStr={todayStr}
-              settings={settings}
-              dayLabel={todayCtx.type === "regular" ? undefined : todayLabel}
-              onAddEntry={onAddEntry}
-              onUpdateEntry={onUpdateEntry}
-              onDeleteEntry={onDeleteEntry}
-              faltaRegistrada={!!faltaHoje}
-              faltaGate={faltaHojeGate}
-              onRegisterFalta={registerFaltaHoje}
-              onRemoveFalta={removeFaltaHoje}
-            />
-          </section>
-          <section className="min-w-0 lg:border-l lg:border-slate-100 lg:pl-6">
-            <h3 className="mb-3 text-[11px] font-extrabold uppercase tracking-wider text-slate-400">
-              Assistente de jornada
-            </h3>
-            <SmartExit
-              embedded
-              date={todayStr}
-              day={t}
-              settings={settings}
-              comps={compensations}
-              nowMinutes={nowMinutes}
-              onSmartExit={smartExit}
-              onConfirmComps={confirmComps}
-              isToday
-              effectiveExpected={todayCtx.effectiveExpected}
-            />
-          </section>
+        {/* Indicadores — 3º no mobile, 2º no desktop */}
+        <div className="order-3 grid grid-cols-2 gap-2 lg:order-2 lg:grid-cols-4 lg:gap-3">
+          <StatCard
+            compact
+            label="Hoje"
+            value={formatMinutes(t.workedMinutes)}
+            sub={
+              <>
+                {/* §4 rodada HOTFIX: o card HOJE usa a MESMA base efetiva central
+                    do Registro rápido (companyDayContext.effectiveExpected — 0 em
+                    folga/feriado/"folga a compensar"). O antigo fallback
+                    `expected || jornada` engolvia base 0min (0 é falsy → 8h). */}
+                {todayCtx.type === "folga" || todayCtx.type === "trabalho-folga"
+                  ? `${todayLabel} · esperado ${formatMinutes(todayCtx.effectiveExpected)}`
+                  : `base ${formatMinutes(todayCtx.effectiveExpected)}`} ·{" "}
+                <span className={t.balanceMinutes >= 0 ? "text-emerald-600" : "text-rose-600"}>
+                  {t.balanceMinutes >= 0 ? "+" : ""}
+                  {formatMinutes(t.balanceMinutes)}
+                </span>
+              </>
+            }
+            tone={todayStatusTone}
+            icon={<Timer size={16} />}
+          />
+          <StatCard
+            compact
+            label="Saldo do período"
+            value={`${totals.balanceTotal >= 0 ? "+" : ""}${formatMinutes(totals.balanceTotal)}`}
+            sub={totals.balanceTotal >= 0 ? "horas a seu favor (crédito)" : "horas em débito — atenção"}
+            tone={balanceTone}
+            icon={<Wallet size={16} />}
+          />
+          <StatCard
+            compact
+            label="Excedente do período"
+            value={formatMinutes(totals.excessTotal)}
+            sub={`acima de ${formatMinutes(settings.maxDailyMinutes)}/dia · ${totals.trackedDays} dia(s) registrados`}
+            tone={excessTone}
+            icon={<TriangleAlert size={16} />}
+          />
+          <StatCard
+            compact
+            label="Compensações pendentes"
+            value={pending.length}
+            sub={
+              pending.length > 0
+                ? `${formatMinutes(pending.reduce((s, c) => s + c.minutes, 0))} a compensar`
+                : "tudo em dia 🎉"
+            }
+            tone={pending.length > 0 ? "indigo" : "slate"}
+            icon={<ArrowLeftRight size={16} />}
+          />
         </div>
-      </Card>
+
+        {/* §7–§14 REGISTRO DE HOJE — Ponto + Assistente de jornada em UM ÚNICO
+            card. Mobile: sobe para logo após a saudação (order-2). Desktop:
+            permanece depois dos 4 indicadores (lg:order-3). Componentes
+            reutilizados no modo embutido (§7: sem duplicar lógica; §10/§11:
+            todas as funções do Registro rápido e do Smart Exit preservadas). */}
+        <Card
+          compact
+          className="order-2 lg:order-3"
+          title="Registro de hoje"
+          /* §13 subtítulo contextual pela MESMA fonte central (companyDayContext.label):
+             "Folga a compensar — Calendário", "Feriado — …", "Abono…" etc. */
+          subtitle={todayCtx.label ?? `Jornada regular · base ${formatMinutes(todayCtx.effectiveExpected)}`}
+        >
+          {/* §9 desktop: Ponto | Assistente lado a lado · mobile: empilha
+              (Ponto sempre primeiro). items-start evita o Assistente esticar
+              e criar área vazia. Sem overflow horizontal. */}
+          <div className="grid items-start gap-4 lg:grid-cols-2 lg:gap-5">
+            <section className="min-w-0">
+              <h3 className="mb-1.5 text-[11px] font-extrabold uppercase tracking-wider text-slate-400">Ponto</h3>
+              <QuickPunch
+                embedded
+                today={t}
+                todayStr={todayStr}
+                settings={settings}
+                dayLabel={todayCtx.type === "regular" ? undefined : todayLabel}
+                onAddEntry={onAddEntry}
+                onUpdateEntry={onUpdateEntry}
+                onDeleteEntry={onDeleteEntry}
+                faltaRegistrada={!!faltaHoje}
+                faltaGate={faltaHojeGate}
+                onRegisterFalta={registerFaltaHoje}
+                onRemoveFalta={removeFaltaHoje}
+              />
+            </section>
+            <section className="min-w-0 lg:border-l lg:border-slate-100 lg:pl-5">
+              <h3 className="mb-1.5 text-[11px] font-extrabold uppercase tracking-wider text-slate-400">
+                Assistente de jornada
+              </h3>
+              <SmartExit
+                embedded
+                date={todayStr}
+                day={t}
+                settings={settings}
+                comps={compensations}
+                nowMinutes={nowMinutes}
+                onSmartExit={smartExit}
+                onConfirmComps={confirmComps}
+                isToday
+                effectiveExpected={todayCtx.effectiveExpected}
+              />
+            </section>
+          </div>
+        </Card>
+      </div>
 
       {/* §15 BANCO DE HORAS — mesmo conteúdo, agora DEPOIS do Registro de hoje */}
       <HourBankCard
