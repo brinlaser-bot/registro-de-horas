@@ -597,6 +597,8 @@ export default function RegistrosPage() {
               onCreateComp={createComp}
               onCapComp={capComp}
               onRemoveFalta={removeFalta}
+              creditView={dayCreditView(date, entries, compensations, absences, companyCalendars, settings, excessReasons)}
+              onRegisterReason={(d) => setReasonDate(d)}
             />
           ))}
         </div>

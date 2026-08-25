@@ -83,12 +83,13 @@ check("A. base 8h / trabalhado 11h ⇒ regularExtra = 2h · specialExcess = 1h",
 /* ── B. UI não rotula +3h como Saldo regular ─────────────────── */
 check("B. Registros NÃO mostra 'Saldo regular' no dia >10h (usa Hora extra regular)", () => {
   assert.ok(dayCardSrc.includes('label="Hora extra regular"'), "rótulo Hora extra regular");
-  assert.ok(dayCardSrc.includes("showSplit && creditView"), "split só com excedente especial");
-  assert.ok(dayCardSrc.includes("creditView.regularExtra"), "número vem da decomposição central");
+  assert.ok(dayCardSrc.includes("{showSplit ? ("), "split só com excedente especial");
+  assert.ok(dayCardSrc.includes("creditView?.regularExtra"), "número vem da decomposição central");
   assert.ok(
     dayCardSrc.includes('label="Saldo regular"'),
     "Saldo regular permanece nos dias SEM excedente especial",
   );
+  assert.ok(registrosSrc.includes("creditView={dayCreditView("), "Registros passa dayCreditView ao card");
 });
 
 /* ── C. +2h regular e 1h excedente separados ─────────────────── */
@@ -258,6 +259,49 @@ check("O. Registrar falta usa variante âmbar/laranja e fica no bloco das batida
   assert.ok(quickSrc.includes('variant="warning"'), "variante warning (âmbar)");
   assert.ok(srcOf("src/components/ui.tsx").includes("bg-amber-500"), "warning = âmbar");
   assert.ok(quickSrc.includes("Mesmo bloco: chips das batidas"), "mesmo bloco dos chips");
+});
+
+/* ── Prioridade visual do excedente (recolhido + expandido) ── */
+check("P. card expandido 11h ⇒ Hora extra regular +2h (não Saldo regular +3h)", () => {
+  assert.ok(dayCardSrc.includes('label="Hora extra regular"'));
+  assert.ok(dayCardSrc.includes("+{formatMinutes(creditView?.regularExtra ?? 0)} regular"), "recolhido: +2h regular");
+  assert.ok(!dayCardSrc.includes("O excedente deve ser compensado em outro dia"), "texto antigo removido");
+});
+
+check("Q. card expandido mostra excedente separado e restante em destaque", () => {
+  assert.ok(dayCardSrc.includes("⚠ Excedente acima de 10h"));
+  assert.ok(dayCardSrc.includes("Restante a realocar"));
+  assert.ok(dayCardSrc.includes("Original:"));
+});
+
+check("R. card recolhido mostra 1h excedente (ou o restante)", () => {
+  assert.ok(dayCardSrc.includes("{formatMinutes(excessRemaining)} excedente"), "recolhido: ⚠ restante excedente");
+});
+
+check("S. excedente parcialmente utilizado ⇒ recolhido usa somente o restante", () => {
+  const comps: Compensation[] = [{
+    id: 11, sourceDate: "2026-08-24", targetDate: "2026-08-25", minutes: 40,
+    status: "pendente", note: null, kind: "excedente", createdAt: 1,
+  }];
+  const v = dayCreditView("2026-08-24", day11h(), comps, [], both, settings, []);
+  assert.equal(v.excessSpecial, 60);
+  assert.equal(v.freeSpecial, 20, "restante 20min");
+  assert.ok(dayCardSrc.includes("creditView?.freeSpecial"), "recolhido/expandido usam o restante central");
+});
+
+check("T. restante 0 ⇒ status Excedente tratado", () => {
+  assert.ok(dayCardSrc.includes("✓ Excedente tratado") || dayCardSrc.includes("Excedente tratado ✓"));
+  const comps: Compensation[] = [{
+    id: 12, sourceDate: "2026-08-24", targetDate: "2026-08-25", minutes: 60,
+    status: "pendente", note: null, kind: "excedente", createdAt: 1,
+  }];
+  const v = dayCreditView("2026-08-24", day11h(), comps, [], both, settings, []);
+  assert.equal(v.freeSpecial, 0);
+});
+
+check("U. texto antigo 'excedente deve ser compensado em outro dia' não aparece", () => {
+  assert.ok(!dayCardSrc.includes("excedente deve ser compensado em outro dia"));
+  assert.ok(dayCardSrc.includes("Horas acima de 10h precisam ser realocadas"));
 });
 
 console.log(`\nEXCEDENTE REGISTROS + FALTA — OK (${passed} testes)`);

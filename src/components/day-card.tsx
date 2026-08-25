@@ -291,12 +291,13 @@ export function DayCard({
   const balanceTone = regularBalance > 0 ? "text-emerald-600" : regularBalance < 0 ? "text-rose-600" : "text-slate-500";
   /* Dia encerrado acima de 10h: NÃO misturar o excedente especial com o
    * crédito regular. A decomposição vem de dayCreditView (fonte única). */
-  const showSplit = !d.open && !d.empty && (creditView?.excessSpecial ?? d.excessMinutes) > 0;
-  const headerCredit = showSplit && creditView ? creditView.regularExtra : regularBalance;
-  const headerTone =
-    showSplit
-      ? "text-emerald-600"
-      : balanceTone;
+  const excessOriginal = creditView?.excessSpecial ?? d.excessMinutes;
+  const excessAllocated = creditView
+    ? creditView.usedSpecialViaTarget + creditView.usedSpecialViaSource
+    : allocatedHere;
+  const excessRemaining = creditView?.freeSpecial ?? remainingExcess;
+  const showSplit = !d.open && !d.empty && excessOriginal > 0;
+  const excessTreated = showSplit && excessRemaining <= 0;
 
   return (
     <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -358,12 +359,27 @@ export function DayCard({
             )}
           </div>
         </div>
-        <div className="text-right">
+        <div className="shrink-0 text-right">
           <p className="text-lg font-extrabold tabular-nums text-slate-900">{formatMinutes(d.workedMinutes)}</p>
-          <p className={`text-xs font-bold tabular-nums ${balanceTone}`}>
-            {regularBalance >= 0 ? "+" : ""}
-            {formatMinutes(regularBalance)}
-          </p>
+          {showSplit ? (
+            <>
+              <p className="text-xs font-bold tabular-nums text-emerald-600">
+                +{formatMinutes(creditView?.regularExtra ?? 0)} regular
+              </p>
+              {excessTreated ? (
+                <p className="mt-0.5 text-[11px] font-semibold text-emerald-700">✓ Excedente tratado</p>
+              ) : (
+                <p className="mt-0.5 inline-flex items-center justify-end gap-1 text-[11px] font-extrabold text-rose-600">
+                  <TriangleAlert size={11} aria-hidden /> {formatMinutes(excessRemaining)} excedente
+                </p>
+              )}
+            </>
+          ) : (
+            <p className={`text-xs font-bold tabular-nums ${balanceTone}`}>
+              {regularBalance >= 0 ? "+" : ""}
+              {formatMinutes(regularBalance)}
+            </p>
+          )}
         </div>
         {expanded ? <ChevronUp size={18} className="text-slate-400" /> : <ChevronDown size={18} className="text-slate-400" />}
       </button>
@@ -500,13 +516,13 @@ export function DayCard({
               value={formatMinutes(regularExpected)}
               tone="text-slate-500"
             />
-            {showSplit && creditView ? (
+            {showSplit ? (
               <MiniStat
                 label="Hora extra regular"
-                value={`+${formatMinutes(creditView.regularExtra)}`}
+                value={`+${formatMinutes(creditView?.regularExtra ?? 0)}`}
                 tone="text-emerald-600"
                 sub={
-                  creditView.usedRegular > 0
+                  creditView && creditView.usedRegular > 0
                     ? `livre ${formatMinutes(creditView.freeRegular)}`
                     : undefined
                 }
@@ -522,47 +538,50 @@ export function DayCard({
             />
           </div>
 
-          {/* Faixa própria do excedente especial — NÃO mistura com crédito regular. */}
+          {/* Faixa PRIORITÁRIA do excedente especial — restante a realocar em destaque. */}
           {showSplit && (
-            <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5">
-              <TriangleAlert size={16} className="text-rose-500 shrink-0" />
-              <div className="min-w-0 flex-1 text-xs font-medium text-rose-700">
-                <p>
-                  Você possui <b>{formatMinutes(creditView?.excessSpecial ?? d.excessMinutes)}</b> acima
-                  do limite diário de <b>{formatMinutes(settings.maxDailyMinutes)}</b>. Esse excedente
-                  precisa ser registrado e realocado.
+            <div
+              className={`mt-3 flex flex-wrap items-center gap-2 rounded-xl border px-3 py-3 ${
+                excessTreated
+                  ? "border-emerald-200 bg-emerald-50"
+                  : "border-rose-300 bg-rose-50 ring-1 ring-rose-200"
+              }`}
+            >
+              <TriangleAlert
+                size={18}
+                className={`shrink-0 ${excessTreated ? "text-emerald-600" : "text-rose-600"}`}
+              />
+              <div className={`min-w-0 flex-1 text-xs font-medium ${excessTreated ? "text-emerald-800" : "text-rose-800"}`}>
+                <p className="text-[11px] font-extrabold uppercase tracking-wider">
+                  {excessTreated ? "Excedente tratado ✓" : "⚠ Excedente acima de 10h"}
                 </p>
-                <p className="mt-1 font-bold uppercase tracking-wide text-rose-800">
-                  Excedente acima de 10h{" "}
-                  <span className="font-extrabold normal-case tracking-normal">
-                    {formatMinutes(creditView?.excessSpecial ?? d.excessMinutes)} a realocar
+                <div className="mt-1.5 flex flex-wrap items-end gap-x-4 gap-y-1">
+                  <span>
+                    Original: <b>{formatMinutes(excessOriginal)}</b>
                   </span>
-                </p>
+                  {excessAllocated > 0 && (
+                    <span>
+                      Alocado: <b>{formatMinutes(excessAllocated)}</b>
+                    </span>
+                  )}
+                  <span className={excessTreated ? "" : "text-sm font-extrabold text-rose-700"}>
+                    Restante a realocar:{" "}
+                    <b className="tabular-nums">{formatMinutes(excessRemaining)}</b>
+                  </span>
+                </div>
                 {creditView?.reason ? (
-                  <p className="mt-0.5 text-rose-600">Motivo: {excessReasonLabel(creditView.reason)}</p>
-                ) : (
-                  <p className="mt-0.5 font-bold text-amber-700">⚠ Motivo não informado</p>
-                )}
-                {creditView && creditView.usedRegular > 0 && (
-                  <p className="mt-0.5 text-rose-500">
-                    Crédito regular {formatMinutes(creditView.regularExtra)} · destinado{" "}
-                    {formatMinutes(creditView.usedRegular)} · livre {formatMinutes(creditView.freeRegular)}
-                  </p>
-                )}
-                {allocatedHere > 0 && (
-                  <p className="mt-0.5 text-rose-500">
-                    Reserva especial: {formatMinutes(d.excessMinutes)} · {formatMinutes(allocatedHere)} já
-                    alocado{remainingExcess > 0 ? ` · restam ${formatMinutes(remainingExcess)}` : " · realocado ✔"}
-                  </p>
-                )}
+                  <p className="mt-1">Motivo: {excessReasonLabel(creditView.reason)}</p>
+                ) : !excessTreated ? (
+                  <p className="mt-1 font-bold text-amber-700">⚠ Motivo não informado</p>
+                ) : null}
               </div>
-              {!creditView?.reason && onRegisterReason && (
+              {!creditView?.reason && !excessTreated && onRegisterReason && (
                 <Button size="sm" variant="secondary" onClick={() => onRegisterReason(d.date)}>
                   Registrar motivo
                 </Button>
               )}
               <Link href="/compensacoes#excedentes-prioridade">
-                <Button variant="danger" size="sm">
+                <Button variant={excessTreated ? "secondary" : "danger"} size="sm">
                   <ArrowLeftRight size={13} /> Gerenciar excedente
                 </Button>
               </Link>
@@ -763,7 +782,8 @@ export function DayCard({
           {!abonoDay && (
             <p className="mt-3 text-[11px] text-slate-400">
               * "No ponto" é o total que pode ser lançado no sistema da empresa (limitado a{" "}
-              {formatMinutes(settings.maxDailyMinutes)}/dia). O excedente deve ser compensado em outro dia.
+              {formatMinutes(settings.maxDailyMinutes)}/dia). Horas acima de 10h precisam ser realocadas
+              antes do lançamento no sistema oficial.
             </p>
           )}
         </div>
