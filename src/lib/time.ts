@@ -302,6 +302,50 @@ export function validatePunchSequence(entries: TimeEntryLike[]): { ok: boolean; 
   return { ok: true };
 }
 
+/**
+ * Erro CONTEXTUAL de inserção (§28): valida a sequência final do dia com a
+ * nova batida incluída e escolhe a mensagem correta:
+ *
+ * - batida ACRESCENTADA NO FIM (é a última cronológica): a alternância clássica
+ *   se aplica — preserva "Já existe uma entrada aberta…"/"A próxima batida…";
+ * - batida inserida NO MEIO da sequência (existe registro cronologicamente
+ *   posterior a ela): não é "entrada aberta" — a mensagem explica que o
+ *   horário retrocede na linha do tempo e sugere um horário compatível
+ *   (posterior à última batida do dia).
+ *
+ * Retorna null quando a inserção é válida.
+ */
+export function insertPunchError(dayEntries: TimeEntryLike[], added: TimeEntryLike): string | null {
+  const finalList = [...dayEntries.filter((e) => e.id !== added.id), added];
+  const sorted = sortedPunchEntries(finalList);
+  // Primeiro ponto de quebra da alternância (mesma regra de validatePunchSequence)
+  let breakIdx = -1;
+  if (sorted.length > 0 && sorted[0].type !== "entrada") {
+    breakIdx = 0;
+  } else {
+    for (let i = 1; i < sorted.length; i++) {
+      if (sorted[i].type === sorted[i - 1].type) {
+        breakIdx = i;
+        break;
+      }
+    }
+  }
+  if (breakIdx === -1) return null;
+
+  const addedIdx = sorted.findIndex((e) => e.id === added.id);
+  if (addedIdx === sorted.length - 1) {
+    // Acréscimo no fim: mensagens clássicas de alternância (verdadeira entrada aberta)
+    return punchSequenceError(nextPunchType(breakIdx === 0 ? [] : sorted.slice(0, breakIdx)));
+  }
+  // Inserção no MEIO: mensagem contextual com horário compatível
+  const last = sorted[sorted.length - 1];
+  return (
+    "Esse horário criaria uma sequência de batidas inválida. " +
+    "Escolha um horário compatível com os registros existentes. " +
+    `Escolha um horário posterior à ${last.type === "saida" ? "saída" : "entrada"} das ${last.time}.`
+  );
+}
+
 export function nowMinutesLocal(): number {
   const d = new Date();
   return d.getHours() * 60 + d.getMinutes();
@@ -381,7 +425,13 @@ export function plannedExitTime(
     return m >= ls && m <= le;
   });
 
-  let exit = openStart + Math.max(0, targetMinutes - rawClosed);
+  const remaining = Math.max(0, targetMinutes - rawClosed);
+  // §29 META JÁ ATINGIDA: com o trecho aberto já cobrindo a meta, a saída é
+  // AGORA (o início do trecho aberto) — nunca somar almoço artificialmente
+  // nem projetar horário futuro. O almoço só entra quando ainda falta tempo
+  // E o trecho futuro cruza o intervalo do almoço.
+  if (remaining === 0) return clampClock(openStart);
+  let exit = openStart + remaining;
   // Se o almoço será descontado automaticamente e a saída cruza o intervalo, soma o almoço
   if (settings.autoDeductLunch && !hasLunchPunch && firstPunch <= ls && exit > ls && len > 0) {
     exit += len;

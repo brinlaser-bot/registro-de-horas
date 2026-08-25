@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { Ban, Coffee, LogIn, LogOut, Pencil, Timer, Trash2, Zap } from "lucide-react";
 import type { DayResult, WorkSettings } from "@/lib/types";
 import type { EntryType, TimeEntryLike } from "@/lib/time";
-import { formatMinutes, nextPunchType, nowTimeString } from "@/lib/time";
+import { formatMinutes, nextPunchType, nowTimeString, validatePunchSequence } from "@/lib/time";
 import type { FaltaGate } from "@/lib/faltas";
 import { Badge, Button, Card, Input, Modal } from "@/components/ui";
 import { useToast } from "@/components/toast";
@@ -26,7 +26,7 @@ interface Props {
     id: number,
     patch: { time?: string; note?: string | null },
   ) => Promise<{ ok: boolean } | undefined>;
-  onDeleteEntry: (id: number) => Promise<void>;
+  onDeleteEntry: (id: number) => Promise<{ ok: boolean } | undefined>;
   /** §11 Falta de hoje já registrada → a ação vira "Excluir falta". */
   faltaRegistrada?: boolean;
   /** Gate central (canRegisterFalta) de hoje — inválido → toast com o motivo. */
@@ -126,7 +126,10 @@ export function QuickPunch({
 
   const remove = async (id: number) => {
     try {
-      await onDeleteEntry(id);
+      const res = await onDeleteEntry(id);
+      // Bloqueado pela guarda central (compensação concluída) → a página já
+      // exibiu o motivo; não emitir confirmação de remoção.
+      if (!res?.ok) return;
       toast.show("Registro removido.");
     } catch {
       toast.show("Não foi possível remover.", "error");
@@ -144,6 +147,23 @@ export function QuickPunch({
 
   const balanceTone = today.balanceMinutes > 0 ? "emerald" : today.balanceMinutes < 0 ? "rose" : "slate";
   const nextIsEntrada = next === "entrada";
+
+  /* §27 Atalhos Almoço/Volta: simulam a batida pela validação central ANTES
+   * de renderizar — um atalho que criaria sequência inválida (ex.: "Volta
+   * 13:00" depois de uma saída 18:20) NUNCA aparece. */
+  const canLunchShortcut =
+    !nextIsEntrada &&
+    validatePunchSequence([
+      ...today.entries,
+      { id: -1, date: todayStr, time: settings.lunchStart, type: "saida" as const, note: null },
+    ]).ok;
+  const canBackShortcut =
+    nextIsEntrada &&
+    today.entries.length > 0 &&
+    validatePunchSequence([
+      ...today.entries,
+      { id: -2, date: todayStr, time: settings.lunchEnd, type: "entrada" as const, note: null },
+    ]).ok;
 
   return (
     <Card
@@ -220,14 +240,14 @@ export function QuickPunch({
             ) : (
               <Badge tone="indigo">Próximo: saída</Badge>
             )}
-            {/* Almoço/Volta seguem a MESMA alternância: só aparecem quando são
-                o próximo tipo esperado (a validação central rejeitaria). */}
-            {!nextIsEntrada && (
+            {/* §27 Almoço/Volta só renderizam quando a inserção é válida pela
+                validação central de sequência (simulação acima). */}
+            {canLunchShortcut && (
               <Button variant="ghost" size="sm" onClick={() => punch("saida", settings.lunchStart)}>
                 <Coffee size={13} /> Almoço {settings.lunchStart}
               </Button>
             )}
-            {nextIsEntrada && today.entries.length > 0 && (
+            {canBackShortcut && (
               <Button variant="ghost" size="sm" onClick={() => punch("entrada", settings.lunchEnd)}>
                 <Zap size={13} /> Volta {settings.lunchEnd}
               </Button>

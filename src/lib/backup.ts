@@ -1,5 +1,5 @@
 // Import/Export de backup (JSON) com versionamento e validação.
-import type { AppData, Compensation, Falta, TimeEntry, User } from "./types";
+import type { AppData, Compensation, ExcessReason, Falta, TimeEntry, User } from "./types";
 import type { Absence } from "./absences";
 import { normalizeCompanyCalendars, type CompanyCalendars } from "./company-calendar";
 
@@ -22,6 +22,8 @@ export interface BackupPayload {
   companyCalendars?: CompanyCalendars;
   /** Faltas (inclusive previstas). Campo opcional: backups antigos não o têm. */
   faltas?: Falta[];
+  /** Motivos de excedente >10h. Campo opcional: backups antigos não o têm. */
+  excessReasons?: ExcessReason[];
 }
 
 export interface BackupSummary {
@@ -41,6 +43,7 @@ export interface ParsedBackup {
   absences: Absence[];
   companyCalendars?: CompanyCalendars;
   faltas: Falta[];
+  excessReasons: ExcessReason[];
   version: number;
   summary: BackupSummary;
 }
@@ -122,6 +125,40 @@ export function faltasEqual(a: Falta, b: Falta): boolean {
   return a.date === b.date;
 }
 
+const EXCESS_REASON_CODES = new Set([
+  "demanda-urgente",
+  "reuniao-prolongada",
+  "viagem-deslocamento",
+  "atendimento-evento",
+  "necessidade-operacional",
+  "outro",
+]);
+
+/** Validação de motivo de excedente em backups (campo opcional, retrocompatível). */
+function validExcessReason(v: unknown): v is ExcessReason {
+  if (!v || typeof v !== "object") return false;
+  const r = v as Record<string, unknown>;
+  return (
+    isNum(r.id) &&
+    isDate(r.date) &&
+    EXCESS_REASON_CODES.has(r.reason as string) &&
+    (r.customReason == null || isStr(r.customReason)) &&
+    (r.observation == null || isStr(r.observation)) &&
+    isNum(r.createdAt) &&
+    isNum(r.updatedAt)
+  );
+}
+
+/** Comparação para mesclagem de motivos: um motivo por data. */
+export function excessReasonsEqual(a: ExcessReason, b: ExcessReason): boolean {
+  return (
+    a.date === b.date &&
+    a.reason === b.reason &&
+    (a.customReason ?? null) === (b.customReason ?? null) &&
+    (a.observation ?? null) === (b.observation ?? null)
+  );
+}
+
 /** Comparação de conteúdo para mesclagem de ausências. */
 export function absencesEqual(a: Absence, b: Absence): boolean {
   return (
@@ -148,6 +185,7 @@ export function buildBackupPayload(data: AppData): BackupPayload {
     absences: data.absences ?? [],
     companyCalendars: data.companyCalendars,
     faltas: data.faltas ?? [],
+    excessReasons: data.excessReasons ?? [],
   };
 }
 
@@ -206,6 +244,12 @@ export function parseBackup(
     return { ok: false, error: "bad-faltas" };
   }
   const faltas = (rawFaltas as Falta[] | undefined) ?? [];
+  // Retrocompatibilidade: backups antigos não possuem "excessReasons" → [].
+  const rawReasons = obj.excessReasons;
+  if (rawReasons !== undefined && (!Array.isArray(rawReasons) || !rawReasons.every(validExcessReason))) {
+    return { ok: false, error: "bad-excess-reasons" };
+  }
+  const excessReasons = (rawReasons as ExcessReason[] | undefined) ?? [];
 
   const allDates = [
     ...entries.map((e) => e.date),
@@ -224,7 +268,7 @@ export function parseBackup(
     periodTo,
   };
 
-  return { ok: true, backup: { user, entries, compensations, absences, companyCalendars, faltas, version, summary } };
+  return { ok: true, backup: { user, entries, compensations, absences, companyCalendars, faltas, excessReasons, version, summary } };
 }
 
 /* ──────────────────────────────────────────────────────────

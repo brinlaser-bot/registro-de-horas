@@ -3,10 +3,11 @@
 // Store client-side com persistência em localStorage.
 // Uso pessoal: todos os dados ficam apenas no navegador.
 import { useEffect, useState, useSyncExternalStore } from "react";
-import { computeDay, formatMinutes, FUTURE_DATE_ERROR, isFutureDate, todayString, validatePunchSequence, type EntryType } from "./time";
+import { computeDay, formatMinutes, FUTURE_DATE_ERROR, insertPunchError, isFutureDate, todayString, type EntryType } from "./time";
 import { buildSeedData, DEFAULT_USER } from "./seed-data";
-import { absencesEqual, compsEqual, entriesEqual, mergeByIdAndContent } from "./backup";
-import { canCompleteComp, concludedForSource, extraCapacityForDate, usesHourExtra, acordoLinkedComps } from "./debt";
+import { absencesEqual, compsEqual, entriesEqual, excessReasonsEqual, mergeByIdAndContent } from "./backup";
+import { actualExtraForDate, allocatedForSource, canCompleteComp, concludedForSource, extraCapacityForDate, kindOf, usesHourExtra, acordoLinkedComps } from "./debt";
+import { canAllocateExcess, planRealizedCreditUse } from "./hour-bank";
 import { abonoDayDecision, abonoInCycle, validateAbsence, type Absence, type AbsenceSplit } from "./absences";
 import { canRegisterFalta } from "./faltas";
 import { sameAnnualCycle } from "./periods";
@@ -46,6 +47,8 @@ import type {
   Compensation,
   CompWithDays,
   DayResult,
+  ExcessReason,
+  ExcessReasonCode,
   Falta,
   TimeEntry,
   User,
@@ -61,6 +64,7 @@ const pristine: AppData = {
   absences: [],
   companyCalendars: undefined,
   faltas: [],
+  excessReasons: [],
 };
 
 let data: AppData = pristine;
@@ -103,7 +107,10 @@ function load() {
           normalizeCompanyCalendars(legacy.companyCalendar);
         // Retrocompatibilidade: dados antigos podem não ter "faltas".
         const faltas = Array.isArray(parsed.faltas) ? parsed.faltas : [];
-        data = { user: parsed.user, entries: parsed.entries, compensations: parsed.compensations, absences, companyCalendars, faltas };
+        // Retrocompatibilidade (§39): dados antigos não têm "excessReasons" —
+        // o excedente segue derivado das batidas; só o motivo fica pendente.
+        const excessReasons = Array.isArray(parsed.excessReasons) ? parsed.excessReasons : [];
+        data = { user: parsed.user, entries: parsed.entries, compensations: parsed.compensations, absences, companyCalendars, faltas, excessReasons };
         emit();
         return;
       }
@@ -146,8 +153,11 @@ const nextId = (rows: { id: number }[]) =>
 const CONCLUDED_COMP_MSG =
   "Este horário já sustenta uma compensação concluída. A alteração reduziria as horas utilizadas e não pode ser aplicada automaticamente.";
 
+const CONCLUDED_TARGET_MSG =
+  "Este registro sustenta compensações já concluídas. A alteração reduziria as horas utilizadas e não pode ser aplicada.";
+
 /**
- * GuARDA DE HISTÓRICO CONCLUÍDO (edição de batidas): o dia `date` pode ser
+ * GUARDA DE HISTÓRICO CONCLUÍDO — LADO DA ORIGEM: o dia `date` pode ser
  * ORIGEM de compensações já CONCLUÍDAS, sustentadas pelas horas do dia. Se a
  * edição reduzir a dívida do dia (excedente/déficit/acordo pela resolução
  * central) abaixo do total já utilizado por compensações concluídas, a
@@ -167,6 +177,34 @@ function concludedCompGuard(d: AppData, date: string): ActionResult | null {
     }
   }
   return null;
+}
+
+/**
+ * GUARDA CENTRAL DE CAPACIDADE CONSUMIDA — LADO DO DESTINO (§23/§24): o dia
+ * `date` pode ser o DESTINO onde compensações CONCLUÍDAS realizaram hora
+ * extra. Antes de editar/excluir batidas, simula-se o resultado final do dia:
+ * se a NOVA capacidade real (hora extra existente: trabalhado − base efetiva)
+ * ficar abaixo do total já CONSUMIDO por concluídas nesse dia, BLOQUEIA.
+ * É quantitativa — edições seguras (que mantêm ou aumentam a capacidade)
+ * continuam permitidas (§26).
+ */
+function concludedTargetGuard(d: AppData, date: string): ActionResult | null {
+  const consumed = d.compensations
+    .filter((c) => c.targetDate === date && c.status === "concluida" && usesHourExtra(kindOf(c)))
+    .reduce((s, c) => s + c.minutes, 0);
+  if (consumed <= 0) return null;
+  const capacity = actualExtraForDate(date, d.entries, settingsOf(d.user), {
+    companyCalendars: d.companyCalendars,
+  });
+  if (consumed > capacity) {
+    return { ok: false, code: "concluded-history", error: CONCLUDED_TARGET_MSG };
+  }
+  return null;
+}
+
+/** Roda as duas guardas (origem + destino) para um dia, no estado simulado. */
+function concludedGuardsFor(d: AppData, date: string): ActionResult | null {
+  return concludedCompGuard(d, date) ?? concludedTargetGuard(d, date);
 }
 
 export const actions = {
@@ -196,9 +234,14 @@ export const actions = {
         return d;
       }
       const created: TimeEntry = { id: nextId(d.entries), ...p, source: p.source ?? "live" };
-      const seq = validatePunchSequence([...d.entries.filter((e) => e.date === p.date), created]);
-      if (!seq.ok) {
-        result = { ok: false, code: "sequence", error: seq.error };
+      // §28: erro CONTEXTUAL — alternância clássica no fim do dia; mensagem
+      // específica para horário cronologicamente inválido NO MEIO da sequência.
+      const seqError = insertPunchError(
+        d.entries.filter((e) => e.date === p.date),
+        created,
+      );
+      if (seqError) {
+        result = { ok: false, code: "sequence", error: seqError };
         return d;
       }
       return { ...d, entries: [...d.entries, created] };
@@ -230,21 +273,22 @@ export const actions = {
         return d;
       }
       const next = { ...target, ...patch, edited: true as const };
-      // Sequência cronológica final válida em TODOS os dias afetados
+      // Sequência cronológica final válida em TODOS os dias afetados (§28:
+      // mensagem contextual para edição que retrocede na linha do tempo)
       const affectedDates = Array.from(new Set([target.date, next.date]));
       for (const date of affectedDates) {
-        const finalList = d.entries.filter((e) => e.date === date && e.id !== id);
-        if (next.date === date) finalList.push(next);
-        const seq = validatePunchSequence(finalList);
-        if (!seq.ok) {
-          result = { ok: false, code: "sequence", error: seq.error };
+        const others = d.entries.filter((e) => e.date === date && e.id !== id);
+        const seqError = next.date === date ? insertPunchError(others, next) : null;
+        if (seqError) {
+          result = { ok: false, code: "sequence", error: seqError };
           return d;
         }
       }
-      // Guarda de histórico: compensação concluída sustentada pelo dia de origem
+      // Guardas de histórico concluído: ORIGEM (dívida sustentada pelo dia) e
+      // DESTINO (§23/24 — capacidade real consumida por concluídas no dia)
       const sim = { ...d, entries: d.entries.map((e) => (e.id === id ? next : e)) };
       for (const date of affectedDates) {
-        const guard = concludedCompGuard(sim, date);
+        const guard = concludedGuardsFor(sim, date);
         if (guard) {
           result = guard;
           return d;
@@ -255,8 +299,28 @@ export const actions = {
     return result;
   },
 
-  deleteEntry(id: number) {
-    mutate((d) => ({ ...d, entries: d.entries.filter((e) => e.id !== id) }));
+  /**
+   * Exclui uma batida. §25 MESMA GUARDA CENTRAL do updateEntry (não duplica
+   * regra): simula a exclusão e bloqueia quando o dia sustenta compensação
+   * concluída — pela ORIGEM (dívida) ou pelo DESTINO (capacidade consumida).
+   */
+  deleteEntry(id: number): ActionResult {
+    let result: ActionResult = OK;
+    mutate((d) => {
+      const target = d.entries.find((e) => e.id === id);
+      if (!target) {
+        result = { ok: false, code: "not-found", error: "Registro não encontrado." };
+        return d;
+      }
+      const sim = { ...d, entries: d.entries.filter((e) => e.id !== id) };
+      const guard = concludedGuardsFor(sim, target.date);
+      if (guard) {
+        result = guard;
+        return d; // bloqueia: batida sustenta compensação concluída
+      }
+      return sim;
+    });
+    return result;
   },
 
   /**
@@ -285,6 +349,14 @@ export const actions = {
       if (!cycleCheck.ok) {
         result = cycleCheck;
         return d;
+      }
+      // §10.1: destinar a reserva especial (>10h) exige MOTIVO registrado.
+      if (kind === "excedente" && p.status !== "cancelada") {
+        const gate = canAllocateExcess(p.sourceDate, d.entries, settingsOf(d.user), d.excessReasons);
+        if (!gate.ok) {
+          result = { ok: false, code: "invalid", error: gate.error };
+          return d;
+        }
       }
       // Regra central: hora extra nunca ultrapassa a capacidade real do dia de destino
       // (déficit, acordo E calendário disputam a mesma hora extra — anti dupla quitação)
@@ -346,6 +418,14 @@ export const actions = {
       if (!cycleCheck.ok) {
         result = cycleCheck;
         return d;
+      }
+      // §10.1: compensação de excedente ativa exige o MOTIVO da reserva especial.
+      if ((next.kind ?? "excedente") === "excedente" && next.status !== "cancelada") {
+        const gate = canAllocateExcess(next.sourceDate, d.entries, settingsOf(d.user), d.excessReasons);
+        if (!gate.ok) {
+          result = { ok: false, code: "invalid", error: gate.error };
+          return d;
+        }
       }
       const kindChanged = (next.kind ?? "excedente") !== (target.kind ?? "excedente");
       const reactivated =
@@ -673,6 +753,333 @@ export const actions = {
     });
   },
 
+  /**
+   * MOTIVO DO EXCEDENTE >10h (§10/§11): um registro por data (upsert).
+   * Obrigatório escolher o motivo; "Outro" exige o texto. Observação opcional.
+   * Persistir o motivo NUNCA altera batidas nem valores — é só o registro
+   * histórico que habilita a destinação da reserva especial.
+   */
+  setExcessReason(p: {
+    date: string;
+    reason: ExcessReasonCode;
+    customReason?: string | null;
+    observation?: string | null;
+  }): ActionResult {
+    let result: ActionResult = OK;
+    mutate((d) => {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(p.date)) {
+        result = { ok: false, code: "invalid", error: "Data inválida." };
+        return d;
+      }
+      const custom = (p.customReason ?? "").trim();
+      if (p.reason === "outro" && !custom) {
+        result = { ok: false, code: "invalid", error: "Informe o motivo." };
+        return d;
+      }
+      const list = d.excessReasons ?? [];
+      const existing = list.find((r) => r.date === p.date);
+      const observation = (p.observation ?? "").trim() || null;
+      const excessReasons = existing
+        ? list.map((r) =>
+            r.date === p.date
+              ? { ...r, reason: p.reason, customReason: custom || null, observation, updatedAt: Date.now() }
+              : r,
+          )
+        : [
+            ...list,
+            {
+              id: nextId(list),
+              date: p.date,
+              reason: p.reason,
+              customReason: custom || null,
+              observation,
+              createdAt: Date.now(),
+              updatedAt: Date.now(),
+            },
+          ];
+      return { ...d, excessReasons };
+    });
+    return result;
+  },
+
+  /**
+   * COMPENSAÇÃO IMEDIATA COM CRÉDITO JÁ REALIZADO (§6/§31): vincula minutos
+   * de uma dívida (origem) a um dia JÁ ENCERRADO com crédito livre (destino).
+   * A compensação nasce CONCLUÍDA — sem etapa artificial Pendente→Meta→Confirmar.
+   * NUNCA altera batidas nem o saldo realizado: é só o VÍNCULO contábil.
+   * Validado: anti-sobre-destinação da dívida, ciclo anual, destino encerrado,
+   * capacidade livre (crédito regular + reserva especial) e MOTIVO quando a
+   * parcela consome o excedente acima de 10h.
+   */
+  useRealizedCredit(p: {
+    sourceDate: string;
+    targetDate: string;
+    minutes: number;
+    kind?: CompKind;
+    note?: string | null;
+  }): ActionResult {
+    let result: ActionResult = OK;
+    mutate((d) => {
+      const kind = p.kind ?? "deficit";
+      if (!usesHourExtra(kind)) {
+        result = { ok: false, code: "invalid", error: "Tipo de dívida inválido para quitação por crédito realizado." };
+        return d;
+      }
+      if (!Number.isFinite(p.minutes) || p.minutes <= 0) {
+        result = { ok: false, code: "invalid", error: "Quantidade de minutos inválida." };
+        return d;
+      }
+      const cycleCheck = validateCompCycle(p.sourceDate, p.targetDate);
+      if (!cycleCheck.ok) {
+        result = cycleCheck;
+        return d;
+      }
+      if (p.targetDate > todayString()) {
+        result = { ok: false, code: "invalid", error: "Só é possível usar crédito de dias já realizados." };
+        return d;
+      }
+      // Anti-sobre-destinação: a dívida de origem não pode receber além do total
+      const debt = d.compensations
+        .filter((c) => c.sourceDate === p.sourceDate && kindOf(c) === kind && c.status !== "cancelada")
+        .reduce((s, c) => s + c.minutes, 0);
+      const cctxSrc = companyDayContext(p.sourceDate, d.entries, d.absences, d.companyCalendars, settingsOf(d.user));
+      const totalDebt =
+        // cobertura por saída antecipada reduz o déficit comum (mesma regra central)
+        kind === "deficit"
+          ? Math.max(
+              0,
+              cctxSrc.adjustedDeficit -
+                d.compensations
+                  .filter((c) => c.targetDate === p.sourceDate && kindOf(c) === "excedente" && c.status !== "cancelada")
+                  .reduce((s, c) => s + c.minutes, 0),
+            )
+          : kind === "acordo"
+            ? cctxSrc.ctx.acordoMinutes
+            : cctxSrc.calendarioACompensar;
+      if (debt + p.minutes > totalDebt) {
+        result = {
+          ok: false,
+          code: "invalid",
+          error: `Esta dívida já está destinada em ${formatMinutes(debt)} de ${formatMinutes(totalDebt)} — não é possível vincular mais ${formatMinutes(p.minutes)}.`,
+        };
+        return d;
+      }
+      // Destino: dia REALIZADO e encerrado (crédito consolidado — §30)
+      const targetDay = computeDay(
+        d.entries.filter((e) => e.date === p.targetDate),
+        settingsOf(d.user),
+      );
+      if (targetDay.empty || targetDay.open) {
+        result = { ok: false, code: "invalid", error: "O dia de origem do crédito precisa estar encerrado." };
+        return d;
+      }
+      // Capacidade livre = crédito regular livre + reserva especial livre (anti-reuso).
+      // §5/§8 atribuição POR PORÇÃO: parcelas marcadas "especial" consomem a
+      // RESERVA; as demais gastam primeiro o regular e só o excedente vai à reserva.
+      const targetComps = d.compensations.filter(
+        (c) => c.targetDate === p.targetDate && usesHourExtra(kindOf(c)) && c.status !== "cancelada",
+      );
+      const markedSpecial = targetComps
+        .filter((c) => c.portion === "especial")
+        .reduce((s, c) => s + c.minutes, 0);
+      const unmarkedUsed = targetComps
+        .filter((c) => c.portion !== "especial")
+        .reduce((s, c) => s + c.minutes, 0);
+      const usedTarget = markedSpecial + unmarkedUsed;
+      const capacityTotal = actualExtraForDate(p.targetDate, d.entries, settingsOf(d.user), {
+        companyCalendars: d.companyCalendars,
+      });
+      if (p.minutes > Math.max(0, capacityTotal - usedTarget)) {
+        result = {
+          ok: false,
+          code: "over-capacity",
+          error: `Este dia tem apenas ${formatMinutes(Math.max(0, capacityTotal - usedTarget))} de crédito livre.`,
+        };
+        return d;
+      }
+      const targetBase = companyDayContext(p.targetDate, d.entries, d.absences, d.companyCalendars, settingsOf(d.user)).effectiveExpected;
+      const regularExtra = Math.min(capacityTotal, Math.max(0, settingsOf(d.user).maxDailyMinutes - targetBase));
+      const freeRegular = Math.max(0, regularExtra - Math.min(unmarkedUsed, regularExtra));
+      // Divisão exata: a parte até o crédito regular livre é "regular"; o que
+      // passar consome a RESERVA ESPECIAL (>10h) — §10.1 exige MOTIVO.
+      const regularPart = Math.min(p.minutes, freeRegular);
+      const especialPart = p.minutes - regularPart;
+      if (especialPart > 0) {
+        const gate = canAllocateExcess(p.targetDate, d.entries, settingsOf(d.user), d.excessReasons);
+        if (!gate.ok) {
+          result = { ok: false, code: "invalid", error: gate.error };
+          return d;
+        }
+        const usedSpecialViaSource = allocatedForSource(d.compensations, p.targetDate, "excedente");
+        const freeSpecial = Math.max(
+          0,
+          targetDay.excessMinutes - markedSpecial - Math.max(0, unmarkedUsed - regularExtra) - usedSpecialViaSource,
+        );
+        if (especialPart > freeSpecial) {
+          result = {
+            ok: false,
+            code: "over-capacity",
+            error: `Este dia tem apenas ${formatMinutes(freeSpecial)} de reserva acima de 10h livre.`,
+          };
+          return d;
+        }
+      }
+      // Parcela pode se dividir em duas (regular + especial) — ambas CONCLUÍDAS.
+      const base = nextId(d.compensations);
+      const mk = (minutes: number, portion: "regular" | "especial", i: number): Compensation => ({
+        id: base + i,
+        sourceDate: p.sourceDate,
+        targetDate: p.targetDate,
+        minutes,
+        status: "concluida", // imediata — sem etapa artificial (§31)
+        note:
+          p.note ??
+          (portion === "especial" ? "Usado excedente acima de 10h (prioritário)" : "Usadas horas positivas realizadas"),
+        kind,
+        portion,
+        createdAt: Date.now() + i,
+      });
+      const created: Compensation[] = [];
+      if (regularPart > 0) created.push(mk(regularPart, "regular", 0));
+      if (especialPart > 0) created.push(mk(especialPart, "especial", created.length));
+      return { ...d, compensations: [...d.compensations, ...created] };
+    });
+    return result;
+  },
+
+  /**
+   * AÇÃO AUTOMÁTICA/PRIORITÁRIA (§8): aplica o crédito realizado disponível
+   * no déficit de `sourceDate`, PRIORIZANDO a reserva especial (>10h) com
+   * motivo e depois o crédito regular — via o plano central (planRealizedCreditUse).
+   * Pode aplicar PARCIAL (§7): não exige programar o restante.
+   */
+  useRealizedCreditForDeficit(sourceDate: string): ActionResult {
+    let result: ActionResult = OK;
+    mutate((d) => {
+      const settings = settingsOf(d.user);
+      const cctxSrc = companyDayContext(sourceDate, d.entries, d.absences, d.companyCalendars, settings);
+      const coveredByEarly = d.compensations
+        .filter((c) => c.targetDate === sourceDate && kindOf(c) === "excedente" && c.status !== "cancelada")
+        .reduce((s, c) => s + c.minutes, 0);
+      const debtTotal = cctxSrc.ctx.day.open ? 0 : Math.max(0, cctxSrc.adjustedDeficit - coveredByEarly);
+      if (debtTotal <= 0) {
+        result = { ok: false, code: "invalid", error: "Este dia não possui déficit em aberto." };
+        return d;
+      }
+      const allocated = d.compensations
+        .filter((c) => c.sourceDate === sourceDate && kindOf(c) === "deficit" && c.status !== "cancelada")
+        .reduce((s, c) => s + c.minutes, 0);
+      const toUse = Math.max(0, debtTotal - allocated);
+      if (toUse <= 0) {
+        result = {
+          ok: false,
+          code: "invalid",
+          error: "Este déficit já está integralmente destinado (concluído ou planejado).",
+        };
+        return d;
+      }
+      const plan = planRealizedCreditUse(
+        sourceDate,
+        toUse,
+        d.entries,
+        d.compensations,
+        d.absences,
+        d.companyCalendars,
+        settings,
+        d.excessReasons,
+        todayString(),
+      );
+      if (!plan.ok) {
+        result = { ok: false, code: "invalid", error: plan.error };
+        return d;
+      }
+      const base = nextId(d.compensations);
+      const created: Compensation[] = plan.parcels.map((p, i) => ({
+        id: base + i,
+        sourceDate: p.sourceDate,
+        targetDate: p.targetDate,
+        minutes: p.minutes,
+        status: "concluida",
+        note: p.portion === "especial" ? "Usado excedente acima de 10h (prioritário)" : "Usadas horas positivas realizadas",
+        kind: "deficit",
+        portion: p.portion, // atribuição exata da reserva especial (§5/§8)
+        createdAt: Date.now() + i,
+      }));
+      const usedTotal = plan.appliedMinutes;
+      result = {
+        ok: true,
+        warning:
+          usedTotal >= toUse
+            ? `Déficit quitado: ${formatMinutes(usedTotal)} vinculados de crédito já realizado.`
+            : `Aplicação parcial: ${formatMinutes(usedTotal)} vinculados; restam ${formatMinutes(toUse - usedTotal)} sem programação.`,
+      };
+      return { ...d, compensations: [...d.compensations, ...created] };
+    });
+    return result;
+  },
+
+  /**
+   * REGISTRAR PARCIAL (§16): confirma SOMENTE a parte já realizada de uma
+   * parcela futura por hora extra (dia de destino hoje ou passado). A parte
+   * realizada vira uma parcela CONCLUÍDA; a original permanece pendente com o
+   * RESTANTE — o estado consolidado da obrigação é Parcial (nunca "Concluir
+   * parcial"). Sem realização, nada é alterado.
+   */
+  registerPartialComp(id: number): ActionResult {
+    let result: ActionResult = OK;
+    mutate((d) => {
+      const target = d.compensations.find((c) => c.id === id);
+      if (!target) {
+        result = { ok: false, code: "not-found", error: "Compensação não encontrada." };
+        return d;
+      }
+      const kind = kindOf(target);
+      if (target.status !== "pendente" || !usesHourExtra(kind)) {
+        result = { ok: false, code: "invalid", error: "Somente parcelas pendentes de hora extra aceitam registrar parcial." };
+        return d;
+      }
+      if (target.targetDate > todayString()) {
+        result = { ok: false, code: "invalid", error: "A data da compensação ainda não chegou." };
+        return d;
+      }
+      const actual = actualExtraForDate(target.targetDate, d.entries, settingsOf(d.user), {
+        companyCalendars: d.companyCalendars,
+      });
+      const committed = d.compensations
+        .filter(
+          (c) =>
+            c.id !== id &&
+            c.targetDate === target.targetDate &&
+            c.status === "concluida" &&
+            usesHourExtra(kindOf(c)),
+        )
+        .reduce((s, c) => s + c.minutes, 0);
+      const realized = Math.min(Math.max(0, actual - committed), target.minutes);
+      if (realized <= 0) {
+        result = { ok: false, code: "invalid", error: "Ainda não há realização parcial a registrar nesta data." };
+        return d;
+      }
+      const completed: Compensation = {
+        id: nextId(d.compensations),
+        sourceDate: target.sourceDate,
+        targetDate: target.targetDate,
+        minutes: realized,
+        status: "concluida",
+        note: target.note,
+        kind,
+        createdAt: Date.now(),
+      };
+      return {
+        ...d,
+        compensations: [
+          ...d.compensations.map((c) => (c.id === id ? { ...c, minutes: c.minutes - realized } : c)),
+          completed,
+        ],
+      };
+    });
+    return result;
+  },
+
   updateUser(patch: Partial<User>) {
     mutate((d) => ({ ...d, user: { ...d.user, ...patch } }));
   },
@@ -682,9 +1089,9 @@ export const actions = {
     mutate(() => buildSeedData());
   },
 
-  /** Apaga registros e compensações (mantém o perfil/jornada). */
+  /** Apaga registros, compensações e motivos de excedente (mantém o perfil/jornada). */
   clearAll() {
-    mutate((d) => ({ ...d, entries: [], compensations: [] }));
+    mutate((d) => ({ ...d, entries: [], compensations: [], excessReasons: [] }));
   },
 
   /** Substitui integralmente os dados pelos do backup. */
@@ -695,6 +1102,7 @@ export const actions = {
     absences?: Absence[];
     companyCalendars?: CompanyCalendars;
     faltas?: Falta[];
+    excessReasons?: ExcessReason[];
   }) {
     mutate(() => ({
       user: p.user,
@@ -703,6 +1111,7 @@ export const actions = {
       absences: p.absences ?? [],
       companyCalendars: p.companyCalendars,
       faltas: p.faltas ?? [],
+      excessReasons: p.excessReasons ?? [],
     }));
   },
 
@@ -710,10 +1119,16 @@ export const actions = {
    * Mescla o backup com os dados atuais, preservando eventos distintos.
    * Deduplicação segura via ID + conteúdo completo (nunca apenas dias/minutos).
    */
-  mergeBackup(p: { entries: TimeEntry[]; compensations: Compensation[]; absences?: Absence[]; companyCalendars?: CompanyCalendars; faltas?: Falta[] }) {
+  mergeBackup(p: { entries: TimeEntry[]; compensations: Compensation[]; absences?: Absence[]; companyCalendars?: CompanyCalendars; faltas?: Falta[]; excessReasons?: ExcessReason[] }) {
     mutate((d) => {
       const entryMerge = mergeByIdAndContent(d.entries, p.entries, entriesEqual);
       const compMerge = mergeByIdAndContent(d.compensations, p.compensations, compsEqual);
+      // Motivos de excedente: mesclagem por ID + conteúdo completo (seguro).
+      const reasonMerge = mergeByIdAndContent(
+        d.excessReasons ?? [],
+        p.excessReasons ?? [],
+        excessReasonsEqual,
+      );
       // Eventos divididos no fechamento anual permanecem independentes (sem recombinar)
       const absenceMerge = mergeByIdAndContent(
         d.absences,
@@ -745,6 +1160,7 @@ export const actions = {
         absences: absenceMerge.merged,
         companyCalendars: mergedCalendars.length > 0 ? mergedCalendars : undefined,
         faltas: faltaMerge,
+        excessReasons: reasonMerge.merged,
       };
     });
   },

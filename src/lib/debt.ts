@@ -128,6 +128,7 @@ export function buildDebtDays(
     const push = (kind: CompKind, debtMinutes: number) => {
       if (debtMinutes <= 0) return;
       const allocated = allocatedForSource(comps, date, kind);
+      const concluded = concludedForSource(comps, date, kind);
       out.push({
         date,
         kind,
@@ -136,8 +137,10 @@ export function buildDebtDays(
         debtMinutes,
         allocatedMinutes: Math.min(allocated, debtMinutes),
         pendingMinutes: pendingForSource(comps, date, kind),
-        concludedMinutes: concludedForSource(comps, date, kind),
+        concludedMinutes: concluded,
         remainingMinutes: Math.max(0, debtMinutes - allocated),
+        // EM ABERTO real: planejado NÃO quita — só o concluído abate.
+        openMinutes: Math.max(0, debtMinutes - concluded),
       });
     };
 
@@ -403,7 +406,7 @@ export function actualExtraForDate(
 
 export interface CompletionCheck {
   ok: boolean;
-  reason?: "future-date" | "insufficient-extra";
+  reason?: "future-date" | "insufficient-extra" | "day-open";
   error?: string;
   /** Hora extra real no dia de destino. */
   actualExtra?: number;
@@ -437,6 +440,21 @@ export function canCompleteComp(
       ok: false,
       reason: "future-date",
       error: `Aguardando realização da hora extra em ${formatDateBR(comp.targetDate)}.`,
+    };
+  }
+
+  // §30 CONFIRMAR QUITAÇÃO somente com jornada CONSOLIDADA: com entrada ainda
+  // aberta no dia de destino, a capacidade está provisória — horas ainda
+  // correndo não podem concluir compensação (mostrar progresso, não quitar).
+  const targetDay = computeDay(
+    entries.filter((e) => e.date === comp.targetDate),
+    settings,
+  );
+  if (targetDay.open) {
+    return {
+      ok: false,
+      reason: "day-open",
+      error: "A jornada do dia ainda está em andamento — registre a saída para confirmar a quitação.",
     };
   }
 

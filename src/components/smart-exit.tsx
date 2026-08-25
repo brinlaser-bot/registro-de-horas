@@ -230,10 +230,19 @@ export function SmartExit({
     </div>
   );
 
+  /* §29 Meta já atingida com entrada aberta: a saída sugerida é AGORA — nunca
+   * um horário futuro artificial (ex.: 21:00 depois de nova entrada às 20:00. */
+  const metaIsNow =
+    goalReached && plan.plannedExit !== null && toMinutes(plan.plannedExit) <= nowMinutes;
+
   const message = goalReached
     ? plan.kind === "extra"
-      ? "Meta de compensação atingida ✓"
-      : "Meta da jornada atingida — você já pode sair."
+      ? day.open
+        ? "Meta de compensação provisoriamente atingida — registre a saída para confirmar a quitação."
+        : "Meta de compensação atingida ✓"
+      : metaIsNow
+        ? "Meta atingida — você já pode registrar a saída."
+        : "Meta da jornada atingida — você já pode sair."
     : plan.kind === "earlier"
       ? `Você tem ${formatMinutes(plan.earlyMinutes)} para compensar hoje. Saída planejada: ${plan.plannedExit}.`
       : plan.kind === "extra"
@@ -258,10 +267,10 @@ export function SmartExit({
           </div>
           <div>
             <p className="text-2xl font-extrabold tabular-nums tracking-tight text-slate-900">
-              {plan.plannedExit}
+              {metaIsNow ? "Agora" : plan.plannedExit}
             </p>
             <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-              saída planejada
+              {metaIsNow ? "saída sugerida" : "saída planejada"}
             </p>
           </div>
         </div>
@@ -333,9 +342,11 @@ export function SmartExit({
           )}
         </div>
 
-        {/* Ações — nunca registrar hora futura nem oferecer botão com jornada encerrada */}
+        {/* Ações — nunca registrar hora futura nem oferecer botão com jornada encerrada.
+            §30: "Confirmar quitação" SOMENTE com jornada consolidada (sem
+            entrada aberta) — horas ainda correndo não concluem compensação. */}
         <div className="flex flex-col gap-2">
-          {goalReached && plan.kind === "extra" && onConfirmComps && deficitComps.length > 0 && (
+          {goalReached && plan.kind === "extra" && onConfirmComps && deficitComps.length > 0 && !day.open && (
             <Button size="lg" onClick={confirmSettlement} loading={confirming}>
               <CheckCircle2 size={17} /> Confirmar quitação
             </Button>

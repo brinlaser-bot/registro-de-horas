@@ -307,7 +307,14 @@ check("P. edição s 12:30 → 07:30 (sequência final inválida) ⇒ rejeitada,
   const res = actions.updateEntry(saida.id, { time: "07:30" });
   assert.equal(res.ok, false);
   assert.equal(res.code, "sequence");
-  assert.equal(res.error, "A próxima batida deve ser uma entrada.");
+  // §28 (rodada Banco de Horas): edição que RETROCEDE na linha do tempo
+  // (saída antes da entrada) é uma inserção inválida NO MEIO — mensagem
+  // contextual com sugestão de horário compatível; as mensagens clássicas
+  // ficam para a verdadeira entrada aberta (teste K, preservado).
+  assert.equal(
+    res.error,
+    "Esse horário criaria uma sequência de batidas inválida. Escolha um horário compatível com os registros existentes. Escolha um horário posterior à entrada das 08:00.",
+  );
   assert.equal(getAppData().entries.find((e) => e.id === saida.id)!.time, "12:30", "original intacto");
 });
 

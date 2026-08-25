@@ -12,9 +12,10 @@ import {
   TriangleAlert,
   Wallet,
 } from "lucide-react";
-import { actions, enrichComp, settingsOf, useAppData, useIsClient } from "@/lib/store";
+import { actions, enrichComp, getAppData, settingsOf, useAppData, useIsClient } from "@/lib/store";
 import {
   addDays,
+  computeDay,
   expectedMinutesOf,
   formatDateShortBR,
   formatMinutes,
@@ -37,6 +38,9 @@ import {
 } from "@/lib/periods";
 import { activeAcordos, canCompleteComp, extraCapacityForDate, kindOf, usesHourExtra } from "@/lib/debt";
 import { canRegisterFalta, dayBalanceContribution, faltaConfirmText, faltaOnDate } from "@/lib/faltas";
+import { excessReasonOnDate } from "@/lib/hour-bank";
+import { HourBankCard } from "@/components/hour-bank-card";
+import { ExcessReasonModal } from "@/components/excess-reason-modal";
 import type { CompKind, DayResult, DaySummary } from "@/lib/types";
 import { Badge, Button, Card, EmptyState, Skeleton, StatCard } from "@/components/ui";
 import { QuickPunch } from "@/components/quick-punch";
@@ -63,12 +67,15 @@ function toSummary(d: DayResult, date?: string): DaySummary {
 export default function DashboardPage() {
   const toast = useToast();
   const mounted = useIsClient();
-  const { user, entries, compensations, absences, companyCalendars, faltas } = useAppData();
+  const { user, entries, compensations, absences, companyCalendars, faltas, excessReasons } = useAppData();
   const settings = settingsOf(user);
   const todayStr = todayString();
   const period = getPointPeriod(todayStr);
   const [compOpen, setCompOpen] = useState(false);
   const [compDraft, setCompDraft] = useState<{ kind: CompKind; initial: CompFormData } | null>(null);
+  // §10: modal do MOTIVO do excedente (>10h) — abre automaticamente quando o
+  // dia é encerrado acima de 10h; fechar sem preencher deixa ⚠ no banco.
+  const [reasonDate, setReasonDate] = useState<string | null>(null);
 
   // Relógio: mantém previsão de saída e horas "em andamento" em tempo real
   const [, setTick] = useState(0);
@@ -189,6 +196,20 @@ export default function DashboardPage() {
     return true;
   };
 
+  /** §10: após registrar batida, se o dia FECHOU acima de 10h e ainda não há
+   *  motivo, abre automaticamente o modal do motivo (pode ser adiado). */
+  const promptExcessReasonIfNeeded = (date: string) => {
+    const snap = getAppData();
+    const s = settingsOf(snap.user);
+    const day = computeDay(
+      snap.entries.filter((e) => e.date === date),
+      s,
+    );
+    if (day.open || day.excessMinutes <= 0) return;
+    if (excessReasonOnDate(snap.excessReasons, date)) return;
+    setReasonDate(date);
+  };
+
   const onAddEntry = async (p: { date: string; time: string; type: EntryType; note: string | null }) => {
     // §7: data futura → bloquear ANTES de tratar qualquer conflito com falta
     if (isFutureDate(p.date)) {
@@ -200,11 +221,20 @@ export default function DashboardPage() {
     // §7: rejeição da validação central de sequência chega aqui (toast + erro)
     if (!res.ok) {
       toast.show(res.error ?? FUTURE_DATE_ERROR, "error");
+      return res;
     }
+    promptExcessReasonIfNeeded(p.date);
     return res;
   };
 
-  const onDeleteEntry = async (id: number) => actions.deleteEntry(id);
+  const onDeleteEntry = async (id: number) => {
+    const res = actions.deleteEntry(id);
+    // §25: guarda central — batida sustentando compensação concluída é bloqueada
+    if (!res.ok) {
+      toast.show(res.error ?? "Não foi possível excluir o registro.", "error");
+    }
+    return res;
+  };
 
   /** §8/§9: edição de batida pelo Registro rápido — validação da sequência
    *  cronológica final e guarda de compensação concluída vivem no store. O
@@ -416,6 +446,20 @@ export default function DashboardPage() {
         />
       </div>
 
+      {/* §2/§4 BANCO DE HORAS — consulta do saldo realizado (só fatos) */}
+      <HourBankCard
+        entries={entries}
+        compensations={compensations}
+        absences={absences}
+        companyCalendars={companyCalendars}
+        faltas={faltas}
+        excessReasons={excessReasons}
+        settings={settings}
+        range={period}
+        today={todayStr}
+        onRegisterReason={(date) => setReasonDate(date)}
+      />
+
       {/* Assistente de saída + Registro rápido */}
       <SmartExit
         date={todayStr}
@@ -455,6 +499,8 @@ export default function DashboardPage() {
             absences={absences}
             companyCalendars={companyCalendars}
             faltas={faltas}
+            excessReasons={excessReasons}
+            onRegisterReason={(date) => setReasonDate(date)}
             settings={settings}
             range={range}
             monthLabel={periodLabel(period)}
@@ -649,6 +695,25 @@ export default function DashboardPage() {
         }
         onSave={createComp}
       />
+
+      {/* §10 Modal do motivo do excedente >10h */}
+      {reasonDate &&
+        (() => {
+          const reasonDay = computeDay(
+            entries.filter((e) => e.date === reasonDate),
+            settings,
+          );
+          return (
+            <ExcessReasonModal
+              open
+              onClose={() => setReasonDate(null)}
+              date={reasonDate}
+              workedMinutes={reasonDay.workedMinutes}
+              excessMinutes={reasonDay.excessMinutes}
+              existing={excessReasonOnDate(excessReasons, reasonDate)}
+            />
+          );
+        })()}
     </div>
   );
 }

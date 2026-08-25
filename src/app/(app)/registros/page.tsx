@@ -254,7 +254,13 @@ export default function RegistrosPage() {
 
   const deleteEntry = async (id: number) => {
     const target = entries.find((e) => e.id === id);
-    actions.deleteEntry(id);
+    // §25: excluir usa a MESMA guarda central do updateEntry — bloqueado se a
+    // batida sustenta compensação concluída (origem OU destino).
+    const res = actions.deleteEntry(id);
+    if (!res.ok) {
+      toast.show(res.error ?? "Não foi possível excluir o registro.", "error");
+      return;
+    }
     if (target) reconcileDay(target.date);
   };
 
