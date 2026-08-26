@@ -65,9 +65,17 @@ export function ExcessPanel({
   const [modalOpen, setModalOpen] = useState(false);
   const [draft, setDraft] = useState<(CompFormData & { kind?: CompKind }) | undefined>();
   const [draftDebt, setDraftDebt] = useState<number | undefined>();
+  const [draftPlanning, setDraftPlanning] = useState<{
+    originalMinutes: number;
+    compensatedMinutes: number;
+    plannedMinutes: number;
+    openMinutes: number;
+    unplannedMinutes: number;
+  } | undefined>();
   const [allocateDate, setAllocateDate] = useState<string | null>(null);
+  const [allocateFromDeficit, setAllocateFromDeficit] = useState<string | null>(null);
 
-  const { excessDays, excessTotals, deficitTotals, deficits } = useMemo(() => {
+  const { deficitTotals, deficits } = useMemo(() => {
     const all = buildDebtDays(
       entries,
       compensations,
@@ -76,12 +84,10 @@ export function ExcessPanel({
       absences,
       companyCalendars,
       effectiveFaltas(faltas, today),
+      today,
     );
-    const ex = all.filter((d) => d.kind === "excedente");
     const df = all.filter((d) => d.kind === "deficit");
     return {
-      excessDays: ex.reverse(),
-      excessTotals: totalsOf(ex),
       deficitTotals: totalsOf(df),
       // §19 visão consolidada do déficit (original/compensado/planejado/sem
       // programação/status) com as parcelas para expansão.
@@ -121,48 +127,80 @@ export function ExcessPanel({
   // apaga dados/cálculos (companias, obrigações e totais seguem nos libs).
 
   const openFor = (date: string, kind: CompKind) => {
-    const minutes = openDebtFor(entries, compensations, settings, date, kind, companyCalendars);
-    // Para hora extra o destino é um dia de trabalho futuro/hoje (não um dia com déficit);
-    // para excedente sugerimos dias recentes com saldo negativo (sair mais cedo).
+    const minutes = openDebtFor(entries, compensations, settings, date, kind, companyCalendars, absences);
     const target =
       kind === "excedente"
         ? suggestTargets(entries, compensations, settings, date, today, undefined, companyCalendars)[0]?.date ?? today
         : today;
-    // Pré-preenche respeitando a capacidade real do dia de destino
     const cap = extraCapacityForDate(target, entries, compensations, settings, { companyCalendars });
-    const prefill =
-      kind === "deficit" ? Math.max(5, Math.min(minutes, Math.max(5, cap.available))) : minutes;
+    const prefill = Math.max(0, Math.min(minutes, cap.available));
+    if (prefill <= 0) {
+      toast.show("Não há minutos sem programação (ou capacidade) para nova compensação.", "error");
+      return;
+    }
+    if (kind === "deficit") {
+      const dv = deficits.find((x) => x.date === date);
+      setDraftPlanning(
+        dv
+          ? {
+              originalMinutes: dv.originalMinutes,
+              compensatedMinutes: dv.compensatedMinutes,
+              plannedMinutes: dv.plannedMinutes,
+              openMinutes: dv.openMinutes,
+              unplannedMinutes: dv.unplannedMinutes,
+            }
+          : undefined,
+      );
+    } else if (kind === "acordo") {
+      const av = acordoDays.find((x) => x.date === date);
+      setDraftPlanning(
+        av
+          ? {
+              originalMinutes: av.originalMinutes,
+              compensatedMinutes: av.compensatedMinutes,
+              plannedMinutes: av.plannedMinutes,
+              openMinutes: av.remainingMinutes,
+              unplannedMinutes: av.unplannedMinutes,
+            }
+          : undefined,
+      );
+    } else {
+      setDraftPlanning(undefined);
+    }
     setDraft({
       kind,
       sourceDate: date,
       targetDate: target,
-      minutes: prefill > 0 ? prefill : 30,
+      minutes: prefill,
       note: kind === "excedente" ? `Compensação do dia ${formatDateShortBR(date)}` : "",
     });
     setDraftDebt(minutes);
     setModalOpen(true);
   };
 
-  // §20 "EM ABERTO" = original − CONCLUÍDO (planejamento integral NÃO quita).
-  // Enquanto houver valor ainda não REALIZADO, o déficit/excedente permanece.
-  const excessOpen = excessDays.filter((d) => d.openMinutes > 0);
-  const deficitOpen = deficits.filter((d) => d.openMinutes > 0);
+  // Pendências da Visão geral: só déficits realizados com parte AINDA SEM PROGRAMAÇÃO.
+  const deficitOpen = deficits.filter((d) => d.unplannedMinutes > 0 && d.date <= today);
   const openDeficitTotal = deficitOpen.reduce((s, d) => s + d.openMinutes, 0);
   const specialBook = useMemo(() => {
     const dates = [...new Set(entries.filter((e) => e.date >= range.from && e.date <= range.to && e.date <= today).map((e) => e.date))];
     let original = 0;
     let realized = 0;
+    let planned = 0;
     let free = 0;
+    const days: { date: string; original: number; realized: number; planned: number; free: number; worked: number }[] = [];
     for (const date of dates) {
       const v = dayCreditView(date, entries, compensations, absences, companyCalendars, settings, excessReasons);
       if (v.excessSpecial <= 0 || v.day.open || v.day.empty) continue;
       const led = specialExcessLedger(date, compensations, v.excessSpecial);
       original += led.original;
       realized += led.realized;
+      planned += led.planned;
       free += led.free;
+      days.push({ date, original: led.original, realized: led.realized, planned: led.planned, free: led.free, worked: v.day.workedMinutes });
     }
-    return { original, realized, free };
+    return { original, realized, planned, free, days };
   }, [entries, compensations, absences, companyCalendars, settings, excessReasons, range, today]);
+  const excessOpen = specialBook.days.filter((d) => d.free > 0 || d.planned > 0);
   // §19: expansão das parcelas de um déficit consolidado (estado local, visual).
   const [expandedDeficit, setExpandedDeficit] = useState<string | null>(null);
 
@@ -180,7 +218,7 @@ export function ExcessPanel({
         <StatCard
           label="Já realocado"
           value={formatMinutes(specialBook.realized)}
-          sub={specialBook.original > 0 ? `${formatMinutes(specialBook.realized)} de ${formatMinutes(specialBook.original)} tratados` : "nenhum excedente especial"}
+          sub={specialBook.original > 0 ? `${formatMinutes(specialBook.realized)} de ${formatMinutes(specialBook.original)} realocados` : "nenhum excedente do limite diário"}
           tone="emerald"
           icon={<CheckCircle2 size={16} />}
         />
@@ -201,28 +239,28 @@ export function ExcessPanel({
       </div>
 
       {/* Barra de progresso */}
-      <Card title="Progresso de compensação de excedentes" subtitle={`${monthLabel} · excedente vs. compensado`}>
+      <Card title="Progresso de realocação do excedente" subtitle={`${monthLabel} · excedente do limite diário`}>
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <p className="text-sm font-semibold text-slate-700">
-            <b className="text-emerald-600">{formatMinutes(excessTotals.concluded)}</b> compensados
-            {excessTotals.pending > 0 && (
+            <b className="text-emerald-600">{formatMinutes(specialBook.realized)}</b> realocados
+            {specialBook.planned > 0 && (
               <>
                 {" · "}
-                <b className="text-amber-600">{formatMinutes(excessTotals.pending)}</b> planejados
+                <b className="text-amber-600">{formatMinutes(specialBook.planned)}</b> programados
               </>
             )}
             {" · "}
-            <b className="text-slate-500">{formatMinutes(excessTotals.remaining)}</b> restantes
+            <b className="text-slate-500">{formatMinutes(specialBook.free)}</b> ainda a realocar
           </p>
           <p className="text-xs font-bold text-slate-400">
-            total {formatMinutes(excessTotals.debtTotal)}
+            total {formatMinutes(specialBook.original)}
           </p>
         </div>
         <div className="mt-2">
           <ProgressBar
-            concluded={excessTotals.concluded}
-            pending={excessTotals.pending}
-            total={excessTotals.debtTotal}
+            concluded={specialBook.realized}
+            pending={specialBook.planned}
+            total={specialBook.original}
           />
         </div>
       </Card>
@@ -231,7 +269,7 @@ export function ExcessPanel({
         {/* Dias com excedente pendente */}
         <Card
           title="Dias com excedente pendente"
-          subtitle="Acima do limite — origem da dívida de horas"
+          subtitle="Excedente do limite diário ainda a realocar"
         >
           {excessOpen.length === 0 ? (
             <EmptyState
@@ -253,17 +291,17 @@ export function ExcessPanel({
                         </span>
                       </span>
                       <Badge tone="rose">
-                        excedente {formatMinutes(d.debtMinutes)}
+                        excedente {formatMinutes(d.original)}
                       </Badge>
                       {reason ? (
                         <Badge tone="slate">motivo registrado</Badge>
                       ) : (
                         <Badge tone="amber">⚠ Motivo não informado</Badge>
                       )}
-                      {d.remainingMinutes > 0 ? (
-                        <Badge tone="amber">restam {formatMinutes(d.remainingMinutes)}</Badge>
+                      {d.free > 0 ? (
+                        <Badge tone="amber">restam {formatMinutes(d.free)}</Badge>
                       ) : (
-                        <Badge tone="sky">{formatMinutes(d.pendingMinutes)} planejado</Badge>
+                        <Badge tone="sky">{formatMinutes(d.planned)} programado</Badge>
                       )}
                       <div className="ml-auto flex items-center gap-1.5">
                         {!reason && onRegisterReason && (
@@ -278,15 +316,15 @@ export function ExcessPanel({
                       </div>
                     </div>
                     <p className="mt-1.5 text-xs text-slate-500">
-                      {formatMinutes(d.workedMinutes)} trabalhados ·{" "}
-                      {formatMinutes(d.concludedMinutes)} compensados ·{" "}
-                      {formatMinutes(d.pendingMinutes)} planejados
+                      {formatMinutes(d.worked)} trabalhados ·{" "}
+                      {formatMinutes(d.realized)} realocados ·{" "}
+                      {formatMinutes(d.planned)} programados
                     </p>
                     <div className="mt-2">
                       <ProgressBar
-                        concluded={d.concludedMinutes}
-                        pending={d.pendingMinutes}
-                        total={d.debtMinutes}
+                        concluded={d.realized}
+                        pending={d.planned}
+                        total={d.original}
                         height={6}
                       />
                     </div>
@@ -306,7 +344,7 @@ export function ExcessPanel({
             <EmptyState
               icon={<TrendingDown size={24} />}
               title="Nenhum déficit em aberto"
-              description="Todos os dias abaixo da base já tiveram o déficit efetivamente compensado."
+              description="Todos os déficits realizados já estão quitados ou com programação ativa."
             />
           ) : (
             <ul className="space-y-3">
@@ -320,17 +358,22 @@ export function ExcessPanel({
                       </span>
                     </span>
                     <Badge tone="indigo">déficit {formatMinutes(d.originalMinutes)}</Badge>
-                    {/* §20: enquanto houver valor não REALIZADO, o déficit aparece */}
                     <Badge tone="amber">em aberto {formatMinutes(d.openMinutes)}</Badge>
                     {d.status === "parcial" && <Badge tone="sky">Parcial</Badge>}
                     <div className="ml-auto flex items-center gap-1.5">
-                      {/* §6/§7: quitação imediata com crédito JÁ realizado */}
+                      {specialBook.free > 0 && (
+                        <Button size="sm" variant="danger" onClick={() => setAllocateFromDeficit(d.date)}>
+                          <ArrowLeftRight size={13} /> Usar excedente disponível
+                        </Button>
+                      )}
                       <Button size="sm" variant="secondary" onClick={() => applyRealizedCredit(d.date)}>
                         <CheckCircle2 size={13} /> Usar horas livres
                       </Button>
-                      <Button size="sm" variant="subtle" onClick={() => openFor(d.date, "deficit")}>
-                        <Zap size={13} /> Programar hora extra
-                      </Button>
+                      {d.unplannedMinutes > 0 && (
+                        <Button size="sm" variant="subtle" onClick={() => openFor(d.date, "deficit")}>
+                          <Zap size={13} /> Programar hora extra
+                        </Button>
+                      )}
                     </div>
                   </div>
                   {/* §32 nomenclatura: compensado (concluído) · planejado · sem programação */}
@@ -412,16 +455,29 @@ export function ExcessPanel({
                         </span>
                       </span>
                       <Badge tone="indigo">acordo {formatMinutes(d.originalMinutes)}</Badge>
-                      <Badge tone="amber">restam {formatMinutes(d.remainingMinutes)}</Badge>
+                      <Badge tone="amber">em aberto {formatMinutes(d.remainingMinutes)}</Badge>
                       {d.plannedMinutes > 0 && (
                         <Badge tone="sky">{formatMinutes(d.plannedMinutes)} planejado</Badge>
                       )}
                       <div className="ml-auto">
-                        <Button size="sm" variant="subtle" onClick={() => openFor(d.date, "acordo")}>
-                          <Zap size={13} /> Compensar com hora extra
-                        </Button>
+                        {d.unplannedMinutes > 0 && (
+                          <Button size="sm" variant="subtle" onClick={() => openFor(d.date, "acordo")}>
+                            <Zap size={13} /> Programar hora extra
+                          </Button>
+                        )}
                       </div>
                     </div>
+                    <p className="mt-1.5 text-xs text-violet-800">
+                      Original: <b>{formatMinutes(d.originalMinutes)}</b> · Compensado:{" "}
+                      <b className="text-emerald-700">{formatMinutes(d.compensatedMinutes)}</b> · Planejado:{" "}
+                      <b className="text-sky-700">{formatMinutes(d.plannedMinutes)}</b> · Em aberto:{" "}
+                      <b>{formatMinutes(d.remainingMinutes)}</b> · Sem programação:{" "}
+                      <b>{formatMinutes(d.unplannedMinutes)}</b>
+                    </p>
+                    <p className="mt-0.5 text-[11px] text-violet-700">
+                      Restam {formatMinutes(d.remainingMinutes)} do acordo: {formatMinutes(d.plannedMinutes)} já
+                      programadas e {formatMinutes(d.unplannedMinutes)} ainda sem programação.
+                    </p>
                     <div className="mt-2">
                       <ProgressBar
                         concluded={d.compensatedMinutes}
@@ -470,6 +526,20 @@ export function ExcessPanel({
           open
           onClose={() => setAllocateDate(null)}
           excessDate={allocateDate}
+          entries={entries}
+          compensations={compensations}
+          absences={absences}
+          companyCalendars={companyCalendars}
+          faltas={faltas}
+          excessReasons={excessReasons}
+          settings={settings}
+        />
+      )}
+      {allocateFromDeficit && (
+        <AllocateExcessModal
+          open
+          onClose={() => setAllocateFromDeficit(null)}
+          deficitDate={allocateFromDeficit}
           entries={entries}
           compensations={compensations}
           absences={absences}

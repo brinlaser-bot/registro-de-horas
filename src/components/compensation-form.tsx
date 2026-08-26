@@ -34,8 +34,16 @@ interface Props {
    * Usada para limitar compensações por hora extra ao teto do dia de destino.
    */
   getCapacity?: (targetDate: string) => ExtraCapacity;
-  /** Déficit pendente do dia de origem (para exibição informativa). */
+  /** Minutos ainda SEM PROGRAMAÇÃO da dívida de origem (teto da nova parcela). */
   pendingDebtMinutes?: number;
+  /** Detalhamento da dívida (acordo/déficit) para o modal. */
+  planning?: {
+    originalMinutes: number;
+    compensatedMinutes: number;
+    plannedMinutes: number;
+    openMinutes: number;
+    unplannedMinutes: number;
+  };
   onSave: (data: CompFormData) => Promise<void>;
 }
 
@@ -84,6 +92,7 @@ export function CompensationForm({
   smartHint,
   getCapacity,
   pendingDebtMinutes,
+  planning,
   onSave,
 }: Props) {
   const toast = useToast();
@@ -99,16 +108,18 @@ export function CompensationForm({
 
   useEffect(() => {
     if (open) {
+      let minutes = initial?.minutes ?? 60;
+      if (planning?.unplannedMinutes != null) minutes = Math.min(minutes, Math.max(0, planning.unplannedMinutes));
       setForm({
         sourceDate: initial?.sourceDate ?? todayString(),
         targetDate: initial?.targetDate ?? todayString(),
-        minutes: initial?.minutes ?? 60,
+        minutes,
         note: initial?.note ?? "",
         status: initial?.status,
         kind: initial?.kind ?? kind,
       });
     }
-  }, [open, initial, kind]);
+  }, [open, initial, kind, planning]);
 
   // ── Validação visual (não substitui a validação central do store) ──
   const usesCapacity = usesHourExtra(kind);
@@ -119,6 +130,8 @@ export function CompensationForm({
     !form.sourceDate || !form.targetDate || form.sourceDate === form.targetDate;
   const invalidMinutes = !Number.isFinite(form.minutes) || form.minutes < 5 || form.minutes > 720;
   const overCapacity = cap !== null && form.minutes > cap.available;
+  const unplannedCap = planning?.unplannedMinutes ?? pendingDebtMinutes;
+  const overUnplanned = unplannedCap !== undefined && form.minutes > unplannedCap;
 
   const invalidReason = crossCycle
     ? "Esta compensação não pode ser realizada porque a origem e o destino pertencem a ciclos anuais diferentes. As compensações devem ocorrer dentro do mesmo ciclo anual."
@@ -130,7 +143,9 @@ export function CompensationForm({
           ? "Este dia já foi encerrado e não possui hora extra disponível para compensação. Escolha outro dia."
           : overCapacity && cap
             ? `Neste dia você pode compensar no máximo ${formatMinutes(cap.available)}.`
-            : null;
+            : overUnplanned && unplannedCap !== undefined
+              ? `Só é possível programar ${formatMinutes(unplannedCap)} (ainda sem programação).`
+              : null;
 
   const submit = async () => {
     if (inflight.current || busy) return;
@@ -194,6 +209,22 @@ export function CompensationForm({
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs font-medium text-amber-800">
           <b>Como funciona:</b> {copy.explain}
         </div>
+
+        {planning && (
+          <div className="rounded-xl border border-violet-200 bg-violet-50 px-3 py-2.5 text-xs text-violet-800">
+            <p>
+              Original: <b>{formatMinutes(planning.originalMinutes)}</b> · Compensado:{" "}
+              <b className="text-emerald-700">{formatMinutes(planning.compensatedMinutes)}</b> · Planejado:{" "}
+              <b className="text-sky-700">{formatMinutes(planning.plannedMinutes)}</b> · Em aberto:{" "}
+              <b>{formatMinutes(planning.openMinutes)}</b> · Sem programação:{" "}
+              <b>{formatMinutes(planning.unplannedMinutes)}</b>
+            </p>
+            <p className="mt-1">
+              Restam {formatMinutes(planning.openMinutes)}: {formatMinutes(planning.plannedMinutes)} já
+              programadas e {formatMinutes(planning.unplannedMinutes)} ainda sem programação.
+            </p>
+          </div>
+        )}
 
         {/* Barreira do fechamento anual (30/04) */}
         {crossCycle && (
@@ -311,7 +342,7 @@ export function CompensationForm({
             label="Horas a compensar (min)"
             type="number"
             min={5}
-            max={cap ? Math.max(5, cap.available) : 720}
+            max={Math.max(5, Math.min(cap ? cap.available : 720, unplannedCap ?? 720))}
             step={5}
             value={form.minutes}
             onChange={(e) => setForm({ ...form, minutes: Number(e.target.value) })}

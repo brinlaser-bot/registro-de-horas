@@ -30,7 +30,7 @@ import { CompensationForm, type CompFormData } from "@/components/compensation-f
 import { SmartExit } from "@/components/smart-exit";
 import { allocatedForSource, overflowForSource, type ExtraCapacity } from "@/lib/debt";
 import { absenceLabel, type Absence, type DayBalanceView } from "@/lib/absences";
-import { excessReasonLabel, specialExcessLedger, type DayCreditView } from "@/lib/hour-bank";
+import { excessReasonLabel, excessReasonObservation, specialExcessLedger, type DayCreditView } from "@/lib/hour-bank";
 import type { CompKind } from "@/lib/types";
 
 export function statusBadge(d: DayResult) {
@@ -196,6 +196,13 @@ export function DayCard({
   });
   const [busy, setBusy] = useState(false);
   const [compOpen, setCompOpen] = useState(false);
+  const [compPlanning, setCompPlanning] = useState<{
+    originalMinutes: number;
+    compensatedMinutes: number;
+    plannedMinutes: number;
+    openMinutes: number;
+    unplannedMinutes: number;
+  } | undefined>();
 
   const d = result;
   const pendingComp = compsForDate.find((c) => c.status === "pendente");
@@ -249,6 +256,25 @@ export function DayCard({
   /** Abre o formulário central de compensação já preenchido (atalho do card). */
   const openComp = (kind: CompKind, minutes: number, note: string) => {
     setCompKind(kind);
+    if (kind === "acordo" && shortcuts) {
+      setCompPlanning({
+        originalMinutes: shortcuts.acordoMinutes,
+        compensatedMinutes: shortcuts.acordoCompensated,
+        plannedMinutes: shortcuts.acordoPlanned,
+        openMinutes: shortcuts.acordoRemaining,
+        unplannedMinutes: Math.max(0, shortcuts.acordoRemaining - shortcuts.acordoPlanned),
+      });
+    } else if (kind === "deficit") {
+      setCompPlanning({
+        originalMinutes: deficitOriginal,
+        compensatedMinutes: deficitConcluded,
+        plannedMinutes: deficitPlanned,
+        openMinutes: deficitOpen,
+        unplannedMinutes: Math.max(0, deficitOpen - deficitPlanned),
+      });
+    } else {
+      setCompPlanning(undefined);
+    }
     setCompInitial({
       sourceDate: d.date,
       // excedente → sair mais cedo (próximo dia útil); hora extra → usuário escolhe o dia
@@ -340,6 +366,10 @@ export function DayCard({
                 <Ban size={14} className="shrink-0" aria-hidden />
                 <span>{falta.status === "prevista" ? "Falta prevista" : "Falta"}</span>
               </Badge>
+            ) : futureDay ? (
+              d.empty ? <Badge tone="slate">—</Badge> : <Badge tone="slate">Registro futuro</Badge>
+            ) : isToday && d.empty && !falta ? (
+              <Badge tone="slate">Jornada não iniciada</Badge>
             ) : (
               statusBadge(d)
             )}
@@ -622,7 +652,7 @@ export function DayCard({
               />
               <div className={`min-w-0 flex-1 text-xs font-medium ${excessTreated ? "text-emerald-800" : "text-rose-800"}`}>
                 <p className="text-[11px] font-extrabold uppercase tracking-wider">
-                  {excessTreated ? "Excedente tratado ✓" : "⚠ Excedente acima de 10h"}
+                  {excessTreated ? "Excedente tratado ✓" : "⚠ Excedente do limite diário"}
                 </p>
                 <div className="mt-1.5 flex flex-wrap items-end gap-x-4 gap-y-1">
                   <span>
@@ -639,10 +669,25 @@ export function DayCard({
                   </span>
                 </div>
                 {creditView?.reason ? (
-                  <p className="mt-1">Motivo: {excessReasonLabel(creditView.reason)}</p>
+                  <p className="mt-1">
+                    Motivo: {excessReasonLabel(creditView.reason)}
+                    {excessReasonObservation(creditView.reason) && (
+                      <span className="italic"> — {excessReasonObservation(creditView.reason)}</span>
+                    )}
+                  </p>
                 ) : !excessTreated ? (
                   <p className="mt-1 font-bold text-amber-700">⚠ Motivo não informado</p>
                 ) : null}
+                {specialLed && (specialLed.realizedTo.length > 0 || specialLed.plannedTo.length > 0) && (
+                  <div className="mt-1.5 space-y-0.5 text-[11px]">
+                    {specialLed.realizedTo.map((t, i) => (
+                      <p key={`r${i}`}>Realizado: {formatMinutes(t.minutes)} → déficit de {formatDateBR(t.date)}</p>
+                    ))}
+                    {specialLed.plannedTo.map((t, i) => (
+                      <p key={`p${i}`}>Programado: {formatMinutes(t.minutes)} → {formatDateBR(t.date)}</p>
+                    ))}
+                  </div>
+                )}
               </div>
               {!creditView?.reason && onRegisterReason && (
                 <Button size="sm" variant="secondary" onClick={() => onRegisterReason(d.date)}>
@@ -702,21 +747,24 @@ export function DayCard({
           )}
 
           {/* Atalho: Acordo a compensar (afastamento acordado — compensar posteriormente) */}
-          {shortcuts?.canCompensate && shortcuts.acordoRemaining > 0 && (
+          {shortcuts?.canCompensate && Math.max(0, shortcuts.acordoRemaining - shortcuts.acordoPlanned) > 0 && (
             <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2.5">
               {/* Detalhamento completo fica no banner acima — aqui só o convite à ação */}
               <p className="flex-1 text-xs font-medium text-violet-800">
-                Há <b>{formatMinutes(shortcuts.acordoRemaining)}</b> do acordo ainda a compensar com
-                hora extra.
+                Há <b>{formatMinutes(Math.max(0, shortcuts.acordoRemaining - shortcuts.acordoPlanned))}</b> do acordo ainda sem programação.
               </p>
               <Button
                 size="sm"
                 variant="subtle"
                 onClick={() =>
-                  openComp("acordo", shortcuts.acordoRemaining, `Acordo de ${formatDateShortBR(d.date)}`)
+                  openComp(
+                    "acordo",
+                    Math.max(0, shortcuts.acordoRemaining - shortcuts.acordoPlanned),
+                    `Acordo de ${formatDateShortBR(d.date)}`,
+                  )
                 }
               >
-                <ArrowLeftRight size={13} /> Compensar acordo
+                <ArrowLeftRight size={13} /> Programar hora extra
               </Button>
             </div>
           )}
@@ -737,7 +785,7 @@ export function DayCard({
                   openComp("deficit", shortcuts.deficitRemaining, `Déficit de ${formatDateShortBR(d.date)}`)
                 }
               >
-                <Zap size={13} /> Quitar com hora extra
+                <Zap size={13} /> Programar hora extra
               </Button>
             </div>
           )}
@@ -874,7 +922,8 @@ export function DayCard({
         kind={compKind}
         initial={compInitial}
         getCapacity={getCapacity}
-        pendingDebtMinutes={compInitial?.minutes}
+        pendingDebtMinutes={compPlanning?.unplannedMinutes ?? compInitial?.minutes}
+        planning={compPlanning}
         onSave={async (payload) => {
           await onCreateComp({ ...payload, kind: compKind });
         }}

@@ -41,6 +41,8 @@ interface Props {
    * do Assistente de jornada. Nenhuma lógica/funcionalidade muda (§10).
    */
   embedded?: boolean;
+  /** Jornada regular vazia (sem falta): mostra "jornada não iniciada" em vez de saldo −8h. */
+  idle?: boolean;
 }
 
 export function QuickPunch({
@@ -57,6 +59,7 @@ export function QuickPunch({
   onRegisterFalta,
   onRemoveFalta,
   embedded = false,
+  idle = false,
 }: Props) {
   const toast = useToast();
   // §6.2 Campo de horário MANUAL permanece: vazio → segue o relógio; quando o
@@ -264,10 +267,14 @@ export function QuickPunch({
             <p className="text-xs text-slate-500">
               trabalhados · base {formatMinutes(today.expectedMinutes)}
             </p>
-            <p className={`mt-0.5 text-xs font-bold ${balanceTone === "emerald" ? "text-emerald-600" : balanceTone === "rose" ? "text-rose-600" : "text-slate-500"}`}>
-              saldo {today.balanceMinutes >= 0 ? "+" : ""}
-              {formatMinutes(today.balanceMinutes)}
-            </p>
+            {idle ? (
+              <p className="mt-0.5 text-xs font-bold text-slate-500">jornada não iniciada</p>
+            ) : (
+              <p className={`mt-0.5 text-xs font-bold ${balanceTone === "emerald" ? "text-emerald-600" : balanceTone === "rose" ? "text-rose-600" : "text-slate-500"}`}>
+                saldo {today.balanceMinutes >= 0 ? "+" : ""}
+                {formatMinutes(today.balanceMinutes)}
+              </p>
+            )}
           </div>
         </div>
 

@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { BarChart3, ChevronLeft, ChevronRight, Download } from "lucide-react";
 import { settingsOf, useAppData, useIsClient } from "@/lib/store";
-import { formatMinutes, isWeekend, todayString, weekdayShort } from "@/lib/time";
+import { formatMinutes, isRealizedDate, isWeekend, todayString, weekdayShort } from "@/lib/time";
 import {
   absenceLabel,
   absenceOnDate,
@@ -54,14 +54,22 @@ export default function ResumoPage() {
         const absence = absenceOnDate(absences, date);
         const falta = faltaOnDate(faltas, date);
         const faltaStatus = falta ? faltaStatusOf(date, todayStr) : null;
+        const realized = isRealizedDate(date, todayStr);
+        const idleToday = date === todayStr && ctx.day.empty && faltaStatus !== "efetiva" && !absence && cctx.effectiveExpected > 0;
         return {
           date,
-          workedMinutes: ctx.day.workedMinutes,
+          workedMinutes: realized ? ctx.day.workedMinutes : 0,
           expectedMinutes: cctx.expectedRegular,
-          balanceMinutes: cctx.regularBalance,
-          excessMinutes: ctx.day.excessMinutes,
-          registrableMinutes: ctx.day.registrableMinutes,
-          status: faltaStatus === "efetiva"
+          balanceMinutes: realized ? cctx.regularBalance : 0,
+          excessMinutes: realized ? ctx.day.excessMinutes : 0,
+          registrableMinutes: realized ? ctx.day.registrableMinutes : 0,
+          status: !realized
+            ? ctx.day.entries.length > 0
+              ? "future"
+              : "empty"
+            : idleToday
+              ? "idle"
+            : faltaStatus === "efetiva"
             ? "falta"
             : absence
               ? absence.kind === "ferias"
@@ -96,7 +104,7 @@ export default function ResumoPage() {
     () =>
       allDays.reduce(
         (acc, d) => {
-          if (d.entryCount > 0) acc.trackedDays += 1;
+          if (d.entryCount > 0 && isRealizedDate(d.date, todayStr)) acc.trackedDays += 1;
           acc.workedTotal += d.workedMinutes;
           acc.registrableTotal += d.registrableMinutes;
           // Mesmo agregador central usado em Registros; dias sem dados e jornada aberta = 0.
@@ -106,7 +114,7 @@ export default function ResumoPage() {
         },
         { trackedDays: 0, workedTotal: 0, registrableTotal: 0, balanceTotal: 0, excessTotal: 0 },
       ),
-    [allDays],
+    [allDays, todayStr],
   );
 
   const exportCsv = () => {
@@ -238,6 +246,10 @@ export default function ResumoPage() {
                         <Badge tone="rose">Acima do limite</Badge>
                       ) : d.status === "deficit" ? (
                         <Badge tone="amber">Abaixo da base</Badge>
+                      ) : d.status === "idle" ? (
+                        <Badge tone="slate">Jornada não iniciada</Badge>
+                      ) : d.status === "future" ? (
+                        <Badge tone="slate">Registro futuro</Badge>
                       ) : d.status === "in-progress" ? (
                         <Badge tone="indigo">Em andamento</Badge>
                       ) : d.status === "ok" ? (
@@ -261,7 +273,7 @@ export default function ResumoPage() {
                             : "text-slate-400"
                       }`}
                     >
-                      {d.faltaStatus === "prevista"
+                      {d.faltaStatus === "prevista" || d.status === "idle" || d.status === "future" || d.status === "empty"
                         ? "—"
                         : d.entryCount > 0 || d.eventLabel
                           ? `${d.balanceMinutes >= 0 ? "+" : ""}${formatMinutes(d.balanceMinutes)}`

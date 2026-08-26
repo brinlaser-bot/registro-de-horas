@@ -10,7 +10,7 @@
  */
 import { useMemo } from "react";
 import { BarChart3 } from "lucide-react";
-import { expectedMinutesOf, formatMinutes, isWeekend, stackedSegments, todayString } from "@/lib/time";
+import { expectedMinutesOf, formatMinutes, isRealizedDate, isWeekend, stackedSegments, todayString } from "@/lib/time";
 import { absenceLabel, absenceOnDate, type Absence } from "@/lib/absences";
 import { acordoViewOf, appliedOnDate, buildDebtDays, type AcordoView } from "@/lib/debt";
 import { companyDayContext, type CompanyCalendars } from "@/lib/company-calendar";
@@ -85,7 +85,7 @@ export function buildStackedPeriodData({
     })
     .filter((d) => d.ctx.day.entries.length > 0 || d.eventLabel || d.faltaEf || !isWeekend(d.date))
     .map((d) => {
-      const worked = d.ctx.day.workedMinutes;
+      const worked = isRealizedDate(d.date, todayStr) ? d.ctx.day.workedMinutes : 0;
       const expected = d.cctx.expectedRegular;
       const seg = stackedSegments(worked, expected, settings.maxDailyMinutes);
       const used = appliedOnDate(compensations, d.date);

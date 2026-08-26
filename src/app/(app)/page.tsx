@@ -36,7 +36,7 @@ import {
   sameAnnualCycle,
 } from "@/lib/periods";
 import { activeAcordos, canCompleteComp, extraCapacityForDate, kindOf, usesHourExtra } from "@/lib/debt";
-import { canRegisterFalta, dayBalanceContribution, faltaConfirmText, faltaOnDate } from "@/lib/faltas";
+import { canRegisterFalta, dayBalanceContribution, faltaOnDate } from "@/lib/faltas";
 import { excessReasonOnDate, shouldPromptExcessReason } from "@/lib/hour-bank";
 import { HourBankCard } from "@/components/hour-bank-card";
 import { ExcessReasonModal } from "@/components/excess-reason-modal";
@@ -72,9 +72,17 @@ export default function DashboardPage() {
   const period = getPointPeriod(todayStr);
   const [compOpen, setCompOpen] = useState(false);
   const [compDraft, setCompDraft] = useState<{ kind: CompKind; initial: CompFormData } | null>(null);
+  const [compPlanning, setCompPlanning] = useState<{
+    originalMinutes: number;
+    compensatedMinutes: number;
+    plannedMinutes: number;
+    openMinutes: number;
+    unplannedMinutes: number;
+  } | null>(null);
   // §10: modal do MOTIVO do excedente (>10h) — abre automaticamente quando o
   // dia é encerrado acima de 10h; fechar sem preencher deixa ⚠ no banco.
   const [reasonDate, setReasonDate] = useState<string | null>(null);
+  const [busyFalta, setBusyFalta] = useState(false);
 
   // Relógio: mantém previsão de saída e horas "em andamento" em tempo real
   const [, setTick] = useState(0);
@@ -97,7 +105,7 @@ export default function DashboardPage() {
     for (const date of listDaysBetween(period.from, period.to)) {
       const cctx = companyDayContext(date, entries, absences, companyCalendars, settings);
       const day = cctx.ctx.day;
-      if (day.entries.length > 0) {
+      if (date <= todayStr && day.entries.length > 0) {
         sum.trackedDays += 1;
         sum.workedTotal += day.workedMinutes;
         sum.registrableTotal += day.registrableMinutes;
@@ -143,18 +151,23 @@ export default function DashboardPage() {
 
   /** §3: botão discreto com confirmação simples antes de registrar a falta. */
   const registerFaltaHoje = async () => {
+    if (busyFalta) return;
     const gate = canRegisterFalta(todayStr, entries, absences, companyCalendars, settings, faltas);
     if (!gate.ok) {
       toast.show(gate.error ?? "Não é possível registrar falta nesta data.", "error");
       return;
     }
-    if (!window.confirm(faltaConfirmText(todayStr, gate.jornadaMinutes ?? 0, todayStr))) return;
-    const res = actions.addFalta(todayStr);
-    if (!res.ok) {
-      toast.show(res.error ?? "Não foi possível registrar a falta.", "error");
-      return;
+    setBusyFalta(true);
+    try {
+      const res = actions.addFalta(todayStr);
+      if (!res.ok) {
+        toast.show(res.error ?? "Não foi possível registrar a falta.", "error");
+        return;
+      }
+      toast.show("Falta registrada — o déficit corresponde à jornada do dia.");
+    } finally {
+      setBusyFalta(false);
     }
-    toast.show("Falta registrada — o déficit corresponde à jornada do dia.");
   };
 
   /** §15: falta de hoje é passada → "Excluir falta", com confirmação. */
@@ -330,13 +343,30 @@ export default function DashboardPage() {
   }, [entries, compensations, absences, settings, todayStr]);
 
   /** Abre o formulário central já preenchido para quitar um acordo/déficit. */
-  const openExtraForm = (kind: CompKind, sourceDate: string, minutes: number) => {
+  const openExtraForm = (
+    kind: CompKind,
+    sourceDate: string,
+    planning: {
+      originalMinutes: number;
+      compensatedMinutes: number;
+      plannedMinutes: number;
+      openMinutes: number;
+      unplannedMinutes: number;
+    },
+  ) => {
+    const cap = extraCapacityForDate(todayStr, entries, compensations, settings, { companyCalendars });
+    const prefill = Math.max(0, Math.min(planning.unplannedMinutes, cap.available));
+    if (prefill <= 0) {
+      toast.show("Não há minutos sem programação (ou capacidade) para nova compensação.", "error");
+      return;
+    }
+    setCompPlanning(planning);
     setCompDraft({
       kind,
       initial: {
         sourceDate,
         targetDate: todayStr,
-        minutes,
+        minutes: prefill,
         note: kind === "acordo" ? `Acordo de ${formatDateShortBR(sourceDate)}` : `Déficit de ${formatDateShortBR(sourceDate)}`,
       },
     });
@@ -380,7 +410,7 @@ export default function DashboardPage() {
    * em jornada, saldo, déficit ou qualquer cálculo central. */
   const birthdayToday = isBirthdayToday(user.birthDate, todayStr);
 
-  const recentDays = [...recent].filter((d) => d.entryCount > 0).slice(-7).reverse();
+  const recentDays = [...recent].filter((d) => d.entryCount > 0 && d.date <= todayStr).slice(-7).reverse();
 
   return (
     <div className="flex flex-col gap-4 lg:gap-5">
@@ -535,6 +565,7 @@ export default function DashboardPage() {
                 faltaGate={faltaHojeGate}
                 onRegisterFalta={registerFaltaHoje}
                 onRemoveFalta={removeFaltaHoje}
+                idle={todayIdle}
               />
             </section>
             <section className="min-w-0 lg:border-l lg:border-slate-100 lg:pl-5">
@@ -621,17 +652,29 @@ export default function DashboardPage() {
                   </p>
                   <p className="mt-0.5 text-xs text-slate-500">
                     Origem: {formatDateShortBR(d.date)} · Ciclo anual:{" "}
-                    {getAnnualPointCycle(d.date)} · Compensado:{" "}
+                    {getAnnualPointCycle(d.date)} · Original:{" "}
+                    <b>{formatMinutes(d.originalMinutes)}</b> · Compensado:{" "}
                     <b className="text-emerald-600">{formatMinutes(d.compensatedMinutes)}</b> ·
-                    Restante: <b className="text-amber-600">{formatMinutes(d.remainingMinutes)}</b>
-                    {d.plannedMinutes > 0 && (
-                      <> · Planejado: <b className="text-sky-600">{formatMinutes(d.plannedMinutes)}</b></>
-                    )}
+                    Planejado: <b className="text-sky-600">{formatMinutes(d.plannedMinutes)}</b> ·
+                    Em aberto: <b className="text-amber-600">{formatMinutes(d.remainingMinutes)}</b> ·
+                    Sem programação: <b>{formatMinutes(d.unplannedMinutes)}</b>
                   </p>
                 </div>
-                {d.remainingMinutes > 0 && (
-                  <Button size="sm" variant="subtle" onClick={() => openExtraForm("acordo", d.date, d.remainingMinutes)}>
-                    Compensar com hora extra
+                {d.unplannedMinutes > 0 && (
+                  <Button
+                    size="sm"
+                    variant="subtle"
+                    onClick={() =>
+                      openExtraForm("acordo", d.date, {
+                        originalMinutes: d.originalMinutes,
+                        compensatedMinutes: d.compensatedMinutes,
+                        plannedMinutes: d.plannedMinutes,
+                        openMinutes: d.remainingMinutes,
+                        unplannedMinutes: d.unplannedMinutes,
+                      })
+                    }
+                  >
+                    Programar hora extra
                   </Button>
                 )}
               </li>
@@ -780,12 +823,15 @@ export default function DashboardPage() {
         onClose={() => {
           setCompOpen(false);
           setCompDraft(null);
+          setCompPlanning(null);
         }}
         kind={compDraft?.kind ?? "excedente"}
         initial={compDraft?.initial}
         getCapacity={(targetDate) =>
           extraCapacityForDate(targetDate, entries, compensations, settings, { companyCalendars })
         }
+        pendingDebtMinutes={compPlanning?.unplannedMinutes}
+        planning={compPlanning ?? undefined}
         onSave={createComp}
       />
 

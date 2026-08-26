@@ -320,7 +320,7 @@ check("O. specialExcessStatusOf: livre / programado / parcial / tratado", () => 
   assert.ok(compsSrc.includes("Parcialmente realocado"));
   assert.ok(compsSrc.includes("Programado"));
   assert.ok(compsSrc.includes("Livre"));
-  assert.ok(compsSrc.includes("Excedente >10h realocado"));
+  assert.ok(compsSrc.includes("Excedente do limite diário realocado"));
 });
 
 /* ── P. Motivo sempre disponível; destino realizado vs programado ─ */

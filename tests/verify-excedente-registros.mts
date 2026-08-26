@@ -94,7 +94,7 @@ check("B. Registros NÃO mostra 'Saldo regular' no dia >10h (usa Hora extra regu
 
 /* ── C. +2h regular e 1h excedente separados ─────────────────── */
 check("C. mostra +2h regular e 1h excedente separado", () => {
-  assert.ok(dayCardSrc.includes("Excedente acima de 10h"), "faixa própria do excedente");
+  assert.ok(dayCardSrc.includes("Excedente do limite diário"), "faixa própria do excedente");
   assert.ok(dayCardSrc.includes("a realocar"), "1h a realocar");
   assert.ok(dayCardSrc.includes("creditView?.excessSpecial"), "excedente especial da fonte central");
   assert.ok(!dayCardSrc.includes("e compense"), "texto antigo de compensar em outro dia removido");
@@ -269,7 +269,7 @@ check("P. card expandido 11h ⇒ Hora extra regular +2h (não Saldo regular +3h)
 });
 
 check("Q. card expandido mostra excedente separado e restante em destaque", () => {
-  assert.ok(dayCardSrc.includes("⚠ Excedente acima de 10h"));
+  assert.ok(dayCardSrc.includes("⚠ Excedente do limite diário"));
   assert.ok(dayCardSrc.includes("Restante a realocar"));
   assert.ok(dayCardSrc.includes("Original:"));
 });

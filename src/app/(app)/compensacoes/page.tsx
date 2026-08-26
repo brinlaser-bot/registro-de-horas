@@ -30,6 +30,7 @@ import {
 import {
   dayCreditView,
   excessReasonLabel,
+  excessReasonObservation,
   excessReasonOnDate,
   futureCompStatus,
   hourBankSummary,
@@ -100,6 +101,13 @@ export default function CompensacoesPage() {
 
   const [formKind, setFormKind] = useState<CompKind>("excedente");
   const [formInitial, setFormInitial] = useState<CompFormData | undefined>();
+  const [formPlanning, setFormPlanning] = useState<{
+    originalMinutes: number;
+    compensatedMinutes: number;
+    plannedMinutes: number;
+    openMinutes: number;
+    unplannedMinutes: number;
+  } | undefined>();
 
   /* ── §4/§9 Banco de horas consultável (topo §22) ─────────────── */
   const bank = useMemo(
@@ -205,13 +213,35 @@ export default function CompensacoesPage() {
   );
 
   /** Abre o modal de compensação pré-preenchido para um acordo */
-  const openAcordoForm = (sourceDate: string, remainingMinutes: number) => {
+  const openAcordoForm = (
+    sourceDate: string,
+    planning: {
+      originalMinutes: number;
+      compensatedMinutes: number;
+      plannedMinutes: number;
+      remainingMinutes: number;
+      unplannedMinutes: number;
+    },
+  ) => {
+    const cap = extraCapacityForDate(todayStr, entries, compensations, settings, { companyCalendars });
+    const prefill = Math.max(0, Math.min(planning.unplannedMinutes, cap.available));
+    if (prefill <= 0) {
+      toast.show("Não há minutos sem programação (ou capacidade) para nova compensação.", "error");
+      return;
+    }
     setFormKind("acordo");
     setFormInitial({
       sourceDate,
       targetDate: todayStr,
-      minutes: remainingMinutes,
+      minutes: prefill,
       note: `Acordo de ${formatDateShortBR(sourceDate)}`,
+    });
+    setFormPlanning({
+      originalMinutes: planning.originalMinutes,
+      compensatedMinutes: planning.compensatedMinutes,
+      plannedMinutes: planning.plannedMinutes,
+      openMinutes: planning.remainingMinutes,
+      unplannedMinutes: planning.unplannedMinutes,
     });
     setModalOpen(true);
   };
@@ -232,6 +262,7 @@ export default function CompensacoesPage() {
     setEditing(null);
     setFormKind("excedente");
     setFormInitial(undefined);
+    setFormPlanning(undefined);
     setModalOpen(true);
   };
 
@@ -318,7 +349,7 @@ export default function CompensacoesPage() {
     if (c.portion === "especial") {
       return (
         <span className="rounded-full bg-rose-50 px-1.5 py-0.5 text-[10px] font-bold text-rose-700">
-          {"Excedente >10h realocado"}
+          {"Excedente do limite diário realocado"}
         </span>
       );
     }
@@ -337,7 +368,7 @@ export default function CompensacoesPage() {
           ? "↗ Acordo · hora extra"
           : k === "calendario"
             ? "↗ Calendário"
-            : "↘ Excedente >10h";
+            : "↘ Excedente do limite diário";
     return (
       <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${cls}`}>{label}</span>
     );
@@ -609,7 +640,7 @@ export default function CompensacoesPage() {
                   </div>
                   <div className="min-w-0 flex-1">
                     <p className="flex flex-wrap items-center gap-2 text-sm font-bold text-slate-800">
-                      {formatDateBR(v.date)} — {formatMinutes(v.excessSpecial)} de excedente especial
+                      {formatDateBR(v.date)} — {formatMinutes(v.excessSpecial)} de excedente do limite diário
                       {statusBadge}
                       {!v.reason && <Badge tone="amber">⚠ Motivo não informado</Badge>}
                     </p>
@@ -621,7 +652,9 @@ export default function CompensacoesPage() {
                       {v.reason && (
                         <>
                           {" "}· Motivo: <b>{excessReasonLabel(v.reason)}</b>
-                          {v.reason.observation && <span className="italic"> — {v.reason.observation}</span>}
+                          {excessReasonObservation(v.reason) && (
+                            <span className="italic"> — {excessReasonObservation(v.reason)}</span>
+                          )}
                         </>
                       )}
                     </p>
@@ -828,17 +861,29 @@ export default function CompensacoesPage() {
                   </p>
                   <p className="mt-0.5 text-xs text-slate-500">
                     Origem: {formatDateShortBR(d.date)} · Ciclo anual:{" "}
-                    {getAnnualPointCycle(d.date)} · Compensado:{" "}
+                    {getAnnualPointCycle(d.date)} · Original:{" "}
+                    <b>{formatMinutes(d.originalMinutes)}</b> · Compensado:{" "}
                     <b className="text-emerald-600">{formatMinutes(d.compensatedMinutes)}</b> ·
-                    Restante: <b className="text-amber-600">{formatMinutes(d.remainingMinutes)}</b>
-                    {d.plannedMinutes > 0 && (
-                      <> · Planejado: <b className="text-sky-600">{formatMinutes(d.plannedMinutes)}</b></>
-                    )}
+                    Planejado: <b className="text-sky-600">{formatMinutes(d.plannedMinutes)}</b> ·
+                    Em aberto: <b className="text-amber-600">{formatMinutes(d.remainingMinutes)}</b> ·
+                    Sem programação: <b>{formatMinutes(d.unplannedMinutes)}</b>
                   </p>
                 </div>
-                {d.remainingMinutes > 0 && (
-                  <Button size="sm" variant="subtle" onClick={() => openAcordoForm(d.date, d.remainingMinutes)}>
-                    Compensar com hora extra
+                {d.unplannedMinutes > 0 && (
+                  <Button
+                    size="sm"
+                    variant="subtle"
+                    onClick={() =>
+                      openAcordoForm(d.date, {
+                        originalMinutes: d.originalMinutes,
+                        compensatedMinutes: d.compensatedMinutes,
+                        plannedMinutes: d.plannedMinutes,
+                        remainingMinutes: d.remainingMinutes,
+                        unplannedMinutes: d.unplannedMinutes,
+                      })
+                    }
+                  >
+                    Programar hora extra
                   </Button>
                 )}
               </li>
@@ -871,6 +916,7 @@ export default function CompensacoesPage() {
           setModalOpen(false);
           setEditing(null);
           setFormInitial(undefined);
+          setFormPlanning(undefined);
         }}
         editingId={editing}
         kind={editing !== null ? (pendingEditing?.kind ?? "excedente") : formKind}

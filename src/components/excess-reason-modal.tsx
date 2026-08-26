@@ -68,7 +68,7 @@ export function ExcessReasonModal({ open, onClose, date, workedMinutes, excessMi
     <Modal
       open={open}
       onClose={onClose}
-      title="Excedente acima de 10h identificado"
+      title="Excedente do limite diário identificado"
       footer={
         <>
           <Button variant="ghost" onClick={onClose}>

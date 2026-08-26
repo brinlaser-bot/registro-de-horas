@@ -318,12 +318,12 @@ check("K. §20: 5 concluídos + 10 planejados (de 15) → 10 em aberto, Parcial,
   // §20 causa raiz do bug: o painel filtrava por remainingMinutes(0) → EmptyState errado
   const panel = srcOf("src/components/excess-panel.tsx");
   assert.ok(
-    panel.includes("deficits.filter((d) => d.openMinutes > 0)"),
-    "painel usa openMinutes (em aberto real), não o 'sem programação'",
+    panel.includes("deficits.filter((d) => d.unplannedMinutes > 0"),
+    "painel de pendências usa unplannedMinutes (sem programação)",
   );
   assert.ok(
-    panel.includes("já tiveram o déficit efetivamente compensado"),
-    "EmptyState só vale quando tudo foi concluído de fato",
+    panel.includes("já estão quitados ou com programação ativa"),
+    "EmptyState quando não resta parte sem programação",
   );
 });
 

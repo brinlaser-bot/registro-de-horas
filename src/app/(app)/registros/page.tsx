@@ -132,14 +132,16 @@ export default function RegistrosPage() {
            * (calendário/folga/evento) — nunca o saldo bruto de computeDay/dayContext.
            * Falta PREVISTA: saldo/déficit mascarados em 0 até a data chegar. */
           balanceView:
-            faltaStatus === "prevista"
+            date > todayStr
+              ? { ...baseView, adjustedBalance: 0, adjustedDeficit: 0 }
+              : faltaStatus === "prevista"
               ? { ...baseView, adjustedBalance: 0, adjustedDeficit: 0 }
               : baseView,
           displayDay: cctx.displayDay,
           // Contribuição CENTRAL (dayBalanceContribution) — MESMA soma da
           // Visão geral e do Resumo do período (falta efetiva conta; prevista 0).
           balanceContribution: dayBalanceContribution(cctx, faltas, date, todayStr),
-          deficitContribution: faltaStatus === "prevista" ? 0 : companyDeficitContribution(cctx),
+          deficitContribution: date > todayStr || faltaStatus === "prevista" ? 0 : companyDeficitContribution(cctx),
           absence: absenceOnDate(absences, date),
         };
       });
@@ -149,7 +151,7 @@ export default function RegistrosPage() {
   const summaries = useMemo(() => {
     // SEMPRE com a coleção de calendários: a resolução central zera o déficit
     // comum em folga/abonado/recesso/folga a compensar (sem "8h − trabalhado").
-    const debts = buildDebtDays(entries, compensations, settings, range, absences, companyCalendars, effectiveFaltaList);
+    const debts = buildDebtDays(entries, compensations, settings, range, absences, companyCalendars, effectiveFaltaList, todayStr);
     const byCycle = new Map<string, RangeSummary>();
     const get = (cycle: string): RangeSummary => {
       let s = byCycle.get(cycle);
@@ -167,7 +169,7 @@ export default function RegistrosPage() {
 
     for (const { date, ctx, balanceContribution, deficitContribution, absence } of days) {
       const s = get(getAnnualPointCycle(date));
-      if (ctx.day.entries.length > 0) {
+      if (date <= todayStr && ctx.day.entries.length > 0) {
         s.workedDays += 1;
         s.workedMinutes += ctx.day.workedMinutes;
         s.registrableMinutes += ctx.day.registrableMinutes;
@@ -315,7 +317,7 @@ export default function RegistrosPage() {
     // Idem: a mesma resolução central do card/resumo. Em folga com trabalho
     // (Trabalho em folga) o ajustedDeficit central é 0 → nenhum banner
     // "Déficit pendente" / botão "Quitar com hora extra" é exibido.
-    const debts = buildDebtDays(entries, compensations, settings, range, absences, companyCalendars, effectiveFaltaList);
+    const debts = buildDebtDays(entries, compensations, settings, range, absences, companyCalendars, effectiveFaltaList, todayStr);
     const map = new Map<
       string,
       {
