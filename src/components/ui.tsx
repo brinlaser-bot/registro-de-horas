@@ -134,6 +134,18 @@ export function Badge({ tone = "slate", children, className = "" }: { tone?: Bad
   );
 }
 
+/** Badge visual "10+" — NÃO significa "+10 horas"; só marca o limite diário. */
+export function ExcessTenBadge({ className = "" }: { className?: string }) {
+  return (
+    <span
+      title="Horas trabalhadas além do limite diário de 10h"
+      className={`inline-flex items-center rounded px-1 py-px text-[10px] font-extrabold leading-none tracking-tight text-rose-700 ring-1 ring-inset ring-rose-600/30 bg-rose-50 ${className}`}
+    >
+      10+
+    </span>
+  );
+}
+
 /* ── Card ───────────────────────────────────────────────── */
 
 export function Card({

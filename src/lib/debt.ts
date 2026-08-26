@@ -75,6 +75,11 @@ export function sourcePlanningHeadroom(
   return { openMinutes, plannedMinutes: planned, unplannedMinutes };
 }
 
+/** Teto de UMA operação nova: min(ainda sem programação, capacidade do dia). */
+export function maxOperationMinutes(unplannedMinutes: number, dayCapacity: number): number {
+  return Math.max(0, Math.min(unplannedMinutes, dayCapacity));
+}
+
 /** Minutos de compensação aplicados (consumidos) em um dia-destino. */
 export function appliedOnDate(comps: Compensation[], date: string): number {
   return sumMinutes(comps.filter((c) => c.targetDate === date && isActive(c)));

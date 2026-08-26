@@ -175,8 +175,10 @@ export interface StackedDatum {
   markerLabel?: string;
   /** Linhas extras do tooltip, já calculadas pelas funções centrais. */
   markerLines?: string[];
-  /** Saldo regular do dia (para o tooltip). */
+  /** Saldo regular do dia (para o tooltip). Ausente = neutro (futuro/idle). */
   regularBalance?: number;
+  tooltipTone?: "factual" | "idle" | "future";
+  predictedWorked?: number;
 }
 
 const MARKER_ICON: Record<ChartAbsenceMarker, typeof Umbrella> = {
@@ -328,10 +330,20 @@ export function StackedBarsChart({
                 {d.marker && (
                   <span className="mt-0.5 block text-sky-200">{d.markerLabel}</span>
                 )}
-                <span className="mt-0.5 block text-slate-300">
-                  Trabalhado: {formatMinutes(d.workedMinutes)}
-                </span>
-                {d.regularBalance !== undefined && (
+                {d.tooltipTone === "idle" ? (
+                  <span className="mt-0.5 block text-slate-300">Jornada não iniciada</span>
+                ) : d.tooltipTone === "future" ? (
+                  <span className="mt-0.5 block text-slate-300">
+                    {d.predictedWorked && d.predictedWorked > 0
+                      ? `Previsto: ${formatMinutes(d.predictedWorked)}`
+                      : "Sem registro realizado"}
+                  </span>
+                ) : (
+                  <span className="mt-0.5 block text-slate-300">
+                    Trabalhado: {formatMinutes(d.workedMinutes)}
+                  </span>
+                )}
+                {d.regularBalance !== undefined && d.tooltipTone !== "idle" && d.tooltipTone !== "future" && (
                   <span className="block text-slate-300">
                     Saldo regular: {d.regularBalance >= 0 ? "+" : ""}
                     {formatMinutes(d.regularBalance)}
@@ -384,7 +396,7 @@ export function StackedBarsChart({
           <span className="h-2.5 w-2.5 rounded-sm bg-amber-400" /> Extra no ponto ({formatMinutes(expected)}→{formatMinutes(cap)})
         </span>
         <span className="inline-flex items-center gap-1.5">
-          <span className="h-2.5 w-2.5 rounded-sm bg-rose-500" /> Excedente (dívida, &gt;{formatMinutes(cap)})
+          <span className="h-2.5 w-2.5 rounded-sm bg-rose-500" /> Excedente do limite diário
         </span>
         <span className="inline-flex items-center gap-1.5">
           <span

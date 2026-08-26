@@ -21,6 +21,8 @@ import {
   actualExtraForDate,
   allocatedForSource,
   appliedOnDate,
+  activeAcordos,
+  activeCalendarObligations,
   buildDebtDays,
   kindOf,
   usesHourExtra,
@@ -808,4 +810,145 @@ export function specialExcessLedger(date: string, comps: Compensation[], origina
     realizedTo,
     plannedTo,
   };
+}
+
+/* ── Compromissos futuros do ciclo (previsão — NÃO é saldo realizado) ─ */
+
+export type FutureCommitmentKind = "calendario" | "falta" | "acordo" | "previsto";
+
+export interface FutureCommitmentLine {
+  kind: FutureCommitmentKind;
+  date: string;
+  originalMinutes: number;
+  plannedMinutes: number;
+  uncoveredMinutes: number;
+}
+
+export interface FutureCommitmentsSummary {
+  totalOriginal: number;
+  calendarMinutes: number;
+  faltaMinutes: number;
+  acordoMinutes: number;
+  otherMinutes: number;
+  plannedMinutes: number;
+  uncoveredMinutes: number;
+  lines: FutureCommitmentLine[];
+}
+
+function pendingMinutesForSource(comps: Compensation[], date: string, kind: CompKind): number {
+  return comps
+    .filter((c) => c.sourceDate === date && kindOf(c) === kind && c.status === "pendente")
+    .reduce((s, c) => s + c.minutes, 0);
+}
+
+/**
+ * Obrigações FUTURAS já conhecidas do ciclo anual (01/05→30/04).
+ * NÃO entra no saldo realizado. Dias futuros vazios (sem ocorrência/registro)
+ * NÃO são interpretados como dívida. Planejado reduz "sem cobertura",
+ * nunca duplica a obrigação.
+ */
+export function futureCommitmentsSummary(
+  entries: TimeEntry[],
+  comps: Compensation[],
+  absences: Absence[],
+  calendars: CompanyCalendars | undefined,
+  faltas: Falta[] | undefined,
+  settings: WorkSettings,
+  today: string,
+): FutureCommitmentsSummary {
+  const bounds = annualCycleBounds(getAnnualPointCycle(today));
+  const lines: FutureCommitmentLine[] = [];
+  const counted = new Set<string>();
+
+  for (const o of activeCalendarObligations(entries, comps, settings, bounds, calendars, today)) {
+    if (o.date <= today) continue;
+    lines.push({
+      kind: "calendario",
+      date: o.date,
+      originalMinutes: o.originalMinutes,
+      plannedMinutes: o.plannedMinutes,
+      uncoveredMinutes: Math.max(0, o.remainingMinutes - o.plannedMinutes),
+    });
+    counted.add(`${o.date}|cal`);
+  }
+
+  for (const a of activeAcordos(entries, comps, settings, bounds, absences)) {
+    if (a.date <= today) continue;
+    lines.push({
+      kind: "acordo",
+      date: a.date,
+      originalMinutes: a.originalMinutes,
+      plannedMinutes: a.plannedMinutes,
+      uncoveredMinutes: a.unplannedMinutes,
+    });
+    counted.add(`${a.date}|acordo`);
+  }
+
+  for (const f of faltas ?? []) {
+    if (f.date <= today || f.date < bounds.from || f.date > bounds.to) continue;
+    if (counted.has(`${f.date}|cal`) || counted.has(`${f.date}|acordo`)) continue;
+    const cctx = companyDayContext(f.date, entries, absences, calendars ?? [], settings);
+    if (cctx.effectiveExpected <= 0) continue;
+    const planned = pendingMinutesForSource(comps, f.date, "deficit");
+    lines.push({
+      kind: "falta",
+      date: f.date,
+      originalMinutes: cctx.effectiveExpected,
+      plannedMinutes: planned,
+      uncoveredMinutes: Math.max(0, cctx.effectiveExpected - planned),
+    });
+    counted.add(`${f.date}|falta`);
+  }
+
+  const futurePunchDates = [...new Set(entries.map((e) => e.date))].filter(
+    (d) => d > today && d >= bounds.from && d <= bounds.to,
+  );
+  for (const date of futurePunchDates) {
+    if (counted.has(`${date}|cal`) || counted.has(`${date}|acordo`) || counted.has(`${date}|falta`)) continue;
+    const cctx = companyDayContext(date, entries, absences, calendars ?? [], settings);
+    if (cctx.ctx.day.empty) continue;
+    const predicted = Math.max(0, cctx.effectiveExpected - cctx.ctx.day.workedMinutes);
+    if (predicted <= 0) continue;
+    const planned = pendingMinutesForSource(comps, date, "deficit");
+    lines.push({
+      kind: "previsto",
+      date,
+      originalMinutes: predicted,
+      plannedMinutes: planned,
+      uncoveredMinutes: Math.max(0, predicted - planned),
+    });
+  }
+
+  const ofKind = (k: FutureCommitmentKind) =>
+    lines.filter((l) => l.kind === k).reduce((s, l) => s + l.originalMinutes, 0);
+  return {
+    totalOriginal: lines.reduce((s, l) => s + l.originalMinutes, 0),
+    calendarMinutes: ofKind("calendario"),
+    faltaMinutes: ofKind("falta"),
+    acordoMinutes: ofKind("acordo"),
+    otherMinutes: ofKind("previsto"),
+    plannedMinutes: lines.reduce((s, l) => s + l.plannedMinutes, 0),
+    uncoveredMinutes: lines.reduce((s, l) => s + l.uncoveredMinutes, 0),
+    lines,
+  };
+}
+
+/** Há excedente do limite diário realizado, com motivo e saldo livre, no ciclo. */
+export function hasEligibleSpecialExcessInCycle(
+  entries: TimeEntry[],
+  comps: Compensation[],
+  absences: Absence[],
+  calendars: CompanyCalendars | undefined,
+  settings: WorkSettings,
+  reasons: ExcessReason[] | undefined,
+  today: string,
+): boolean {
+  const bounds = annualCycleBounds(getAnnualPointCycle(today));
+  const dates = [...new Set(entries.map((e) => e.date))].filter(
+    (d) => isRealizedDate(d, today) && d >= bounds.from && d <= bounds.to,
+  );
+  return dates.some((d) => {
+    const v = dayCreditView(d, entries, comps, absences, calendars, settings, reasons);
+    return v.excessSpecial > 0 && !v.day.open && !v.day.empty && v.freeSpecial > 0 && !!v.reason;
+  });
 }

@@ -85,13 +85,26 @@ export function buildStackedPeriodData({
     })
     .filter((d) => d.ctx.day.entries.length > 0 || d.eventLabel || d.faltaEf || !isWeekend(d.date))
     .map((d) => {
-      const worked = isRealizedDate(d.date, todayStr) ? d.ctx.day.workedMinutes : 0;
+      const realized = isRealizedDate(d.date, todayStr);
+      const idleToday =
+        d.date === todayStr &&
+        d.ctx.day.empty &&
+        !d.faltaEf &&
+        !d.absence &&
+        d.cctx.effectiveExpected > 0;
+      const worked = realized ? d.ctx.day.workedMinutes : 0;
       const expected = d.cctx.expectedRegular;
       const seg = stackedSegments(worked, expected, settings.maxDailyMinutes);
       const used = appliedOnDate(compensations, d.date);
       const acordo = acordoByDate.get(d.date) ?? null;
+      const predictedWorked = !realized && d.ctx.day.entries.length > 0 ? d.ctx.day.workedMinutes : 0;
 
       const lines: string[] = [];
+      if (!realized) {
+        lines.push(predictedWorked > 0 ? `Registro futuro · previsto ${formatMinutes(predictedWorked)}` : "Registro futuro");
+      } else if (idleToday) {
+        lines.push("Jornada não iniciada");
+      }
       if (d.absence) {
         lines.push(
           d.absence.duration === "parcial"
@@ -136,7 +149,10 @@ export function buildStackedPeriodData({
         marker: d.absence ? markerOf(d.absence) : d.faltaEf ? "falta" : d.cctx.marker ?? undefined,
         markerLabel: d.eventLabel ?? undefined,
         markerLines: lines.length > 0 ? lines : undefined,
-        regularBalance: d.cctx.regularBalance,
+        // Futuro e HOJE idle: tooltip neutro — nunca saldo −8h.
+        regularBalance: !realized || idleToday ? undefined : d.cctx.regularBalance,
+        tooltipTone: !realized ? "future" : idleToday ? "idle" : "factual",
+        predictedWorked: predictedWorked > 0 ? predictedWorked : undefined,
       };
     });
 }
