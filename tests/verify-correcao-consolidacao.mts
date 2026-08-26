@@ -183,12 +183,12 @@ check("E. pendência sem programação 6h e capacidade 2h → prefill 2h", () =>
 });
 
 /* ── F. Dashboard excedente 24/08: 10/50 não 0/60 ─────────── */
-check("F. 24/08 ledger 60/10/50; progresso usa specialBook não sair-cedo", () => {
+check("F. 24/08 ledger 60/25/35; progresso usa specialBook não sair-cedo", () => {
   const seed = buildSeedData();
   const led = specialExcessLedger("2026-08-24", seed.compensations, 60);
   assert.equal(led.original, 60);
-  assert.equal(led.realized, 10);
-  assert.equal(led.free, 50);
+  assert.equal(led.realized, 25);
+  assert.equal(led.free, 35);
   assert.ok(panelSrc.includes("Progresso de realocação do excedente"));
   assert.ok(panelSrc.includes("specialBook.realized"));
   assert.ok(!panelSrc.includes("excessTotals.concluded"));
@@ -236,13 +236,13 @@ check("I. observation igual ao label do motivo é omitida", () => {
 });
 
 /* ── Fontes inversas ──────────────────────────────────────── */
-check("J. eligibleSpecialSourcesForDeficit lista 24/08 para quitar 20/08", () => {
+check("J. eligibleSpecialSourcesForDeficit lista 24/08 para quitar 19/08", () => {
   const seed = buildSeedData();
   const srcs = eligibleSpecialSourcesForDeficit(
-    "2026-08-20", seed.entries, seed.compensations, seed.absences,
+    "2026-08-19", seed.entries, seed.compensations, seed.absences,
     seed.companyCalendars, settings, seed.excessReasons, TODAY,
   );
-  assert.ok(srcs.some((v) => v.date === "2026-08-24" && v.freeSpecial === 50));
+  assert.ok(srcs.some((v) => v.date === "2026-08-24" && v.freeSpecial === 35));
 });
 
 reset([]);

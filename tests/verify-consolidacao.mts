@@ -1,6 +1,6 @@
 /**
  * VERIFICAÇÃO — RODADA DE CONSOLIDAÇÃO
- * UX, rastreabilidade, duplo clique, excedentes, déficits e seed 2.0.
+ * UX, rastreabilidade, duplo clique, excedentes, déficits e seed 3.0.
  *
  * Executar: npx tsx tests/verify-consolidacao.mts
  */
@@ -284,7 +284,7 @@ check("M. 21/08 seed: déficit 15 quitado com 5 regular + 10 especial de 24/08",
 });
 
 /* ── N. Gestão 24/08: 60 original / 10 realocado / 50 livre ─── */
-check("N. 24/08 ledger especial = 60 / realizado 10 / livre 50 (planejado ≠ tratado)", () => {
+check("N. 24/08 ledger especial = 60 / realizado 25 / livre 35 (planejado ≠ tratado)", () => {
   const seed = buildSeedData();
   const day = computeDay(seed.entries.filter((e) => e.date === "2026-08-24"), settings);
   assert.equal(day.workedMinutes, 660);
@@ -297,9 +297,9 @@ check("N. 24/08 ledger especial = 60 / realizado 10 / livre 50 (planejado ≠ tr
   assert.equal(v.excessSpecial, 60);
   const led = specialExcessLedger("2026-08-24", seed.compensations, 60);
   assert.equal(led.original, 60);
-  assert.equal(led.realized, 10);
+  assert.equal(led.realized, 25);
   assert.equal(led.planned, 0);
-  assert.equal(led.free, 50);
+  assert.equal(led.free, 35);
   assert.equal(led.status, "parcial");
   assert.ok(panelSrc.includes('label="Já realocado"'));
   assert.ok(panelSrc.includes('label="Ainda a realocar"'));
@@ -364,14 +364,15 @@ check("S. acordado-dispensado integral sem batidas = expected 0, déficit 0, sal
 });
 
 /* ── T. Seed 2.0 determinístico ─────────────────────────────── */
-check("T. seed 2.0: datas fixas, 25/08 vazio regular, sem calendário importado", () => {
+check("T. seed 3.0: datas fixas, calendário fictício, 20/08 quitado", () => {
   const seed = buildSeedData();
-  assert.equal(seed.companyCalendars, undefined, "seed NÃO importa calendários da empresa");
+  assert.ok((seed.companyCalendars?.length ?? 0) >= 1, "seed traz calendário fictício");
   assert.equal(seed.user.birthDate, "1990-08-10");
   assert.equal(seed.entries.some((e) => e.date === "2026-08-25"), false, "25/08 sem batidas");
   assert.ok(seed.entries.some((e) => e.date === "2026-08-24"));
   assert.ok(seed.entries.some((e) => e.date === "2026-08-07"));
   assert.ok(seed.entries.some((e) => e.date === "2026-09-07"), "07/09 futuro escrito direto");
+  assert.ok(seed.entries.some((e) => e.date === "2026-09-03"), "03/09 registro futuro parcial");
   assert.ok(seed.entries.some((e) => e.date === "2026-04-29"), "29/04 ciclo anterior");
   assert.ok(seed.faltas.some((f) => f.date === "2026-08-31"), "falta prevista 31/08");
   assert.ok(seed.absences.some((a) => a.kind === "abono" && a.startDate === "2026-08-10"));
@@ -379,11 +380,11 @@ check("T. seed 2.0: datas fixas, 25/08 vazio regular, sem calendário importado"
   const semMotivo = seed.excessReasons?.filter((r) => r.date === "2026-08-11") ?? [];
   assert.equal(semMotivo.length, 0, "11/08 especial sem motivo");
   assert.ok(seed.excessReasons?.some((r) => r.date === "2026-08-24" && r.reason === "demanda-urgente"));
-  const acordo = seed.compensations.find((c) => c.kind === "acordo" && c.sourceDate === "2026-08-06")!;
+  const acordo = seed.compensations.find((c) => c.kind === "acordo" && c.sourceDate === "2026-08-06" && c.status === "concluida")!;
   assert.equal(acordo.minutes, 120, "acordo concluído cabe no teto de 10h de 07/08");
   assert.equal(acordo.status, "concluida");
   const d19 = deficitViews(
-    seed.entries, seed.compensations, seed.absences, undefined, seed.faltas, settings,
+    seed.entries, seed.compensations, seed.absences, seed.companyCalendars, seed.faltas, settings,
     { from: "2026-08-19", to: "2026-08-19" }, TODAY,
   )[0];
   assert.equal(d19.originalMinutes, 30);
@@ -391,11 +392,11 @@ check("T. seed 2.0: datas fixas, 25/08 vazio regular, sem calendário importado"
   assert.equal(d19.plannedMinutes, 10);
   assert.equal(d19.openMinutes, 20);
   const d20 = deficitViews(
-    seed.entries, seed.compensations, seed.absences, undefined, seed.faltas, settings,
+    seed.entries, seed.compensations, seed.absences, seed.companyCalendars, seed.faltas, settings,
     { from: "2026-08-20", to: "2026-08-20" }, TODAY,
   )[0];
   assert.equal(d20.originalMinutes, 15);
-  assert.equal(d20.openMinutes, 15);
+  assert.equal(d20.openMinutes, 0, "20/08 totalmente quitado");
 });
 
 reset([]);

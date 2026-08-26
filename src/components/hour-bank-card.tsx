@@ -205,21 +205,24 @@ export function HourBankCard({
               Previsão de horas a compensar
             </p>
             <p className="text-sm font-extrabold tabular-nums text-slate-800">
-              Total previstas: {formatMinutes(future.totalOriginal)}
+              {formatMinutes(future.totalOriginal)} previstas
             </p>
           </div>
           <p className="mt-1 text-xs text-slate-500">
             Até {formatDateBR(annualCycleClose(getAnnualPointCycle(today)))} · não altera o saldo realizado
           </p>
-          <div className="mt-2 grid gap-1 text-xs text-slate-600 sm:grid-cols-2">
-            <p className="sm:col-span-2 text-[11px] font-extrabold uppercase tracking-wider text-slate-400">
-              Origem
-            </p>
-            <p>Calendário: <b>{formatMinutes(future.calendarMinutes)}</b></p>
-            <p>Faltas: <b>{formatMinutes(future.faltaMinutes)}</b></p>
-            <p>Registros futuros: <b>{formatMinutes(future.otherMinutes)}</b></p>
-            <p>Acordos futuros: <b>{formatMinutes(future.acordoMinutes)}</b></p>
-          </div>
+          <p className="mt-2 text-[11px] font-extrabold uppercase tracking-wider text-slate-400">
+            Origem da previsão
+          </p>
+          <p className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-slate-600">
+            <span>Calendário <b>{formatMinutes(future.calendarMinutes)}</b></span>
+            <span className="text-slate-300">·</span>
+            <span>Faltas <b>{formatMinutes(future.faltaMinutes)}</b></span>
+            <span className="text-slate-300">·</span>
+            <span>Registros futuros <b>{formatMinutes(future.otherMinutes)}</b></span>
+            <span className="text-slate-300">·</span>
+            <span>Acordos futuros <b>{formatMinutes(future.acordoMinutes)}</b></span>
+          </p>
           <div className="mt-2">
             <button
               type="button"

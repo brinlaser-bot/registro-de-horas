@@ -105,6 +105,7 @@ export function ImportBackupModal({ open, onClose }: Props) {
       absences: parsed.absences,
       companyCalendars: parsed.companyCalendars,
       faltas: parsed.faltas,
+      excessReasons: parsed.excessReasons,
     });
     setBusy(false);
     toast.show("Backup restaurado com sucesso.");
@@ -120,6 +121,7 @@ export function ImportBackupModal({ open, onClose }: Props) {
       absences: parsed.absences,
       companyCalendars: parsed.companyCalendars,
       faltas: parsed.faltas,
+      excessReasons: parsed.excessReasons,
     });
     setBusy(false);
     toast.show("Backup mesclado com sucesso.");

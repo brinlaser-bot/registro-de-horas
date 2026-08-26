@@ -113,10 +113,10 @@ check("C. prefill = min(unplanned, capacidade) ao abrir/trocar data", () => {
 check("D. card do dia devedor mostra Usar excedente disponível", () => {
   const seed = buildSeedData();
   const srcs = eligibleSpecialSourcesForDeficit(
-    "2026-08-20", seed.entries, seed.compensations, seed.absences,
+    "2026-08-19", seed.entries, seed.compensations, seed.absences,
     seed.companyCalendars, settings, seed.excessReasons, TODAY,
   );
-  assert.ok(srcs.some((v) => v.date === "2026-08-24" && v.freeSpecial === 50));
+  assert.ok(srcs.some((v) => v.date === "2026-08-24" && v.freeSpecial === 35));
   assert.ok(dayCardSrc.includes("Usar excedente disponível"));
   assert.ok(dayCardSrc.includes("onUseAvailableExcess"));
   assert.ok(regsSrc.includes("onUseAvailableExcess"));
@@ -134,7 +134,7 @@ check("E. ciclo anual: 20/08 aparece; futuro não; quitado some; 100% planejado 
     seed.entries, seed.compensations, seed.absences, seed.companyCalendars,
     seed.faltas, settings, cycle, TODAY,
   );
-  assert.ok(views.some((d) => d.date === "2026-08-20" && d.openMinutes > 0), "20/08 (período anterior) no ciclo");
+  assert.ok(views.some((d) => d.date === "2026-08-19" && d.openMinutes > 0), "19/08 (período anterior) no ciclo");
   assert.ok(!views.some((d) => d.date > TODAY), "futuro não entra como déficit factual");
   const d21 = views.find((d) => d.date === "2026-08-21");
   assert.ok(!d21 || d21.openMinutes === 0, "21/08 quitado não é pendência");

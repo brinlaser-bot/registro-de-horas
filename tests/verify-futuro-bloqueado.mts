@@ -16,13 +16,12 @@ import {
 } from "../src/lib/company-calendar.ts";
 import { buildDebtDays } from "../src/lib/debt.ts";
 import { actions, getAppData } from "../src/lib/store.ts";
-import { effectiveFaltas } from "../src/lib/faltas.ts";
+import { canRegisterFalta, effectiveFaltas } from "../src/lib/faltas.ts";
 import { annualCycleBounds, getAnnualPointCycle } from "../src/lib/periods.ts";
 import {
   addDays,
   FUTURE_DATE_ERROR,
   isFutureDate,
-  isWeekend,
   todayString,
 } from "../src/lib/time.ts";
 import type { User, WorkSettings } from "../src/lib/types.ts";
@@ -41,12 +40,21 @@ const cal2526 = buildCompanyCalendar(parseCompanyCalendarCsv(read("calendario-se
 const cal2627 = buildCompanyCalendar(parseCompanyCalendarCsv(read("calendario-ficticio-2026-2027.csv"), settings).entries);
 const both = [cal2526, cal2627];
 
-// Datas derivadas do relógio real — robustas a qualquer dia de execução
+// Datas derivadas do relógio real — NÃO usar "ontem" cego: a data pode ser
+// folga/abonado/COMPENSAR no calendário e o gate de falta recusa.
 const HOJE = todayString();
-const FUT = addDays(HOJE, 8);   // análogo ao 31/08 do bug report
+const FUT = addDays(HOJE, 8);
 const FUT2 = addDays(HOJE, 31);
-let ONTEM = addDays(HOJE, -1);
-while (isWeekend(ONTEM)) ONTEM = addDays(ONTEM, -1); // último dia útil
+function pickFaltaDate(from: string, step: 1 | -1): string {
+  let d = addDays(from, step);
+  for (let i = 0; i < 120; i++) {
+    if (canRegisterFalta(d, [], [], both, settings, []).ok) return d;
+    d = addDays(d, step);
+  }
+  throw new Error("nenhum dia elegível para falta no intervalo");
+}
+const PASSADO = pickFaltaDate(HOJE, -1);
+const FUT_FALTA = pickFaltaDate(HOJE, 1);
 const BOUNDS = annualCycleBounds(getAnnualPointCycle(HOJE));
 
 const reset = () =>
@@ -108,45 +116,45 @@ check("D. hoje: batida (entrada/saída, live/manual) continua permitida", () => 
 });
 
 /* ── E. data passada: lançamento manual continua permitido ── */
-check(`E. passado (${ONTEM}): lançamento manual entrada+saída continua permitido`, () => {
+check(`E. passado (${PASSADO}): lançamento manual entrada+saída continua permitido`, () => {
   reset();
-  assert.equal(isFutureDate(ONTEM), false);
-  assert.equal(actions.addEntry({ date: ONTEM, time: "08:00", type: "entrada", note: null, source: "manual" }).ok, true);
-  assert.equal(actions.addEntry({ date: ONTEM, time: "17:00", type: "saida", note: null, source: "manual" }).ok, true);
+  assert.equal(isFutureDate(PASSADO), false);
+  assert.equal(actions.addEntry({ date: PASSADO, time: "08:00", type: "entrada", note: null, source: "manual" }).ok, true);
+  assert.equal(actions.addEntry({ date: PASSADO, time: "17:00", type: "saida", note: null, source: "manual" }).ok, true);
   assert.equal(getAppData().entries.length, 2);
 });
 
 /* ── F. falta prevista futura: continua válida e com saldo 0 ─ */
-check(`F. falta prevista em ${FUT}: registrável, saldo 0, sem déficit/dívida`, () => {
+check(`F. falta prevista em ${FUT_FALTA}: registrável, saldo 0, sem déficit/dívida`, () => {
   reset();
-  assert.equal(actions.addFalta(FUT).ok, true, "Falta prevista PODE ser futura");
+  assert.equal(actions.addFalta(FUT_FALTA).ok, true, "Falta prevista PODE ser futura");
   const st = getAppData();
   assert.equal(effectiveFaltas(st.faltas, HOJE).length, 0, "prevista não é efetiva");
   const debts = buildDebtDays(st.entries, st.compensations, settings, BOUNDS, st.absences, st.companyCalendars, effectiveFaltas(st.faltas, HOJE));
-  assert.equal(debts.find((d) => d.date === FUT), undefined, "sem déficit/saldo antes da data");
+  assert.equal(debts.find((d) => d.date === FUT_FALTA), undefined, "sem déficit/saldo antes da data");
 });
 
 /* ── G. falta efetiva passada: continua gerando déficit ───── */
-check(`G. falta efetiva ${ONTEM}: déficit = jornada efetiva do dia (sem regressão)`, () => {
+check(`G. falta efetiva ${PASSADO}: déficit = jornada efetiva do dia (sem regressão)`, () => {
   reset();
-  assert.equal(actions.addFalta(ONTEM).ok, true);
+  assert.equal(actions.addFalta(PASSADO).ok, true);
   const st = getAppData();
   const debts = buildDebtDays(st.entries, st.compensations, settings, BOUNDS, st.absences, st.companyCalendars, effectiveFaltas(st.faltas, HOJE));
-  const d = debts.find((x) => x.date === ONTEM && x.kind === "deficit");
+  const d = debts.find((x) => x.date === PASSADO && x.kind === "deficit");
   assert.ok(d, "déficit da falta efetiva");
-  assert.equal(d.debtMinutes, companyDayContext(ONTEM, [], [], both, settings).effectiveExpected);
+  assert.equal(d.debtMinutes, companyDayContext(PASSADO, [], [], both, settings).effectiveExpected);
 });
 
 /* ── H. futuro bloqueia ANTES do conflito com falta (§7) ──── */
 check("H. falta prevista + batida futura: erro de DATA FUTURA (nunca o diálogo de conflito)", () => {
   reset();
-  assert.equal(actions.addFalta(FUT).ok, true);
-  const res = actions.addEntry({ date: FUT, time: "08:00", type: "entrada", note: null });
+  assert.equal(actions.addFalta(FUT_FALTA).ok, true);
+  const res = actions.addEntry({ date: FUT_FALTA, time: "08:00", type: "entrada", note: null });
   assert.equal(res.ok, false);
   assert.equal(res.error, FUTURE_DATE_ERROR, "bloqueio de data futura precede qualquer conflito com falta");
   // Data PASSADA com falta: o guard de futuro NÃO dispara — o fluxo de
   // confirmação de falta (UI, resolveFaltaConflict) segue disponível.
-  assert.equal(isFutureDate(ONTEM), false);
+  assert.equal(isFutureDate(PASSADO), false);
 });
 
 /* ── I. sábado/abonado/calendário: nenhuma regressão ──────── */
@@ -168,13 +176,13 @@ check("I. sábado +2h, feriado abonado +2h e obrigação 25/08 (8h) intactos", (
 /* ── J. edição: nunca move registro para data futura ──────── */
 check("J. updateEntry: patch com data futura rejeitado (histórico preservado); edição normal segue", () => {
   reset();
-  assert.equal(actions.addEntry({ date: ONTEM, time: "08:00", type: "entrada", note: null }).ok, true);
+  assert.equal(actions.addEntry({ date: PASSADO, time: "08:00", type: "entrada", note: null }).ok, true);
   const entry = getAppData().entries[0];
   const res = actions.updateEntry(entry.id, { date: FUT });
   assert.equal(res.ok, false);
   assert.equal(res.error, FUTURE_DATE_ERROR);
   const after = getAppData().entries[0];
-  assert.equal(after.date, ONTEM, "data original preservada");
+  assert.equal(after.date, PASSADO, "data original preservada");
   // Edição histórica continua funcionando (hora e data passada/hoje)
   assert.equal(actions.updateEntry(entry.id, { time: "09:30" }).ok, true);
   assert.equal(getAppData().entries[0].time, "09:30");

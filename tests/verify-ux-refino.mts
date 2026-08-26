@@ -107,11 +107,14 @@ check("D. bloco previsao: título, Até 30/04, origens; sem Já programado / cob
   assert.ok(bankSrc.includes("Previsão de horas a compensar"));
   assert.ok(bankSrc.includes("Até {formatDateBR(annualCycleClose(getAnnualPointCycle(today)))}"));
   assert.ok(bankSrc.includes("não altera o saldo realizado"));
-  assert.ok(bankSrc.includes("Total previstas:"));
-  assert.ok(bankSrc.includes("Calendário:"));
-  assert.ok(bankSrc.includes("Faltas:"));
-  assert.ok(bankSrc.includes("Registros futuros:"));
-  assert.ok(bankSrc.includes("Acordos futuros:"));
+  assert.ok(!bankSrc.includes("Total previstas:"));
+  assert.ok(bankSrc.includes("previstas"));
+  assert.ok(bankSrc.includes("Origem da previsão"));
+  assert.ok(bankSrc.includes("Calendário"));
+  assert.ok(bankSrc.includes("Faltas"));
+  assert.ok(bankSrc.includes("Registros futuros"));
+  assert.ok(bankSrc.includes("Acordos futuros"));
+  assert.ok(bankSrc.includes("flex-wrap items-center gap-x-1.5"));
   assert.ok(!bankSrc.includes("Já programado:"));
   assert.ok(!bankSrc.includes("Ainda sem cobertura"));
   assert.ok(!bankSrc.includes("Compromissos futuros do ciclo"));
@@ -155,6 +158,14 @@ check("G. Realocar excedente; 35min a realocar; Excedente do limite diário a re
   assert.ok(dayCardSrc.includes("sm:flex-row sm:flex-wrap sm:items-center"), "adicionar + atalhos na mesma linha no desktop");
   const guardas = dayCardSrc.split("!futureDay && !abonoDay && (").length - 1;
   assert.ok(guardas >= 2, "formulário E atalhos continuam em guardas distintas");
+  assert.ok(dayCardSrc.includes("sm:flex sm:flex-wrap"), "batidas em fluxo horizontal no desktop");
+  assert.ok(dayCardSrc.includes("min-[360px]:grid-cols-2"), "mobile: preferência por 2 colunas");
+  assert.ok(dayCardSrc.includes("sm:w-auto sm:min-w-[11.5rem]"), "chip não ocupa 100% no desktop");
+  assert.ok(dayCardSrc.includes("Registro manual"));
+  assert.ok(dayCardSrc.includes("Adicionar registro manual"));
+  assert.ok(dayCardSrc.includes("shortcutsOpen"), "atalhos recolhidos no mobile");
+  assert.ok(dayCardSrc.includes("Atalhos"));
+  assert.ok(dayCardSrc.includes("sm:hidden"));
 });
 
 /* ── H. Tooltip: programado ≠ compensado; barra inalterada ─ */
