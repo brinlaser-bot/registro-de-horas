@@ -197,7 +197,7 @@ export default function ResumoPage() {
 
       <Card
         title="Barras empilhadas do período"
-        subtitle="Base · extra no ponto · excedente (dívida) · horas compensadas — férias/afastamentos reduzem a base"
+        subtitle="Base · extra no ponto · excedente do limite diário · horas compensadas — férias/afastamentos reduzem a base"
       >
         {/* Preparação + componente COMPARTILHADOS (src/components/stacked-period-chart):
             mesma fonte usada pela Visão geral — dados idênticos para o mesmo período. */}

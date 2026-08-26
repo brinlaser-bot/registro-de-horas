@@ -160,7 +160,7 @@ export function AllocateExcessModal({
     <Modal
       open={open}
       onClose={onClose}
-      title={inverse ? "Quitar déficit com excedente realizado" : "Alocar excedente"}
+      title={inverse ? "Quitar déficit com excedente disponível" : "Alocar excedente"}
       /* title="Alocar excedente" — fluxo clássico preservado */
       subtitle="Vincula o excedente do limite diário já realizado a um déficit factual — não cria programação futura."
       wide

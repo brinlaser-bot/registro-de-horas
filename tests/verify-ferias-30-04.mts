@@ -240,8 +240,8 @@ check("P.11. acordo parcial a compensar 13–17 em 11/08 sem batidas: acordo 4h 
   // pela presença do acordo (a guarda acordoMinutes === 0 foi removida).
   const src = readFileSync(new URL("../src/components/day-card.tsx", import.meta.url), "utf8");
   assert.ok(
-    src.includes("shortcuts?.canCompensate && shortcuts.deficitRemaining > 0"),
-    "atalho de déficit renderiza mesmo com acordo no dia",
+    src.includes("!futureDay && shortcuts?.canCompensate && deficitOpen > 0"),
+    "atalho de déficit renderiza mesmo com acordo no dia (factual em aberto)",
   );
   assert.ok(
     !src.includes("canCompensate && shortcuts.acordoMinutes === 0"),

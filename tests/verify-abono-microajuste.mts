@@ -154,7 +154,7 @@ check("6. Resumo/gráfico: Abono identificado, jornada 0, saldo +0, totais sem i
   const d = data.find((x) => x.date === "2026-09-02");
   assert.equal(d?.marker, "abono-aniversario");
   assert.equal(d?.markerLabel, "Abono de aniversário");
-  assert.equal(d?.regularBalance, 0);
+  assert.equal(d?.regularBalance, undefined, "data futura: tooltip neutro (sem saldo factual)");
   assert.equal(d?.expectedMinutes, 0, "jornada 0 no detalhamento");
   reset();
 });

@@ -28,20 +28,18 @@ import {
 import { isBirthdayToday } from "@/lib/absences";
 import { companyDayContext } from "@/lib/company-calendar";
 import {
-  annualCycleBounds,
-  getAnnualPointCycle,
   getPointPeriod,
   listDaysBetween,
   periodLabel,
   sameAnnualCycle,
 } from "@/lib/periods";
-import { activeAcordos, canCompleteComp, extraCapacityForDate, kindOf, usesHourExtra } from "@/lib/debt";
+import { canCompleteComp, extraCapacityForDate, kindOf, usesHourExtra } from "@/lib/debt";
 import { canRegisterFalta, dayBalanceContribution, faltaOnDate } from "@/lib/faltas";
 import { excessReasonOnDate, shouldPromptExcessReason } from "@/lib/hour-bank";
 import { HourBankCard } from "@/components/hour-bank-card";
 import { ExcessReasonModal } from "@/components/excess-reason-modal";
 import type { CompKind, DayResult, DaySummary } from "@/lib/types";
-import { Badge, Button, Card, EmptyState, Skeleton, StatCard } from "@/components/ui";
+import { Badge, Button, Card, EmptyState, ExcessTenBadge, Skeleton, StatCard } from "@/components/ui";
 import { QuickPunch } from "@/components/quick-punch";
 import { ExcessPanel } from "@/components/excess-panel";
 import { StackedPeriodChart } from "@/components/stacked-period-chart";
@@ -170,23 +168,22 @@ export default function DashboardPage() {
     }
   };
 
-  /** §15: falta de hoje é passada → "Excluir falta", com confirmação. */
+  /** Excluir falta de hoje — sem window.confirm; mutex anti duplo clique. */
   const removeFaltaHoje = async () => {
+    if (busyFalta) return;
     const f = faltaOnDate(faltas, todayStr);
     if (!f) return;
-    if (
-      !window.confirm(
-        `Excluir a falta de ${formatDateShortBR(todayStr)}?\nO déficit gerado por ela será removido.`,
-      )
-    ) {
-      return;
+    setBusyFalta(true);
+    try {
+      const res = actions.removeFalta(f.id);
+      if (!res.ok) {
+        toast.show(res.error ?? "Não foi possível excluir a falta.", "error");
+        return;
+      }
+      toast.show("Falta excluída");
+    } finally {
+      setBusyFalta(false);
     }
-    const res = actions.removeFalta(f.id);
-    if (!res.ok) {
-      toast.show(res.error ?? "Não foi possível excluir a falta.", "error");
-      return;
-    }
-    toast.show("Falta removida. O déficit dela foi revertido.");
   };
 
   /**
@@ -336,43 +333,6 @@ export default function DashboardPage() {
     if (done > 0) toast.show("Quitação confirmada — déficit abatido!");
   };
 
-  /** Acordos a compensar ativos do ciclo anual atual (independe do período 21→20). */
-  const acordos = useMemo(() => {
-    const bounds = annualCycleBounds(getAnnualPointCycle(todayStr));
-    return activeAcordos(entries, compensations, settings, bounds, absences);
-  }, [entries, compensations, absences, settings, todayStr]);
-
-  /** Abre o formulário central já preenchido para quitar um acordo/déficit. */
-  const openExtraForm = (
-    kind: CompKind,
-    sourceDate: string,
-    planning: {
-      originalMinutes: number;
-      compensatedMinutes: number;
-      plannedMinutes: number;
-      openMinutes: number;
-      unplannedMinutes: number;
-    },
-  ) => {
-    const cap = extraCapacityForDate(todayStr, entries, compensations, settings, { companyCalendars });
-    const prefill = Math.max(0, Math.min(planning.unplannedMinutes, cap.available));
-    if (prefill <= 0) {
-      toast.show("Não há minutos sem programação (ou capacidade) para nova compensação.", "error");
-      return;
-    }
-    setCompPlanning(planning);
-    setCompDraft({
-      kind,
-      initial: {
-        sourceDate,
-        targetDate: todayStr,
-        minutes: prefill,
-        note: kind === "acordo" ? `Acordo de ${formatDateShortBR(sourceDate)}` : `Déficit de ${formatDateShortBR(sourceDate)}`,
-      },
-    });
-    setCompOpen(true);
-  };
-
   if (!mounted) {
     return (
       <div className="flex flex-col gap-4 lg:gap-5">
@@ -514,7 +474,7 @@ export default function DashboardPage() {
             compact
             label="Excedente do período"
             value={formatMinutes(totals.excessTotal)}
-            sub={`acima de ${formatMinutes(settings.maxDailyMinutes)}/dia · ${totals.trackedDays} dia(s) registrados`}
+            sub={<>excedente do limite diário <ExcessTenBadge /> · {totals.trackedDays} dia(s) registrados</>}
             tone={excessTone}
             icon={<TriangleAlert size={16} />}
           />
@@ -633,56 +593,6 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Acordos a compensar — ativos no ciclo anual, independentemente do período */}
-      <Card
-        title="Acordos a compensar"
-        subtitle={`Pendências ativas do ciclo anual ${getAnnualPointCycle(todayStr)} — visíveis até quitação ou fechamento anual (30/04)`}
-      >
-        {acordos.length === 0 ? (
-          <p className="text-xs text-slate-400">
-            Nenhum acordo pendente neste ciclo anual.
-          </p>
-        ) : (
-          <ul className="space-y-3">
-            {acordos.map((d) => (
-              <li key={d.date} className="flex flex-wrap items-center gap-3 rounded-xl border border-violet-100 bg-violet-50/50 p-3">
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-bold text-slate-800">
-                    Acordo a compensar — {formatMinutes(d.originalMinutes)}
-                  </p>
-                  <p className="mt-0.5 text-xs text-slate-500">
-                    Origem: {formatDateShortBR(d.date)} · Ciclo anual:{" "}
-                    {getAnnualPointCycle(d.date)} · Original:{" "}
-                    <b>{formatMinutes(d.originalMinutes)}</b> · Compensado:{" "}
-                    <b className="text-emerald-600">{formatMinutes(d.compensatedMinutes)}</b> ·
-                    Planejado: <b className="text-sky-600">{formatMinutes(d.plannedMinutes)}</b> ·
-                    Em aberto: <b className="text-amber-600">{formatMinutes(d.remainingMinutes)}</b> ·
-                    Sem programação: <b>{formatMinutes(d.unplannedMinutes)}</b>
-                  </p>
-                </div>
-                {d.unplannedMinutes > 0 && (
-                  <Button
-                    size="sm"
-                    variant="subtle"
-                    onClick={() =>
-                      openExtraForm("acordo", d.date, {
-                        originalMinutes: d.originalMinutes,
-                        compensatedMinutes: d.compensatedMinutes,
-                        plannedMinutes: d.plannedMinutes,
-                        openMinutes: d.remainingMinutes,
-                        unplannedMinutes: d.unplannedMinutes,
-                      })
-                    }
-                  >
-                    Programar hora extra
-                  </Button>
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
-      </Card>
-
       <div className="grid gap-6 lg:grid-cols-2">
         {/* Compensações pendentes */}
         <Card
@@ -708,8 +618,13 @@ export default function DashboardPage() {
                     <p className="text-sm font-bold text-slate-800">
                       Compensar {formatMinutes(c.minutes)}{" "}
                       <span className="font-medium text-slate-400">
-                        ({(c.kind ?? "excedente") === "deficit" ? "hora extra de " : "excedente de "}
-                        {formatDateShortBR(c.sourceDate)})
+                        ({kindOf(c) === "deficit"
+                          ? `hora extra de ${formatDateShortBR(c.sourceDate)}`
+                          : kindOf(c) === "acordo"
+                            ? `acordo de ${formatDateShortBR(c.sourceDate)}`
+                            : kindOf(c) === "calendario"
+                              ? `calendário de ${formatDateShortBR(c.sourceDate)}`
+                              : `excedente do limite diário de ${formatDateShortBR(c.sourceDate)}`})
                       </span>
                     </p>
                     <p className="mt-0.5 text-xs text-slate-500">
@@ -767,7 +682,7 @@ export default function DashboardPage() {
             resolvido pelo helper central, com os especiais do fechamento anual). */}
         <Card
           title="Barras empilhadas do período"
-          subtitle="Base · extra no ponto · excedente (dívida) · horas compensadas"
+          subtitle="Base · extra no ponto · excedente do limite diário · horas compensadas"
         >
           <StackedPeriodChart
             entries={entries}
@@ -811,7 +726,7 @@ export default function DashboardPage() {
                   {d.balanceMinutes >= 0 ? "+" : ""}
                   {formatMinutes(d.balanceMinutes)}
                 </span>
-                {d.excessMinutes > 0 ? <Badge tone="rose">+10h</Badge> : <Badge tone="slate">ok</Badge>}
+                {d.excessMinutes > 0 ? <ExcessTenBadge /> : <Badge tone="slate">ok</Badge>}
               </Link>
             ))}
           </div>

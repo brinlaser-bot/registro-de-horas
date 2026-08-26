@@ -25,7 +25,7 @@ import {
 import type { Compensation, DayResult, WorkSettings } from "@/lib/types";
 import type { EntryType, TimeEntryLike } from "@/lib/time";
 import { formatDateBR, formatDateShortBR, formatMinutes, isFutureDate, nextWorkday, nowTimeString, todayString, weekdayLong } from "@/lib/time";
-import { Badge, Button, Input, Select } from "@/components/ui";
+import { Badge, Button, ExcessTenBadge, Input, Select } from "@/components/ui";
 import { CompensationForm, type CompFormData } from "@/components/compensation-form";
 import { SmartExit } from "@/components/smart-exit";
 import { allocatedForSource, overflowForSource, type ExtraCapacity } from "@/lib/debt";
@@ -151,6 +151,10 @@ interface Props {
   onRegisterReason?: (date: string) => void;
   /** Abre o fluxo próprio de alocação do excedente especial já realizado. */
   onAllocateExcess?: (date: string) => void;
+  /** Fluxo inverso: quitar o déficit DESTE dia com excedente realizado. */
+  onUseAvailableExcess?: (date: string) => void;
+  /** Há excedente do limite diário elegível no ciclo (motivo + livre). */
+  hasAvailableSpecialExcess?: boolean;
 }
 
 export function DayCard({
@@ -177,6 +181,8 @@ export function DayCard({
   creditView,
   onRegisterReason,
   onAllocateExcess,
+  onUseAvailableExcess,
+  hasAvailableSpecialExcess,
 }: Props) {
   // Regra: todos os dias iniciam RECOLHIDOS — o usuário expande apenas o dia desejado.
   const [expanded, setExpanded] = useState(false);
@@ -195,6 +201,7 @@ export function DayCard({
     note: "",
   });
   const [busy, setBusy] = useState(false);
+  const [busyFalta, setBusyFalta] = useState(false);
   const [compOpen, setCompOpen] = useState(false);
   const [compPlanning, setCompPlanning] = useState<{
     originalMinutes: number;
@@ -549,18 +556,11 @@ export function DayCard({
                   size="sm"
                   variant="ghost"
                   className="!text-rose-600 hover:!bg-rose-100"
+                  disabled={busyFalta}
                   onClick={() => {
-                    const isPrevista = falta.status === "prevista";
-                    if (
-                      !window.confirm(
-                        isPrevista
-                          ? `Cancelar a falta prevista de ${formatDateShortBR(d.date)}?`
-                          : `Excluir a falta de ${formatDateShortBR(d.date)}?\nO déficit gerado por ela será removido.`,
-                      )
-                    ) {
-                      return;
-                    }
-                    void onRemoveFalta?.(falta.id);
+                    if (busyFalta) return;
+                    setBusyFalta(true);
+                    void Promise.resolve(onRemoveFalta?.(falta.id)).finally(() => setBusyFalta(false));
                   }}
                 >
                   <Trash2 size={13} /> {falta.status === "prevista" ? "Cancelar falta" : "Excluir falta"}
@@ -571,7 +571,11 @@ export function DayCard({
 
           {/* Métricas */}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <MiniStat label="Trabalhado" value={formatMinutes(d.workedMinutes)} tone="text-slate-900" />
+            <MiniStat
+              label={futureDay ? "Registro previsto" : "Trabalhado"}
+              value={formatMinutes(d.workedMinutes)}
+              tone="text-slate-900"
+            />
             <MiniStat
               label="Base regular"
               value={formatMinutes(regularExpected)}
@@ -592,10 +596,10 @@ export function DayCard({
               <MiniStat label="Saldo regular" value={`${regularBalance >= 0 ? "+" : ""}${formatMinutes(regularBalance)}`} tone={balanceTone} />
             )}
             <MiniStat
-              label="No ponto*"
+              label={futureDay ? "Previsto no ponto" : "No ponto*"}
               value={formatMinutes(d.registrableMinutes)}
               tone="text-indigo-600"
-              sub={d.excessMinutes > 0 ? "limitado a 10h" : undefined}
+              sub={futureDay ? "ainda não realizado" : d.excessMinutes > 0 ? "limitado a 10h" : undefined}
             />
           </div>
 
@@ -627,7 +631,7 @@ export function DayCard({
                       .map((c) => (
                         <li key={c.id}>
                           {formatMinutes(c.minutes)}{" "}
-                          {c.portion === "especial" ? "de excedente >10h" : "de crédito regular"}{" "}
+                          {c.portion === "especial" ? "de excedente do limite diário" : "de crédito regular"}{" "}
                           em {formatDateBR(c.targetDate)}
                         </li>
                       ))}
@@ -640,7 +644,7 @@ export function DayCard({
           {/* Faixa PRIORITÁRIA do excedente especial — restante a realocar em destaque. */}
           {showSplit && (
             <div
-              className={`mt-3 flex flex-wrap items-center gap-2 rounded-xl border px-3 py-3 ${
+              className={`mt-3 flex flex-col gap-3 rounded-xl border px-3 py-3 sm:flex-row sm:flex-wrap sm:items-start ${
                 excessTreated
                   ? "border-emerald-200 bg-emerald-50"
                   : "border-rose-300 bg-rose-50 ring-1 ring-rose-200"
@@ -650,9 +654,9 @@ export function DayCard({
                 size={18}
                 className={`shrink-0 ${excessTreated ? "text-emerald-600" : "text-rose-600"}`}
               />
-              <div className={`min-w-0 flex-1 text-xs font-medium ${excessTreated ? "text-emerald-800" : "text-rose-800"}`}>
-                <p className="text-[11px] font-extrabold uppercase tracking-wider">
-                  {excessTreated ? "Excedente tratado ✓" : "⚠ Excedente do limite diário"}
+              <div className={`min-w-0 w-full flex-1 text-xs font-medium sm:w-auto ${excessTreated ? "text-emerald-800" : "text-rose-800"}`}>
+                <p className="flex flex-wrap items-center gap-1.5 text-[11px] font-extrabold uppercase tracking-wider">
+                  {excessTreated ? "Excedente tratado ✓" : <>⚠ Excedente do limite diário <ExcessTenBadge /></>}
                 </p>
                 <div className="mt-1.5 flex flex-wrap items-end gap-x-4 gap-y-1">
                   <span>
@@ -660,7 +664,7 @@ export function DayCard({
                   </span>
                   {excessAllocated > 0 && (
                     <span>
-                      Alocado: <b>{formatMinutes(excessAllocated)}</b>
+                      Realocado: <b>{formatMinutes(excessAllocated)}</b>
                     </span>
                   )}
                   <span className={excessTreated ? "" : "text-sm font-extrabold text-rose-700"}>
@@ -689,6 +693,7 @@ export function DayCard({
                   </div>
                 )}
               </div>
+              <div className="flex w-full flex-col gap-2 sm:ml-auto sm:w-auto sm:flex-row sm:flex-wrap">
               {!creditView?.reason && onRegisterReason && (
                 <Button size="sm" variant="secondary" onClick={() => onRegisterReason(d.date)}>
                   Registrar motivo
@@ -709,6 +714,7 @@ export function DayCard({
                   <ArrowLeftRight size={13} /> Gerenciar excedente
                 </Button>
               </Link>
+              </div>
             </div>
           )}
 
@@ -773,20 +779,31 @@ export function DayCard({
               Coexiste com o atalho do acordo: quando o dia tem acorda parcial a
               compensar SEM batidas, o restante da jornada é déficit comum
               (acordo 4h + déficit 4h — nunca uma dívida única de 8h). */}
-          {shortcuts?.canCompensate && shortcuts.deficitRemaining > 0 && (
-            <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5">
-              <p className="flex-1 text-xs font-medium text-amber-800">
-                Déficit pendente: <b>{formatMinutes(shortcuts.deficitRemaining)}</b> ainda pendentes
+          {!futureDay && shortcuts?.canCompensate && deficitOpen > 0 && (
+            <div className="mt-3 flex flex-col gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 sm:flex-row sm:flex-wrap sm:items-center">
+              <p className="min-w-0 flex-1 text-xs font-medium text-amber-800">
+                Déficit em aberto: <b>{formatMinutes(deficitOpen)}</b>
+                {deficitPlanned > 0 && <> · planejado {formatMinutes(deficitPlanned)}</>}
+                {" "}· sem programação <b>{formatMinutes(Math.max(0, deficitOpen - deficitPlanned))}</b>
               </p>
-              <Button
-                size="sm"
-                variant="subtle"
-                onClick={() =>
-                  openComp("deficit", shortcuts.deficitRemaining, `Déficit de ${formatDateShortBR(d.date)}`)
-                }
-              >
-                <Zap size={13} /> Programar hora extra
-              </Button>
+              <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+              {hasAvailableSpecialExcess && onUseAvailableExcess && (
+                <Button size="sm" variant="danger" onClick={() => onUseAvailableExcess(d.date)}>
+                  <ArrowLeftRight size={13} /> Usar excedente disponível
+                </Button>
+              )}
+              {Math.max(0, deficitOpen - deficitPlanned) > 0 && (
+                <Button
+                  size="sm"
+                  variant="subtle"
+                  onClick={() =>
+                    openComp("deficit", Math.max(0, deficitOpen - deficitPlanned), `Déficit de ${formatDateShortBR(d.date)}`)
+                  }
+                >
+                  <Zap size={13} /> Programar hora extra
+                </Button>
+              )}
+              </div>
             </div>
           )}
 

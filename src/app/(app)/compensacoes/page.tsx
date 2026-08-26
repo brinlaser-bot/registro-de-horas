@@ -612,7 +612,7 @@ export default function CompensacoesPage() {
         <Card
           title={
             <>
-              Excedentes acima de 10h <span className="text-rose-600">— prioridade</span>
+              Excedente do limite diário <span className="text-rose-600">[10+] — prioridade</span>
             </>
           }
           subtitle="Reserva especial de dias que passaram do limite diário — o motivo é obrigatório antes de realocar (§10); a realocação usa a prioridade do banco (Visão geral → Dias com saldo negativo)"

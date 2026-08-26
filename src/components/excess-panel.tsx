@@ -17,7 +17,7 @@ import {
   suggestTargets,
   totalsOf,
 } from "@/lib/debt";
-import { dayCreditView, deficitViews, excessReasonOnDate, specialExcessLedger } from "@/lib/hour-bank";
+import { dayCreditView, deficitViews, excessReasonOnDate, hasEligibleSpecialExcessInCycle, specialExcessLedger } from "@/lib/hour-bank";
 import { actions } from "@/lib/store";
 import { useToast } from "@/components/toast";
 import { formatDateBR, formatDateShortBR, formatMinutes, todayString, weekdayShort } from "@/lib/time";
@@ -75,6 +75,8 @@ export function ExcessPanel({
   const [allocateDate, setAllocateDate] = useState<string | null>(null);
   const [allocateFromDeficit, setAllocateFromDeficit] = useState<string | null>(null);
 
+  const cycleBounds = useMemo(() => annualCycleBounds(getAnnualPointCycle(today)), [today]);
+
   const { deficitTotals, deficits } = useMemo(() => {
     const all = buildDebtDays(
       entries,
@@ -89,8 +91,7 @@ export function ExcessPanel({
     const df = all.filter((d) => d.kind === "deficit");
     return {
       deficitTotals: totalsOf(df),
-      // §19 visão consolidada do déficit (original/compensado/planejado/sem
-      // programação/status) com as parcelas para expansão.
+      // Lista de pendências: CICLO ANUAL (01/05→30/04), não o período 21→20.
       deficits: deficitViews(
         entries,
         compensations,
@@ -98,11 +99,11 @@ export function ExcessPanel({
         companyCalendars,
         faltas,
         settings,
-        range,
+        cycleBounds,
         today,
       ).reverse(),
     };
-  }, [entries, compensations, absences, companyCalendars, faltas, settings, range, today]);
+  }, [entries, compensations, absences, companyCalendars, faltas, settings, range, cycleBounds, today]);
 
   /** §6–§8: quita déficit com crédito JÁ REALIZADO (prioridade do excedente >10h).
    *  (nome sem prefixo "use" — não é hook; regra react-hooks/rules-of-hooks) */
@@ -178,9 +179,16 @@ export function ExcessPanel({
     setModalOpen(true);
   };
 
-  // Pendências da Visão geral: só déficits realizados com parte AINDA SEM PROGRAMAÇÃO.
-  const deficitOpen = deficits.filter((d) => d.unplannedMinutes > 0 && d.date <= today);
+  // Pendências do CICLO: déficit factual em aberto (planejado NÃO quita).
+  const deficitOpen = deficits.filter((d) => d.openMinutes > 0 && d.date <= today);
   const openDeficitTotal = deficitOpen.reduce((s, d) => s + d.openMinutes, 0);
+  const cycleHasSpecial = useMemo(
+    () =>
+      hasEligibleSpecialExcessInCycle(
+        entries, compensations, absences, companyCalendars, settings, excessReasons, today,
+      ),
+    [entries, compensations, absences, companyCalendars, settings, excessReasons, today],
+  );
   const specialBook = useMemo(() => {
     const dates = [...new Set(entries.filter((e) => e.date >= range.from && e.date <= range.to && e.date <= today).map((e) => e.date))];
     let original = 0;
@@ -211,7 +219,7 @@ export function ExcessPanel({
           /* §5: cálculo usa o período oficial 21→20 — rótulo alinhado (era "do mês") */
           label="Excedente do período"
           value={formatMinutes(specialBook.original)}
-          sub={`acima de ${formatMinutes(settings.maxDailyMinutes)}/dia · ${monthLabel}`}
+          sub={`excedente do limite diário · ${monthLabel}`}
           tone={specialBook.original > 0 ? "rose" : "slate"}
           icon={<TriangleAlert size={16} />}
         />
@@ -338,18 +346,20 @@ export function ExcessPanel({
         {/* Dias com déficit (dívida) — visão consolidada §19/§32 */}
         <Card
           title="Dias com saldo negativo"
-          subtitle="Abaixo da base — quite com horas já realizadas (imediato) ou programe hora extra (até 10h)"
+          subtitle={`Ciclo anual ${getAnnualPointCycle(today)} — déficits factuais ainda em aberto (planejado não quita)`}
         >
           {deficitOpen.length === 0 ? (
             <EmptyState
               icon={<TrendingDown size={24} />}
               title="Nenhum déficit em aberto"
-              description="Todos os déficits realizados já estão quitados ou com programação ativa."
+              description="Todos os déficits realizados do ciclo anual já foram quitados."
             />
           ) : (
             <ul className="space-y-3">
-              {deficitOpen.map((d) => (
-                <li key={d.date} className="rounded-xl border border-slate-100 bg-slate-50/60 p-3">
+              {deficitOpen.map((d) => {
+                const programmed = d.unplannedMinutes <= 0 && d.openMinutes > 0;
+                return (
+                <li key={d.date} className={`rounded-xl border p-3 ${programmed ? "border-slate-100 bg-slate-50/40" : "border-slate-100 bg-slate-50/60"}`}>
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-sm font-extrabold text-slate-900">
                       {weekdayShort(d.date).replace(".", "")}
@@ -358,10 +368,16 @@ export function ExcessPanel({
                       </span>
                     </span>
                     <Badge tone="indigo">déficit {formatMinutes(d.originalMinutes)}</Badge>
-                    <Badge tone="amber">em aberto {formatMinutes(d.openMinutes)}</Badge>
-                    {d.status === "parcial" && <Badge tone="sky">Parcial</Badge>}
-                    <div className="ml-auto flex items-center gap-1.5">
-                      {specialBook.free > 0 && (
+                    <Badge tone={programmed ? "slate" : "amber"}>em aberto {formatMinutes(d.openMinutes)}</Badge>
+                    {programmed ? (
+                      <Badge tone="sky">Programado</Badge>
+                    ) : d.status === "parcial" ? (
+                      <Badge tone="sky">Parcial</Badge>
+                    ) : (
+                      <Badge tone="amber">Pendente</Badge>
+                    )}
+                    <div className="ml-auto flex flex-wrap items-center gap-1.5">
+                      {cycleHasSpecial && (
                         <Button size="sm" variant="danger" onClick={() => setAllocateFromDeficit(d.date)}>
                           <ArrowLeftRight size={13} /> Usar excedente disponível
                         </Button>
@@ -382,7 +398,7 @@ export function ExcessPanel({
                     <b className="text-emerald-600">{formatMinutes(d.compensatedMinutes)}</b> · Planejado:{" "}
                     <b className="text-sky-600">{formatMinutes(d.plannedMinutes)}</b> · Sem programação:{" "}
                     <b>{formatMinutes(d.unplannedMinutes)}</b> · Status:{" "}
-                    <b>{d.status === "quitada" ? "Quitada" : d.status === "parcial" ? "Parcial" : "Pendente"}</b>
+                    <b>{programmed ? "Programado" : d.status === "parcial" ? "Parcial" : "Pendente"}</b>
                   </p>
                   <div className="mt-2">
                     <ProgressBar
@@ -428,7 +444,8 @@ export function ExcessPanel({
                     </div>
                   )}
                 </li>
-              ))}
+              );
+              })}
             </ul>
           )}
         </Card>

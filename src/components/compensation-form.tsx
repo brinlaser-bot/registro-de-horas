@@ -6,7 +6,7 @@ import { Button, Input, Modal, Select } from "@/components/ui";
 import { useToast } from "@/components/toast";
 import { formatDateBR, formatMinutes, todayString, weekdayShort } from "@/lib/time";
 import type { CompKind, TargetSuggestion } from "@/lib/types";
-import { usesHourExtra, type ExtraCapacity } from "@/lib/debt";
+import { maxOperationMinutes, usesHourExtra, type ExtraCapacity } from "@/lib/debt";
 import { getAnnualPointCycle, sameAnnualCycle } from "@/lib/periods";
 
 export interface CompFormData {
@@ -106,19 +106,30 @@ export function CompensationForm({
   const inflight = useRef(false);
   const copy = COPY[kind];
 
-  useEffect(() => {
-    if (open) {
-      let minutes = initial?.minutes ?? 60;
-      if (planning?.unplannedMinutes != null) minutes = Math.min(minutes, Math.max(0, planning.unplannedMinutes));
-      setForm({
-        sourceDate: initial?.sourceDate ?? todayString(),
-        targetDate: initial?.targetDate ?? todayString(),
-        minutes,
-        note: initial?.note ?? "",
-        status: initial?.status,
-        kind: initial?.kind ?? kind,
-      });
+  const prefillOf = (targetDate: string, fallback?: number) => {
+    const unplanned = planning?.unplannedMinutes;
+    const capAvail = getCapacity?.(targetDate)?.available;
+    if (!editingId && unplanned != null) {
+      return capAvail != null ? maxOperationMinutes(unplanned, capAvail) : Math.max(0, unplanned);
     }
+    let minutes = fallback ?? 60;
+    if (unplanned != null) minutes = Math.min(minutes, Math.max(0, unplanned));
+    if (capAvail != null) minutes = Math.min(minutes, capAvail);
+    return minutes;
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    const targetDate = initial?.targetDate ?? todayString();
+    setForm({
+      sourceDate: initial?.sourceDate ?? todayString(),
+      targetDate,
+      minutes: prefillOf(targetDate, initial?.minutes),
+      note: initial?.note ?? "",
+      status: initial?.status,
+      kind: initial?.kind ?? kind,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- prefill ao abrir/trocar contexto
   }, [open, initial, kind, planning]);
 
   // ── Validação visual (não substitui a validação central do store) ──
@@ -248,7 +259,10 @@ export function CompensationForm({
             label={copy.targetLabel}
             type="date"
             value={form.targetDate}
-            onChange={(e) => setForm({ ...form, targetDate: e.target.value })}
+            onChange={(e) => {
+              const targetDate = e.target.value;
+              setForm({ ...form, targetDate, minutes: prefillOf(targetDate, form.minutes) });
+            }}
           />
         </div>
 
@@ -294,14 +308,21 @@ export function CompensationForm({
         {/* Capacidade do dia de destino (hora extra) — regra central */}
         {usesCapacity && getCapacity && (() => {
           const cap = getCapacity(form.targetDate);
+          const maxOp =
+            unplannedCap !== undefined ? maxOperationMinutes(unplannedCap, cap.available) : cap.available;
           const restante =
             pendingDebtMinutes !== undefined
-              ? Math.max(0, pendingDebtMinutes - Math.min(form.minutes, cap.available))
+              ? Math.max(0, pendingDebtMinutes - Math.min(form.minutes, maxOp))
               : null;
           return (
             <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3 text-xs text-slate-600">
               <div className="grid gap-1 sm:grid-cols-2">
-                {pendingDebtMinutes !== undefined && (
+                {unplannedCap !== undefined && (
+                  <p>
+                    <b>Ainda sem programação:</b> {formatMinutes(unplannedCap)}
+                  </p>
+                )}
+                {pendingDebtMinutes !== undefined && unplannedCap === undefined && (
                   <p>
                     <b>{kind === "acordo" ? "Acordo pendente:" : kind === "calendario" ? "Obrigação de calendário:" : "Déficit pendente:"}</b>{" "}
                     {formatMinutes(pendingDebtMinutes)}
@@ -311,9 +332,12 @@ export function CompensationForm({
                   <b>Já planejado neste dia:</b> {formatMinutes(cap.alreadyAllocated)}
                 </p>
                 <p>
-                  <b>Máximo disponível para esta compensação:</b>{" "}
-                  <span className={cap.available < form.minutes ? "font-bold text-rose-600" : "font-bold text-emerald-600"}>
-                    {formatMinutes(cap.available)}
+                  <b>Capacidade disponível no dia:</b> {formatMinutes(cap.available)}
+                </p>
+                <p>
+                  <b>Máximo nesta operação:</b>{" "}
+                  <span className={maxOp < form.minutes ? "font-bold text-rose-600" : "font-bold text-emerald-600"}>
+                    {formatMinutes(maxOp)}
                   </span>
                 </p>
                 <p>

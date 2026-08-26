@@ -176,7 +176,7 @@ check("D. acordo orig 8h / conc 2h / plan 2h / cap 10h → máximo nova = 4h", (
 /* ── E. Modal acordo prefill = min(sem programação, capacidade) ─ */
 check("E. pendência sem programação 6h e capacidade 2h → prefill 2h", () => {
   assert.ok(formSrc.includes("planning?.unplannedMinutes"));
-  assert.ok(formSrc.includes("Math.min(minutes, Math.max(0, planning.unplannedMinutes))"));
+  assert.ok(formSrc.includes("maxOperationMinutes"));
   const unplanned = 360;
   const capacity = 120;
   assert.equal(Math.min(unplanned, capacity), 120);
@@ -207,8 +207,8 @@ check("G. Registrar falta: sem confirm nativo; duplo add rejeitado; excluir reve
   assert.equal(getAppData().faltas.length, 0);
 });
 
-/* ── H. Filtro de pendências: unplanned = 0 some da lista ─── */
-check("H. déficit totalmente coberto por planejamento não aparece em Dias com saldo negativo", () => {
+/* ── H. Filtro de pendências: factual em aberto permanece (Programado) ─ */
+check("H. déficit 100% planejado continua na lista com status Programado", () => {
   reset([...dayDef15()], [{
     id: 1, sourceDate: "2026-08-21", targetDate: "2026-08-28", minutes: 15,
     status: "pendente", note: null, kind: "deficit", createdAt: 1,
@@ -219,8 +219,9 @@ check("H. déficit totalmente coberto por planejamento não aparece em Dias com 
   );
   assert.equal(dv.openMinutes, 15);
   assert.equal(dv.unplannedMinutes, 0);
-  assert.ok(panelSrc.includes("d.unplannedMinutes > 0"));
-  assert.ok(allocSrc.includes("Quitar déficit com excedente realizado"));
+  assert.ok(panelSrc.includes("d.openMinutes > 0 && d.date <= today"));
+  assert.ok(panelSrc.includes("Programado"));
+  assert.ok(allocSrc.includes("Quitar déficit com excedente disponível"));
   assert.ok(allocSrc.includes("eligibleSpecialSourcesForDeficit"));
 });
 

@@ -381,7 +381,7 @@ check("37-39. Abono neutro: Registros/Resumo 0/0/+0; gráfico identifica \"abono
   const d = data.find((x) => x.date === "2026-09-02");
   assert.equal(d?.marker, "abono-aniversario");
   assert.equal(d?.markerLabel, "Abono de aniversário");
-  assert.equal(d?.regularBalance, 0);
+  assert.equal(d?.regularBalance, undefined, "data futura: tooltip neutro (sem saldo factual)");
   reset();
 });
 

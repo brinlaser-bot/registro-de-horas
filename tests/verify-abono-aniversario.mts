@@ -196,7 +196,7 @@ check("P.20/P.21/P.22. abono em data livre do ciclo (≠ aniversário): criado; 
   const d = data.find((x) => x.date === "2026-09-15");
   assert.equal(d?.marker, "abono-aniversario");
   assert.equal(d?.markerLabel, "Abono de aniversário");
-  assert.equal(d?.regularBalance, 0);
+  assert.equal(d?.regularBalance, undefined, "data futura: tooltip neutro (sem saldo factual)");
   // Editar para outra data livre do ciclo também é permitido (ex.: quarta 16/09)
   const id = st.absences[0].id;
   assert.equal(actions.updateAbsence(id, abonoDraft("2026-09-16")).ok, true);

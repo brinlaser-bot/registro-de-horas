@@ -1,9 +1,9 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { ArrowLeftRight, CalendarClock, TrendingDown, TriangleAlert, Wallet, Zap } from "lucide-react";
-import { hourBankSummary, excessReasonOnDate } from "@/lib/hour-bank";
+import { hourBankSummary, excessReasonOnDate, futureCommitmentsSummary } from "@/lib/hour-bank";
 import { computeDay, formatMinutes } from "@/lib/time";
 import type { Absence } from "@/lib/absences";
 import type { CompanyCalendars } from "@/lib/company-calendar";
@@ -74,6 +74,7 @@ export function HourBankCard({
   today,
   onRegisterReason,
 }: Props) {
+  const [futureOpen, setFutureOpen] = useState(false);
   const bank = useMemo(
     () =>
       hourBankSummary(
@@ -104,6 +105,20 @@ export function HourBankCard({
         ).excessMinutes > 0 && !excessReasonOnDate(excessReasons, date),
     );
   }, [entries, range, settings, excessReasons]);
+
+  const future = useMemo(
+    () =>
+      futureCommitmentsSummary(
+        entries,
+        compensations,
+        absences,
+        companyCalendars,
+        faltas,
+        settings,
+        today,
+      ),
+    [entries, compensations, absences, companyCalendars, faltas, settings, today],
+  );
 
   const realizedTone =
     bank.realizedBalance > 0 ? "text-emerald-600" : bank.realizedBalance < 0 ? "text-rose-600" : "text-slate-900";
@@ -179,6 +194,64 @@ export function HourBankCard({
               Registrar motivo · {date.slice(8)}/{date.slice(5, 7)}
             </button>
           ))}
+        </div>
+      )}
+
+      {future.totalOriginal > 0 && (
+        <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <p className="text-[11px] font-extrabold uppercase tracking-wider text-slate-500">
+              Compromissos futuros do ciclo
+            </p>
+            <p className="text-sm font-extrabold tabular-nums text-slate-800">
+              Total conhecido: {formatMinutes(future.totalOriginal)}
+            </p>
+          </div>
+          <p className="mt-1 text-xs text-slate-500">
+            Previsão — não altera o saldo realizado até a data ocorrer.
+          </p>
+          <div className="mt-2 grid gap-1 text-xs text-slate-600 sm:grid-cols-2">
+            <p>Calendário da empresa: <b>{formatMinutes(future.calendarMinutes)}</b></p>
+            <p>Faltas/ausências previstas: <b>{formatMinutes(future.faltaMinutes)}</b></p>
+            <p>Acordos: <b>{formatMinutes(future.acordoMinutes)}</b></p>
+            <p>Outros (registro futuro): <b>{formatMinutes(future.otherMinutes)}</b></p>
+            <p>Já programado: <b className="text-sky-700">{formatMinutes(future.plannedMinutes)}</b></p>
+            <p>Ainda sem cobertura: <b className="text-amber-700">{formatMinutes(future.uncoveredMinutes)}</b></p>
+          </div>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setFutureOpen((v) => !v)}
+              className="text-[11px] font-bold text-indigo-600 hover:underline cursor-pointer"
+            >
+              {futureOpen ? "Ocultar detalhes" : "Ver detalhes"}
+            </button>
+            <Link href="/compensacoes" className="text-[11px] font-bold text-indigo-500 hover:underline">
+              Abrir Compensações
+            </Link>
+          </div>
+          {futureOpen && (
+            <ul className="mt-2 space-y-1 text-xs text-slate-600">
+              {future.lines.map((l) => (
+                <li key={`${l.kind}-${l.date}`}>
+                  {l.date.slice(8)}/{l.date.slice(5, 7)} ·{" "}
+                  {l.kind === "calendario"
+                    ? "Calendário"
+                    : l.kind === "falta"
+                      ? "Falta prevista"
+                      : l.kind === "acordo"
+                        ? "Acordo"
+                        : "Déficit previsto"}
+                  : {formatMinutes(l.originalMinutes)}
+                  {l.plannedMinutes > 0 && <> · programado {formatMinutes(l.plannedMinutes)}</>}
+                  {" "}· sem cobertura {formatMinutes(l.uncoveredMinutes)}
+                  {l.uncoveredMinutes === 0 && l.originalMinutes > 0 && (
+                    <span className="ml-1 font-semibold text-sky-700">Programado</span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       )}
 

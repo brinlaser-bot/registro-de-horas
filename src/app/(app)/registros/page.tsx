@@ -35,7 +35,7 @@ import {
 } from "@/lib/periods";
 import { acordoViewOf, buildDebtDays, checkSourceOverflow, extraCapacityForDate } from "@/lib/debt";
 import { dayBalanceContribution, effectiveFaltas, faltaOnDate, faltaStatusOf } from "@/lib/faltas";
-import { dayCreditView, excessReasonOnDate, shouldPromptExcessReason } from "@/lib/hour-bank";
+import { dayCreditView, excessReasonOnDate, hasEligibleSpecialExcessInCycle, shouldPromptExcessReason } from "@/lib/hour-bank";
 import type { CompKind, DayResult, WorkSettings } from "@/lib/types";
 import { DayCard } from "@/components/day-card";
 import { ManualEntryModal, type ManualPairData } from "@/components/manual-entry-modal";
@@ -82,6 +82,7 @@ export default function RegistrosPage() {
   const [faltaOpen, setFaltaOpen] = useState(false);
   const [reasonDate, setReasonDate] = useState<string | null>(null);
   const [allocateDate, setAllocateDate] = useState<string | null>(null);
+  const [allocateFromDeficit, setAllocateFromDeficit] = useState<string | null>(null);
 
   // Faltas que JÁ valem (date <= hoje) — previstas não geram déficit/saldo
   const effectiveFaltaList = useMemo(() => effectiveFaltas(faltas, todayStr), [faltas, todayStr]);
@@ -95,6 +96,13 @@ export default function RegistrosPage() {
   const nowMinutes = nowMinutesLocal();
 
   const range = query ?? period;
+  const cycleHasSpecial = useMemo(
+    () =>
+      hasEligibleSpecialExcessInCycle(
+        entries, compensations, absences, companyCalendars, settings, excessReasons, todayStr,
+      ),
+    [entries, compensations, absences, companyCalendars, settings, excessReasons, todayStr],
+  );
 
   // Dias do intervalo: com batidas OU cobertos por ausência
   const days = useMemo(() => {
@@ -367,7 +375,7 @@ export default function RegistrosPage() {
       toast.show(res.error ?? "Não foi possível excluir a falta.", "error");
       return;
     }
-    toast.show("Falta removida. O déficit dela foi revertido.");
+    toast.show("Falta excluída");
   };
 
   /**
@@ -604,6 +612,8 @@ export default function RegistrosPage() {
               creditView={dayCreditView(date, entries, compensations, absences, companyCalendars, settings, excessReasons)}
               onRegisterReason={(d) => setReasonDate(d)}
               onAllocateExcess={(d) => setAllocateDate(d)}
+              onUseAvailableExcess={(d) => setAllocateFromDeficit(d)}
+              hasAvailableSpecialExcess={cycleHasSpecial}
             />
           ))}
         </div>
@@ -650,6 +660,20 @@ export default function RegistrosPage() {
           open
           onClose={() => setAllocateDate(null)}
           excessDate={allocateDate}
+          entries={entries}
+          compensations={compensations}
+          absences={absences}
+          companyCalendars={companyCalendars}
+          faltas={faltas}
+          excessReasons={excessReasons}
+          settings={settings}
+        />
+      )}
+      {allocateFromDeficit && (
+        <AllocateExcessModal
+          open
+          onClose={() => setAllocateFromDeficit(null)}
+          deficitDate={allocateFromDeficit}
           entries={entries}
           compensations={compensations}
           absences={absences}

@@ -260,7 +260,7 @@ check("L. day-card: −15 factual + ✓/Parcial/Em aberto; Como foi quitado igno
   assert.ok(dayCardSrc.includes("Como foi quitado"));
   assert.ok(dayCardSrc.includes('c.status === "concluida"'), "fontes só das concluídas");
   assert.ok(dayCardSrc.includes("de crédito regular"));
-  assert.ok(dayCardSrc.includes("de excedente >10h"));
+  assert.ok(dayCardSrc.includes("de excedente do limite diário"));
 });
 
 /* ── M. 21/08 seed: 15 quitados = 5 regular + 10 especial ───── */
