@@ -111,7 +111,7 @@ export function buildSeedData(): AppData {
   const excessReasons: ExcessReason[] = [
     { id: 1, date: "2026-08-17", reason: "demanda-urgente", customReason: null, observation: null, createdAt: now - 8 * 86_400_000, updatedAt: now - 8 * 86_400_000 },
     { id: 2, date: "2026-08-18", reason: "atendimento-evento", customReason: null, observation: null, createdAt: now - 7 * 86_400_000, updatedAt: now - 7 * 86_400_000 },
-    { id: 3, date: "2026-08-24", reason: "demanda-urgente", customReason: null, observation: "Demanda urgente de trabalho", createdAt: now - 1 * 86_400_000, updatedAt: now - 1 * 86_400_000 },
+    { id: 3, date: "2026-08-24", reason: "demanda-urgente", customReason: null, observation: null, createdAt: now - 1 * 86_400_000, updatedAt: now - 1 * 86_400_000 },
   ];
 
   return {

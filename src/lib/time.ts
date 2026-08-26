@@ -100,6 +100,15 @@ export function isFutureDate(date: string, today: string = todayString()): boole
   return date > today;
 }
 
+/**
+ * REALIZADO = date <= hoje. Batidas futuras podem existir no dataset, mas
+ * antes da data não são fato: não geram saldo, déficit, crédito, totais
+ * trabalhados nem "No ponto". Fonte única do cutoff temporal.
+ */
+export function isRealizedDate(date: string, today: string = todayString()): boolean {
+  return date <= today;
+}
+
 /** "YYYY-MM-DD" -> Date (meio-dia local, evita off-by-one de UTC) */
 export function parseDate(s: string): Date {
   const [y, m, d] = s.split("-").map(Number);

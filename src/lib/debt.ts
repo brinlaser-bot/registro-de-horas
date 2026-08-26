@@ -1,5 +1,5 @@
 // Matemática de dívida de horas: abatimento fracionado + sugestões inteligentes.
-import { computeDay, expectedMinutesOf, formatDateBR, formatMinutes } from "./time";
+import { computeDay, expectedMinutesOf, formatDateBR, formatMinutes, isRealizedDate } from "./time";
 import { type Absence } from "./absences";
 import { calendarCycleOf, companyDayContext, type CompanyCalendars } from "./company-calendar";
 import { sameAnnualCycle } from "./periods";
@@ -52,6 +52,29 @@ export function concludedForSource(comps: Compensation[], date: string, kind: Co
   return sumMinutes(bySource(comps, date, kind).filter((c) => c.status === "concluida"));
 }
 
+export const OVERPLAN_MSG =
+  "O planejamento ativo não pode ultrapassar o restante factual. Reduza os minutos ou cancele uma programação existente.";
+
+/**
+ * Teto de NOVA programação (pendente) sobre uma dívida:
+ * unplanned = max(0, (original − concluído) − planejado ativo).
+ * Planejado NÃO reduz o déficit factual (open = original − concluído).
+ */
+export function sourcePlanningHeadroom(
+  comps: Compensation[],
+  sourceDate: string,
+  kind: CompKind,
+  originalMinutes: number,
+  excludeCompId?: number,
+): { openMinutes: number; plannedMinutes: number; unplannedMinutes: number } {
+  const linked = bySource(comps, sourceDate, kind).filter((c) => c.id !== excludeCompId);
+  const concluded = sumMinutes(linked.filter((c) => c.status === "concluida"));
+  const planned = sumMinutes(linked.filter((c) => c.status === "pendente"));
+  const openMinutes = Math.max(0, originalMinutes - concluded);
+  const unplannedMinutes = Math.max(0, openMinutes - planned);
+  return { openMinutes, plannedMinutes: planned, unplannedMinutes };
+}
+
 /** Minutos de compensação aplicados (consumidos) em um dia-destino. */
 export function appliedOnDate(comps: Compensation[], date: string): number {
   return sumMinutes(comps.filter((c) => c.targetDate === date && isActive(c)));
@@ -77,6 +100,7 @@ export function buildDebtDays(
   companyCalendars?: CompanyCalendars,
   /** Faltas EFETIVAS (date <= hoje) — falta futura/prevista NÃO gera déficit. */
   faltas: Falta[] = [],
+  today?: string,
 ): DebtDay[] {
   // Datas relevantes: com batidas OU cobertas por ausência (acordo sem batidas conta)
   const dates = new Set<string>();
@@ -144,8 +168,11 @@ export function buildDebtDays(
       });
     };
 
-    push("excedente", excess);
-    push("deficit", deficit);
+    // Cutoff temporal central: batidas futuras não geram déficit/excedente.
+    if (today === undefined || isRealizedDate(date, today)) {
+      push("excedente", excess);
+      push("deficit", deficit);
+    }
     push("acordo", ctx.acordoMinutes);
     push("calendario", cctx.calendarioACompensar);
   }
@@ -234,8 +261,9 @@ export function openDebtFor(
   date: string,
   kind: CompKind,
   companyCalendars?: CompanyCalendars,
+  absences: Absence[] = [],
 ): number {
-  const days = buildDebtDays(entries, comps, settings, undefined, [], companyCalendars);
+  const days = buildDebtDays(entries, comps, settings, undefined, absences, companyCalendars);
   const found = days.find((d) => d.date === date && d.kind === kind);
   if (found) return found.remainingMinutes;
 
@@ -353,11 +381,28 @@ export function extraCapacityForDate(
   };
 }
 
-/**
- * Quanto a compensação vinculada a um dia ultrapassa a dívida atual.
- * Usado para avisar quando uma correção de registro reduz o excedente/déficit
- * abaixo do que já está alocado.
- */
+/** Dívida original (minutos) de uma origem para kinds quitados com hora extra. */
+export function originalHourExtraDebt(
+  date: string,
+  kind: CompKind,
+  entries: TimeEntry[],
+  comps: Compensation[],
+  absences: Absence[],
+  companyCalendars: CompanyCalendars | undefined,
+  settings: WorkSettings,
+): number {
+  const cctx = companyDayContext(date, entries, absences, companyCalendars, settings);
+  if (kind === "acordo") return cctx.ctx.acordoMinutes;
+  if (kind === "calendario") return cctx.calendarioACompensar;
+  if (kind === "deficit") {
+    const coveredByEarly = sumMinutes(
+      comps.filter((c) => c.targetDate === date && kindOf(c) === "excedente" && isActive(c)),
+    );
+    return cctx.ctx.day.open ? 0 : Math.max(0, cctx.adjustedDeficit - coveredByEarly);
+  }
+  return 0;
+}
+
 export function overflowForSource(
   comps: Compensation[],
   date: string,
@@ -496,6 +541,8 @@ export interface AcordoView {
   plannedMinutes: number;
   /** Original − Compensado (planejado NÃO abate). */
   remainingMinutes: number;
+  /** Restante factual − planejado ativo: ainda SEM PROGRAMAÇÃO. */
+  unplannedMinutes: number;
 }
 
 /**
@@ -505,12 +552,14 @@ export interface AcordoView {
  * Não altera a semântica de excedente/déficit em `buildDebtDays`.
  */
 export function acordoViewOf(day: DebtDay): AcordoView {
+  const remainingMinutes = Math.max(0, day.debtMinutes - day.concludedMinutes);
   return {
     date: day.date,
     originalMinutes: day.debtMinutes,
     compensatedMinutes: day.concludedMinutes,
     plannedMinutes: day.pendingMinutes,
-    remainingMinutes: Math.max(0, day.debtMinutes - day.concludedMinutes),
+    remainingMinutes,
+    unplannedMinutes: Math.max(0, remainingMinutes - day.pendingMinutes),
   };
 }
 

@@ -6,7 +6,7 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import { computeDay, formatMinutes, FUTURE_DATE_ERROR, insertPunchError, isFutureDate, todayString, type EntryType } from "./time";
 import { buildSeedData, DEFAULT_USER } from "./seed-data";
 import { absencesEqual, compsEqual, entriesEqual, excessReasonsEqual, mergeByIdAndContent } from "./backup";
-import { actualExtraForDate, allocatedForSource, canCompleteComp, concludedForSource, extraCapacityForDate, kindOf, usesHourExtra, acordoLinkedComps } from "./debt";
+import { actualExtraForDate, allocatedForSource, canCompleteComp, concludedForSource, extraCapacityForDate, kindOf, usesHourExtra, acordoLinkedComps, originalHourExtraDebt, sourcePlanningHeadroom, OVERPLAN_MSG } from "./debt";
 import {
   ALLOCATE_CROSS_CYCLE_MSG,
   ALLOCATE_NO_REASON_MSG,
@@ -387,6 +387,24 @@ export const actions = {
           return d;
         }
       }
+      // Sobreplanejamento: concluído + planejado ativo nunca ultrapassa o original.
+      if (usesHourExtra(kind) && (p.status ?? "pendente") === "pendente") {
+        const original = originalHourExtraDebt(
+          p.sourceDate, kind, d.entries, d.compensations, d.absences, d.companyCalendars, settingsOf(d.user),
+        );
+        const { unplannedMinutes } = sourcePlanningHeadroom(d.compensations, p.sourceDate, kind, original);
+        if (p.minutes > unplannedMinutes) {
+          result = {
+            ok: false,
+            code: "invalid",
+            error:
+              unplannedMinutes <= 0
+                ? OVERPLAN_MSG
+                : `Só é possível programar ${formatMinutes(unplannedMinutes)} (ainda sem programação). ${OVERPLAN_MSG}`,
+          };
+          return d;
+        }
+      }
       // Regra central: hora extra nunca ultrapassa a capacidade real do dia de destino
       // (déficit, acordo E calendário disputam a mesma hora extra — anti dupla quitação)
       if (usesHourExtra(kind) && p.status !== "cancelada") {
@@ -465,6 +483,28 @@ export const actions = {
         (patch.targetDate !== undefined && patch.targetDate !== target.targetDate) ||
         kindChanged ||
         reactivated;
+
+      // Sobreplanejamento na edição: concluído + planejado ativo nunca ultrapassa o original.
+      if (usesHourExtra(next.kind ?? "excedente") && next.status === "pendente") {
+        const kind = next.kind ?? "excedente";
+        const original = originalHourExtraDebt(
+          next.sourceDate, kind, d.entries, d.compensations, d.absences, d.companyCalendars, settingsOf(d.user),
+        );
+        const { unplannedMinutes } = sourcePlanningHeadroom(
+          d.compensations, next.sourceDate, kind, original, id,
+        );
+        if (next.minutes > unplannedMinutes) {
+          result = {
+            ok: false,
+            code: "invalid",
+            error:
+              unplannedMinutes <= 0
+                ? OVERPLAN_MSG
+                : `Só é possível programar ${formatMinutes(unplannedMinutes)} (ainda sem programação). ${OVERPLAN_MSG}`,
+          };
+          return d;
+        }
+      }
 
       if (
         touchesCapacity &&

@@ -12,7 +12,8 @@
 //
 // PLANEJADO ≠ REALIZADO ≠ COMPENSADO.
 // ─────────────────────────────────────────────────────────────
-import { computeDay, formatMinutes } from "./time";
+import { computeDay, formatMinutes, isRealizedDate } from "./time";
+export { isRealizedDate } from "./time";
 import { annualCycleBounds, getAnnualPointCycle, sameAnnualCycle } from "./periods";
 import { companyDayContext, type CompanyCalendars } from "./company-calendar";
 import { dayBalanceContribution } from "./faltas";
@@ -37,20 +38,6 @@ import type {
   WorkSettings,
 } from "./types";
 
-/* ── Regra temporal central (§2) ───────────────────────────── */
-
-/**
- * REALIZADO = somente dados com date <= hoje (fatos efetivamente ocorridos).
- * Batidas cadastradas em data futura podem existir no dataset, mas antes da
- * data: não entram no banco, não viram crédito livre, não servem à quitação
- * imediata e não alteram o saldo realizado. A contribuição diária usa a mesma
- * guarda na fonte compartilhada (dayBalanceContribution — Visão/Resumo/
- * Registros/Banco); créditos/planos filtram as datas por este predicado.
- */
-export function isRealizedDate(date: string, today: string): boolean {
-  return date <= today;
-}
-
 /* ── Motivo do excedente >10h (§10) ────────────────────────── */
 
 export const EXCESS_REASON_OPTIONS: { code: ExcessReasonCode; label: string }[] = [
@@ -65,6 +52,13 @@ export const EXCESS_REASON_OPTIONS: { code: ExcessReasonCode; label: string }[] 
 export function excessReasonLabel(r: ExcessReason): string {
   if (r.reason === "outro") return r.customReason?.trim() ? `Outro — ${r.customReason.trim()}` : "Outro";
   return EXCESS_REASON_OPTIONS.find((o) => o.code === r.reason)?.label ?? "Outro";
+}
+
+/** Evita repetir o mesmo texto quando motivo e observação coincidem. */
+export function excessReasonObservation(r: ExcessReason): string | null {
+  const obs = r.observation?.trim() || null;
+  if (!obs) return null;
+  return obs === excessReasonLabel(r).trim() ? null : obs;
 }
 
 /** Motivo registrado para a data, se houver. */
@@ -247,6 +241,7 @@ export function hourBankSummary(
     absences,
     calendars,
     effectiveFaltas(faltas, today),
+    today,
   );
 
   // Saldo realizado: soma da contribuição central por dia (FATOS — faltas
@@ -422,6 +417,7 @@ export function deficitViews(
     absences,
     calendars,
     effectiveFaltas(faltas, today),
+    today,
   ).filter((d) => d.kind === "deficit");
 
   return debts.map((d) => {
@@ -571,6 +567,29 @@ export function eligibleDeficitsForSpecialAllocation(
   )
     .filter((d) => d.openMinutes > 0 && d.date !== excessDate && sameAnnualCycle(d.date, excessDate))
     .reverse();
+}
+
+/**
+ * Fontes de excedente do limite diário já realizadas, com motivo,
+ * livres para quitar `deficitDate` no MESMO ciclo anual.
+ */
+export function eligibleSpecialSourcesForDeficit(
+  deficitDate: string,
+  entries: TimeEntry[],
+  comps: Compensation[],
+  absences: Absence[],
+  calendars: CompanyCalendars | undefined,
+  settings: WorkSettings,
+  reasons: ExcessReason[] | undefined,
+  today: string,
+): DayCreditView[] {
+  const bounds = annualCycleBounds(getAnnualPointCycle(deficitDate));
+  const dates = [...new Set(entries.map((e) => e.date))]
+    .filter((d) => isRealizedDate(d, today) && d >= bounds.from && d <= bounds.to && d !== deficitDate && sameAnnualCycle(d, deficitDate))
+    .sort((a, b) => a.localeCompare(b));
+  return dates
+    .map((d) => dayCreditView(d, entries, comps, absences, calendars, settings, reasons))
+    .filter((v) => v.excessSpecial > 0 && !v.day.open && !v.day.empty && v.freeSpecial > 0 && !!v.reason);
 }
 
 export interface AllocateSpecialPreview {
