@@ -1,5 +1,5 @@
 /**
- * VERIFICAÇÃO — SEED 3.0 / RESTAURAR DADOS DE EXEMPLO
+ * VERIFICAÇÃO — SEED 3.1 / RESTAURAR DADOS DE EXEMPLO
  *
  *  A  excessReasons após restore: 17/18/24 com motivo; 11/08 sem
  *  B  calendário fictício presente, ABONADO + COMPENSAR + parcial; sem duplicar
@@ -9,6 +9,7 @@
  *  F  24/08: motivo, 25 realocados, 35 livres, Realocar (não Registrar)
  *  G  11/08 continua sem motivo
  *  H  19/08 tem excedente elegível; UI sem "Usar horas livres"
+ *  I  14/08: 6 batidas (bancada de wrap); 8h sem déficit novo
  *
  * Executar: npx tsx tests/verify-seed-restore.mts
  */
@@ -20,6 +21,7 @@ import { dayCreditView, eligibleSpecialSourcesForDeficit, specialExcessLedger } 
 import { buildSeedData, SEED_VERSION } from "../src/lib/seed-data.ts";
 import { actions, getAppData } from "../src/lib/store.ts";
 import { settingsOf } from "../src/lib/store.ts";
+import { computeDay } from "../src/lib/time.ts";
 import type { AppData, WorkSettings } from "../src/lib/types.ts";
 
 const srcOf = (rel: string) => readFileSync(new URL(`../${rel}`, import.meta.url), "utf8");
@@ -38,7 +40,7 @@ const dayCardSrc = srcOf("src/components/day-card.tsx");
 const panelSrc = srcOf("src/components/excess-panel.tsx");
 const bankSrc = srcOf("src/components/hour-bank-card.tsx");
 
-assert.equal(SEED_VERSION, "3.0");
+assert.equal(SEED_VERSION, "3.1");
 
 check("A. excessReasons: 17/18/24 com motivo; 11/08 sem", () => {
   actions.reseed();
@@ -150,4 +152,29 @@ check("H. 19/08: excedente elegível; UI sem Usar horas livres", () => {
   assert.ok(!bankSrc.includes("Abrir Compensações"));
 });
 
-console.log(`\nSEED RESTORE 3.0 — OK (${passed} testes)`);
+check("I. Seed 3.1: 14/08 tem 6 batidas, 8h, restore não duplica", () => {
+  actions.reseed();
+  const first = getAppData();
+  const punches = first.entries.filter((e) => e.date === "2026-08-14").sort((a, b) => a.time.localeCompare(b.time));
+  assert.equal(punches.length, 6);
+  assert.deepEqual(
+    punches.map((e) => [e.time, e.type]),
+    [
+      ["08:00", "entrada"],
+      ["10:00", "saida"],
+      ["10:15", "entrada"],
+      ["12:00", "saida"],
+      ["13:00", "entrada"],
+      ["17:15", "saida"],
+    ],
+  );
+  const day = computeDay(punches, settings);
+  assert.equal(day.workedMinutes, 480, "8h — sem déficit/excedente novo");
+  assert.equal(day.excessMinutes, 0);
+  const n = first.entries.length;
+  actions.reseed();
+  assert.equal(getAppData().entries.length, n, "restore 2x não duplica batidas");
+  assert.equal(getAppData().entries.filter((e) => e.date === "2026-08-14").length, 6);
+});
+
+console.log(`\nSEED RESTORE 3.1 — OK (${passed} testes)`);

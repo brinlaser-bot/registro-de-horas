@@ -1,4 +1,4 @@
-// Calendário fictício embutido no Seed 3.0 — bancada permanente, sem importação manual.
+// Calendário fictício embutido no Seed 3.1 — bancada permanente, sem importação manual.
 import { buildCompanyCalendar, parseCompanyCalendarCsv, type CompanyCalendar } from "./company-calendar";
 import type { WorkSettings } from "./types";
 

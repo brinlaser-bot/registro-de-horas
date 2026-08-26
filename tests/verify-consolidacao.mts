@@ -1,6 +1,6 @@
 /**
  * VERIFICAÇÃO — RODADA DE CONSOLIDAÇÃO
- * UX, rastreabilidade, duplo clique, excedentes, déficits e seed 3.0.
+ * UX, rastreabilidade, duplo clique, excedentes, déficits e seed 3.1.
  *
  * Executar: npx tsx tests/verify-consolidacao.mts
  */
@@ -364,13 +364,14 @@ check("S. acordado-dispensado integral sem batidas = expected 0, déficit 0, sal
 });
 
 /* ── T. Seed 2.0 determinístico ─────────────────────────────── */
-check("T. seed 3.0: datas fixas, calendário fictício, 20/08 quitado", () => {
+check("T. seed 3.1: datas fixas, calendário fictício, 20/08 quitado, 14/08 com 6 batidas", () => {
   const seed = buildSeedData();
   assert.ok((seed.companyCalendars?.length ?? 0) >= 1, "seed traz calendário fictício");
   assert.equal(seed.user.birthDate, "1990-08-10");
   assert.equal(seed.entries.some((e) => e.date === "2026-08-25"), false, "25/08 sem batidas");
   assert.ok(seed.entries.some((e) => e.date === "2026-08-24"));
   assert.ok(seed.entries.some((e) => e.date === "2026-08-07"));
+  assert.equal(seed.entries.filter((e) => e.date === "2026-08-14").length, 6, "14/08 com 6 batidas");
   assert.ok(seed.entries.some((e) => e.date === "2026-09-07"), "07/09 futuro escrito direto");
   assert.ok(seed.entries.some((e) => e.date === "2026-09-03"), "03/09 registro futuro parcial");
   assert.ok(seed.entries.some((e) => e.date === "2026-04-29"), "29/04 ciclo anterior");

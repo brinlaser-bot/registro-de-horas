@@ -1,11 +1,12 @@
-// Seed determinístico 3.0 — bancada permanente de testes manuais.
+// Seed determinístico 3.1 — bancada permanente de testes manuais.
 // Datas fixas (não relativas a "hoje"): Restaurar dados de exemplo reproduz o mesmo conjunto,
 // inclusive calendário fictício da empresa e excessReasons.
+// 3.1 adiciona 14/08 com 6 batidas (wrap/responsividade) sem alterar os cenários 3.0.
 import type { Absence } from "./absences";
 import { seedCompanyCalendars } from "./seed-calendars";
 import type { AppData, Compensation, ExcessReason, Falta, TimeEntry, User } from "./types";
 
-export const SEED_VERSION = "3.0";
+export const SEED_VERSION = "3.1";
 
 export const DEFAULT_USER: User = {
   id: 1,
@@ -41,6 +42,13 @@ export function buildSeedData(): AppData {
     ...day(10, "2026-08-07", "19:00"),
     // 11/08 10h15 — especial 15min SEM motivo (testa "Registrar motivo")
     ...day(20, "2026-08-11", "19:15"),
+    // 14/08 8h com 6 batidas — só layout (wrap desktop / 2 colunas mobile)
+    e(94, "2026-08-14", "08:00", "entrada"),
+    e(95, "2026-08-14", "10:00", "saida"),
+    e(96, "2026-08-14", "10:15", "entrada"),
+    e(97, "2026-08-14", "12:00", "saida"),
+    e(98, "2026-08-14", "13:00", "entrada"),
+    e(99, "2026-08-14", "17:15", "saida"),
     // 16/08 7h30 — déficit 30min, quitado pelo especial de 17/08
     ...day(30, "2026-08-16", "16:30"),
     // 17/08 10h30 — especial 30min tratado ✓

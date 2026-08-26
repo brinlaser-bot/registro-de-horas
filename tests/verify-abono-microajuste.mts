@@ -4,9 +4,9 @@
  * 1. Modal do Abono sem a frase "Benefício de um dia — sem efeito em horas
  *    ou saldos." (somente título + campos);
  * 2–3. Dia com Abono em Registros = SOMENTE INFORMATIVO: badge/evento e
- *    métricas 0/0/+0/0 preservadas; sem "Adicionar registro manual" e sem os
- *    atalhos (Entrada agora / Saída agora / Almoço / Volta) — guarda
- *    `!abonoDay` (kind === "abono", sem generalização);
+ *    métricas 0/0/+0/0 preservadas; sem "Adicionar registro manual" — guarda
+ *    `!abonoDay` (kind === "abono", sem generalização). Atalhos de ponto
+ *    (Entrada agora / Saída agora / Almoço / Volta) não existem mais no card;
  * 4. Ao mover o Abono para outra data, o dia anterior volta a permitir
  *    registro e atalhos;
  * 5. Nenhuma regra de cálculo muda;
@@ -81,15 +81,15 @@ check("2. Dia com Abono em Registros: badge/evento preservado; Trabalhado 0 · B
 });
 
 /* ── 3. Dia de Abono NÃO mostra registro manual nem atalhos ───────────── */
-check("3. Card do dia com Abono NÃO oferece \"Adicionar registro manual\"/Entrada/Saída/Almoço/Volta (guarda !abonoDay)", () => {
+check("3. Card do dia com Abono NÃO oferece \"Adicionar registro manual\" (guarda !abonoDay); sem atalhos de ponto", () => {
   const card = srcOf("src/components/day-card.tsx");
   // Guarda específica e explícita de kind === \"abono\" (§3: não generalizar)
   assert.ok(card.includes('const abonoDay = absence?.kind === "abono"'), "guarda dedicada ao Abono");
   const guardas = card.split("!futureDay && !abonoDay && (").length - 1;
-  assert.ok(guardas >= 2, "formulário E atalhos protegidos pela guarda !abonoDay");
+  assert.ok(guardas >= 1, "formulário de registro manual protegido pela guarda !abonoDay");
   // Os controles de batida só existem dentro dos blocos protegidos
   assert.ok(card.includes("Adicionar registro manual"), "controle existe para dias normais");
-  assert.ok(card.includes("Entrada agora") && card.includes("Saída agora"), "atalhos existem para dias normais");
+  assert.ok(!card.includes("Entrada agora") && !card.includes("Saída agora"), "atalhos de ponto removidos dos cards");
   // Smart Exit não se aplica (sem batidas o dia nunca fica \"open\"); e nada gera batida noutro ponto do card
   reset();
   actions.setAbono({ date: "2026-09-02", note: null });

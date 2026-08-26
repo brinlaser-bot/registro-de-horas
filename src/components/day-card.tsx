@@ -10,11 +10,8 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronUp,
-  Coffee,
   Handshake,
   HeartPulse,
-  LogIn,
-  LogOut,
   Pencil,
   Plus,
   Trash2,
@@ -202,7 +199,6 @@ export function DayCard({
   });
   const [busy, setBusy] = useState(false);
   const [busyFalta, setBusyFalta] = useState(false);
-  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [compOpen, setCompOpen] = useState(false);
   const [compPlanning, setCompPlanning] = useState<{
     originalMinutes: number;
@@ -215,11 +211,11 @@ export function DayCard({
   const d = result;
   const pendingComp = compsForDate.find((c) => c.status === "pendente");
   // REGRA ABSOLUTA: batidas só em data <= hoje. Em card FUTURO nenhum controle
-  // de ponto é oferecido (formulário, atalhos, Smart Exit) — o card fica
-  // somente leitura (Falta prevista, métricas e Cancelar falta permanecem).
+  // de ponto é oferecido (formulário, Smart Exit) — o card fica somente leitura
+  // (Falta prevista, métricas e Cancelar falta permanecem).
   const futureDay = isFutureDate(d.date);
   // ABONO DE ANIVERSÁRIO: dia coberto pelo benefício é SOMENTE INFORMATIVO —
-  // nenhum controle de batida (formulário/atalhos) é oferecido no card.
+  // nenhum controle de batida (formulário de registro manual) é oferecido no card.
   // (Regra específica de kind === "abono" — NÃO generalizar para outros eventos.)
   const abonoDay = absence?.kind === "abono";
 
@@ -837,7 +833,7 @@ export function DayCard({
           )}
 
           {/* Registros — chips em fluxo horizontal (desktop) / 2 colunas (mobile) */}
-          <div className="mt-4 grid grid-cols-1 gap-1.5 min-[360px]:grid-cols-2 sm:flex sm:flex-wrap">
+          <div className="mt-4 grid grid-cols-1 gap-1.5 overflow-x-hidden min-[360px]:grid-cols-2 sm:flex sm:flex-wrap">
             {d.entries.map((e) =>
               editingId === e.id ? (
                 <div key={e.id} className="col-span-full flex w-full min-w-0 flex-wrap items-end gap-2 rounded-xl border border-emerald-200 bg-emerald-50/50 p-3">
@@ -858,17 +854,17 @@ export function DayCard({
               ) : (
                 <div
                   key={e.id}
-                  className="group flex w-full min-w-0 items-center gap-1.5 rounded-lg border border-slate-100 bg-slate-50/70 px-2 py-1.5 sm:w-auto sm:min-w-[11.5rem]"
+                  className="group flex w-full min-w-0 flex-wrap items-center gap-x-1 gap-y-0.5 rounded-lg border border-slate-100 bg-slate-50/70 px-1.5 py-1.5 sm:w-auto sm:min-w-[11.5rem] sm:gap-1.5 sm:px-2"
                 >
                   <span className={`h-2 w-2 shrink-0 rounded-full ${e.type === "entrada" ? "bg-emerald-500" : "bg-indigo-500"}`} />
                   <span className="shrink-0 text-sm font-extrabold tabular-nums text-slate-900">{e.time}</span>
-                  <span className="min-w-0 truncate text-xs font-semibold text-slate-600">{e.type === "entrada" ? "Entrada" : "Saída"}</span>
-                  <div className="ml-auto flex shrink-0 items-center gap-0.5 opacity-100 sm:opacity-0 sm:transition-opacity sm:group-hover:opacity-100">
-                    <button onClick={() => startEdit(e)} className="rounded-lg p-2 text-slate-400 hover:bg-white hover:text-slate-700 cursor-pointer sm:p-1.5" aria-label="Editar">
-                      <Pencil size={14} />
+                  <span className="shrink-0 whitespace-nowrap text-xs font-semibold text-slate-600">{e.type === "entrada" ? "Entrada" : "Saída"}</span>
+                  <div className="ml-auto flex shrink-0 items-center opacity-100 sm:opacity-0 sm:transition-opacity sm:group-hover:opacity-100">
+                    <button onClick={() => startEdit(e)} className="rounded-md p-1 text-slate-400 hover:bg-white hover:text-slate-700 cursor-pointer sm:p-1.5" aria-label="Editar">
+                      <Pencil size={13} />
                     </button>
-                    <button onClick={() => remove(e.id)} className="rounded-lg p-2 text-slate-400 hover:bg-rose-50 hover:text-rose-500 cursor-pointer sm:p-1.5" aria-label="Excluir">
-                      <Trash2 size={14} />
+                    <button onClick={() => remove(e.id)} className="rounded-md p-1 text-slate-400 hover:bg-rose-50 hover:text-rose-500 cursor-pointer sm:p-1.5" aria-label="Excluir">
+                      <Trash2 size={13} />
                     </button>
                   </div>
                 </div>
@@ -876,9 +872,8 @@ export function DayCard({
             )}
           </div>
 
-          {/* Adicionar + atalhos: duas guardas (form/atalhos) */}
+          {/* Registro manual — NUNCA em data futura nem em dia de Abono (card vira somente leitura) */}
           <div className="mt-3 flex min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
-            {/* Formulário adicionar — NUNCA em data futura nem em dia de Abono (card vira somente leitura) */}
             {!futureDay && !abonoDay && (showAdd ? (
               <div className="flex w-full min-w-0 flex-wrap items-end gap-2 rounded-xl border border-dashed border-slate-300 bg-white p-3">
                 <Select
@@ -907,51 +902,6 @@ export function DayCard({
                 <span className="hidden sm:inline">Adicionar registro manual</span>
               </button>
             ))}
-
-            {/* Atalhos — NUNCA em data futura nem em dia de Abono */}
-            {!futureDay && !abonoDay && (
-              <>
-                <div className="hidden min-w-0 flex-wrap items-center gap-2 sm:flex">
-                  <Button variant="ghost" size="sm" onClick={() => add("entrada", nowTimeString())}>
-                    <LogIn size={13} /> Entrada agora
-                  </Button>
-                  <Button variant="ghost" size="sm" onClick={() => add("saida", nowTimeString())}>
-                    <LogOut size={13} /> Saída agora
-                  </Button>
-                  <Button variant="ghost" size="sm" onClick={() => add("saida", settings.lunchStart)}>
-                    <Coffee size={13} /> Almoço {settings.lunchStart}
-                  </Button>
-                  <Button variant="ghost" size="sm" onClick={() => add("entrada", settings.lunchEnd)}>
-                    <Zap size={13} /> Volta {settings.lunchEnd}
-                  </Button>
-                </div>
-                <div className="sm:hidden">
-                  <button
-                    type="button"
-                    onClick={() => setShortcutsOpen((v) => !v)}
-                    className="inline-flex items-center gap-1 text-xs font-bold text-slate-500 cursor-pointer"
-                  >
-                    Atalhos {shortcutsOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                  </button>
-                  {shortcutsOpen && (
-                    <div className="mt-1.5 flex flex-col items-start gap-1">
-                      <Button variant="ghost" size="sm" onClick={() => add("entrada", nowTimeString())}>
-                        <LogIn size={13} /> Entrada agora
-                      </Button>
-                      <Button variant="ghost" size="sm" onClick={() => add("saida", nowTimeString())}>
-                        <LogOut size={13} /> Saída agora
-                      </Button>
-                      <Button variant="ghost" size="sm" onClick={() => add("saida", settings.lunchStart)}>
-                        <Coffee size={13} /> Almoço {settings.lunchStart}
-                      </Button>
-                      <Button variant="ghost" size="sm" onClick={() => add("entrada", settings.lunchEnd)}>
-                        <Zap size={13} /> Volta {settings.lunchEnd}
-                      </Button>
-                    </div>
-                  )}
-                </div>
-              </>
-            )}
           </div>
 
           {/* Rodapé explicativo do "No ponto" — em dia de Abono o card é

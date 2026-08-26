@@ -155,16 +155,17 @@ check("G. Realocar excedente; 35min a realocar; Excedente do limite diário a re
   assert.ok(!compsSrc.includes("Excedente >10h a realocar") && !compsSrc.includes("Excedente &gt;10h a realocar"));
   assert.ok(dayCardSrc.includes("Horas acima de 10h precisam ser realocadas"));
   assert.ok(dayCardSrc.includes("w-full sm:w-auto"), "botões de excedente full-width no mobile");
-  assert.ok(dayCardSrc.includes("sm:flex-row sm:flex-wrap sm:items-center"), "adicionar + atalhos na mesma linha no desktop");
+  assert.ok(dayCardSrc.includes("sm:flex-row sm:flex-wrap sm:items-center"), "ações de déficit na mesma linha no desktop");
   const guardas = dayCardSrc.split("!futureDay && !abonoDay && (").length - 1;
-  assert.ok(guardas >= 2, "formulário E atalhos continuam em guardas distintas");
+  assert.ok(guardas >= 1, "registro manual permanece atrás da guarda !abonoDay");
   assert.ok(dayCardSrc.includes("sm:flex sm:flex-wrap"), "batidas em fluxo horizontal no desktop");
   assert.ok(dayCardSrc.includes("min-[360px]:grid-cols-2"), "mobile: preferência por 2 colunas");
   assert.ok(dayCardSrc.includes("sm:w-auto sm:min-w-[11.5rem]"), "chip não ocupa 100% no desktop");
   assert.ok(dayCardSrc.includes("Registro manual"));
   assert.ok(dayCardSrc.includes("Adicionar registro manual"));
-  assert.ok(dayCardSrc.includes("shortcutsOpen"), "atalhos recolhidos no mobile");
-  assert.ok(dayCardSrc.includes("Atalhos"));
+  assert.ok(!dayCardSrc.includes("shortcutsOpen"), "accordion de atalhos removido");
+  assert.ok(!dayCardSrc.includes("Entrada agora"), "atalho de ponto saiu dos cards");
+  assert.ok(!dayCardSrc.includes("Atalhos {"), "título Atalhos removido dos cards");
   assert.ok(dayCardSrc.includes("sm:hidden"));
 });
 
