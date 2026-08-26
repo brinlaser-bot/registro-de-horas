@@ -243,8 +243,8 @@ check("K. preview do modal não exige plannedToRelease > 0", () => {
   assert.ok(allocSrc.includes("Vai alocar agora:"));
   assert.ok(allocSrc.includes("Excedente disponível antes:"));
   assert.ok(allocSrc.includes("Excedente que restará:"));
-  assert.ok(allocSrc.includes("Déficit factual antes:"));
-  assert.ok(allocSrc.includes("Déficit factual depois:"));
+  assert.ok(allocSrc.includes("Déficit em aberto antes:"));
+  assert.ok(allocSrc.includes("Déficit em aberto depois:"));
   assert.ok(allocSrc.includes("Planejado atual:"));
   assert.ok(allocSrc.includes("Planejamento que será liberado:"));
   assert.ok(allocSrc.includes("Planejamento que continuará ativo:"));

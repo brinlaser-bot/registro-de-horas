@@ -181,8 +181,9 @@ check("F. compromissos futuros: calendário, falta, registro previsto; vazio nã
   assert.ok(sum.acordoMinutes >= 480, "acordo futuro entra");
   assert.equal(sum.otherMinutes, 360, "07/09 08:00–10:00 → déficit previsto 6h");
   assert.ok(!sum.lines.some((l) => l.date === "2026-08-26"), "dia futuro vazio NÃO entra");
-  assert.ok(bankSrc.includes("Compromissos futuros do ciclo"));
-  assert.ok(bankSrc.includes("Ainda sem cobertura"));
+  assert.ok(bankSrc.includes("Previsão de horas a compensar"));
+  assert.ok(!bankSrc.includes("Ainda sem cobertura"));
+  assert.ok(!bankSrc.includes("Compromissos futuros do ciclo"));
   assert.ok(bankSrc.includes("não altera o saldo realizado"));
 
   const planned: Compensation = {

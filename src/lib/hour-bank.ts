@@ -720,7 +720,7 @@ export function previewAllocateSpecialExcess(
   if (requestedMinutes > max) {
     return {
       ok: false,
-      error: `Só é possível alocar ${formatMinutes(max)} neste déficit (excedente livre ${formatMinutes(freeSpecial)} · restante factual ${formatMinutes(openDeficit)}).`,
+      error: `Só é possível alocar ${formatMinutes(max)} neste déficit (excedente livre ${formatMinutes(freeSpecial)} · restante em aberto ${formatMinutes(openDeficit)}).`,
       minutes: 0, maxMinutes: max, freeSpecial, openDeficit, originalDeficit: original,
       compensatedNow, plannedNow, plannedToRelease: 0, plannedAfter: plannedNow,
       remainingDeficitAfter: openDeficit, remainingSpecialAfter: freeSpecial, compensatedAfter: compensatedNow,

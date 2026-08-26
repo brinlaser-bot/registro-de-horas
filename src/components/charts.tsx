@@ -179,6 +179,10 @@ export interface StackedDatum {
   regularBalance?: number;
   tooltipTone?: "factual" | "idle" | "future";
   predictedWorked?: number;
+  /** Compensações CONCLUÍDAS neste destino (tooltip — só após quitação). */
+  compensatedConcluded?: number;
+  /** Compensações PENDENTES neste destino (tooltip — programado, não compensado). */
+  compensatedPending?: number;
 }
 
 const MARKER_ICON: Record<ChartAbsenceMarker, typeof Umbrella> = {
@@ -349,9 +353,14 @@ export function StackedBarsChart({
                     {formatMinutes(d.regularBalance)}
                   </span>
                 )}
-                {d.compensated > 0 && (
+                {(d.compensatedConcluded ?? 0) > 0 && (
                   <span className="block text-slate-300">
-                    Compensado no dia: {formatMinutes(d.compensated)}
+                    Compensado no dia: {formatMinutes(d.compensatedConcluded ?? 0)}
+                  </span>
+                )}
+                {(d.compensatedPending ?? 0) > 0 && (
+                  <span className="block text-slate-300">
+                    Programado para hoje: {formatMinutes(d.compensatedPending ?? 0)}
                   </span>
                 )}
                 {d.markerLines?.map((line) => (

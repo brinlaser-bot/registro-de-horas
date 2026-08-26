@@ -12,7 +12,7 @@ import { useMemo } from "react";
 import { BarChart3 } from "lucide-react";
 import { expectedMinutesOf, formatMinutes, isRealizedDate, isWeekend, stackedSegments, todayString } from "@/lib/time";
 import { absenceLabel, absenceOnDate, type Absence } from "@/lib/absences";
-import { acordoViewOf, appliedOnDate, buildDebtDays, type AcordoView } from "@/lib/debt";
+import { acordoViewOf, appliedOnDate, buildDebtDays, pendingForTarget, type AcordoView } from "@/lib/debt";
 import { companyDayContext, type CompanyCalendars } from "@/lib/company-calendar";
 import { faltaOnDate } from "@/lib/faltas";
 import { listDaysBetween, type PointPeriod } from "@/lib/periods";
@@ -96,6 +96,8 @@ export function buildStackedPeriodData({
       const expected = d.cctx.expectedRegular;
       const seg = stackedSegments(worked, expected, settings.maxDailyMinutes);
       const used = appliedOnDate(compensations, d.date);
+      const pendingMins = pendingForTarget(compensations, d.date).reduce((s, c) => s + c.minutes, 0);
+      const concludedMins = Math.max(0, used - pendingMins);
       const acordo = acordoByDate.get(d.date) ?? null;
       const predictedWorked = !realized && d.ctx.day.entries.length > 0 ? d.ctx.day.workedMinutes : 0;
 
@@ -146,6 +148,8 @@ export function buildStackedPeriodData({
         extra: seg.extra,
         excess: seg.excess,
         compensated: Math.max(0, Math.min(used, Math.max(0, expected - worked))),
+        compensatedConcluded: concludedMins,
+        compensatedPending: pendingMins,
         marker: d.absence ? markerOf(d.absence) : d.faltaEf ? "falta" : d.cctx.marker ?? undefined,
         markerLabel: d.eventLabel ?? undefined,
         markerLines: lines.length > 0 ? lines : undefined,

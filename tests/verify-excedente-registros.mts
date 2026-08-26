@@ -275,7 +275,7 @@ check("Q. card expandido mostra excedente separado e restante em destaque", () =
 });
 
 check("R. card recolhido mostra 1h excedente (ou o restante)", () => {
-  assert.ok(dayCardSrc.includes("{formatMinutes(excessRemaining)} excedente"), "recolhido: ⚠ restante excedente");
+  assert.ok(dayCardSrc.includes("{formatMinutes(excessRemaining)} a realocar"), "recolhido: ⚠ restante a realocar");
 });
 
 check("S. excedente parcialmente utilizado ⇒ recolhido usa somente o restante", () => {

@@ -574,7 +574,7 @@ export default function CompensacoesPage() {
             <>
               {(pendenteStats.count > 0 || unplannedDeficitTotal > 0) && <span>·</span>}
               <span className="text-rose-600">
-                Excedente &gt;10h a realocar: {formatMinutes(bank.excessSpecialFreeTotal)}
+                Excedente do limite diário a realocar: {formatMinutes(bank.excessSpecialFreeTotal)}
                 {bank.excessWithoutReason > 0 && ` (⚠ ${formatMinutes(bank.excessWithoutReason)} sem motivo)`}
               </span>
             </>
@@ -681,7 +681,7 @@ export default function CompensacoesPage() {
                   )}
                   {v.reason && led.free > 0 && (
                     <Button size="sm" variant="danger" onClick={() => setAllocateDate(v.date)}>
-                      Alocar excedente
+                      Realocar excedente
                     </Button>
                   )}
                 </li>

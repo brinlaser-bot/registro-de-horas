@@ -2,9 +2,10 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { ArrowLeftRight, CalendarClock, TrendingDown, TriangleAlert, Wallet, Zap } from "lucide-react";
+import { CalendarClock, TrendingDown, TriangleAlert, Wallet, Zap } from "lucide-react";
 import { hourBankSummary, excessReasonOnDate, futureCommitmentsSummary } from "@/lib/hour-bank";
-import { computeDay, formatMinutes } from "@/lib/time";
+import { annualCycleClose, getAnnualPointCycle } from "@/lib/periods";
+import { computeDay, formatDateBR, formatDateShortBR, formatMinutes } from "@/lib/time";
 import type { Absence } from "@/lib/absences";
 import type { CompanyCalendars } from "@/lib/company-calendar";
 import type { Compensation, ExcessReason, Falta, TimeEntry, WorkSettings } from "@/lib/types";
@@ -141,7 +142,7 @@ export function HourBankCard({
           label="Saldo realizado"
           value={`${bank.realizedBalance >= 0 ? "+" : ""}${formatMinutes(bank.realizedBalance)}`}
           tone="bg-emerald-100 text-emerald-600"
-          title="Soma factual das batidas e faltas efetivas do período (folga/abonado nunca geram déficit)"
+          title="Soma das batidas e faltas efetivas do período (folga/abonado nunca geram déficit)"
         >
           <span className={`text-sm font-extrabold ${realizedTone}`}>
             {bank.realizedBalance >= 0 ? "a seu favor" : "em débito"}
@@ -201,24 +202,25 @@ export function HourBankCard({
         <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3">
           <div className="flex flex-wrap items-baseline justify-between gap-2">
             <p className="text-[11px] font-extrabold uppercase tracking-wider text-slate-500">
-              Compromissos futuros do ciclo
+              Previsão de horas a compensar
             </p>
             <p className="text-sm font-extrabold tabular-nums text-slate-800">
-              Total conhecido: {formatMinutes(future.totalOriginal)}
+              Total previstas: {formatMinutes(future.totalOriginal)}
             </p>
           </div>
           <p className="mt-1 text-xs text-slate-500">
-            Previsão — não altera o saldo realizado até a data ocorrer.
+            Até {formatDateBR(annualCycleClose(getAnnualPointCycle(today)))} · não altera o saldo realizado
           </p>
           <div className="mt-2 grid gap-1 text-xs text-slate-600 sm:grid-cols-2">
-            <p>Calendário da empresa: <b>{formatMinutes(future.calendarMinutes)}</b></p>
-            <p>Faltas/ausências previstas: <b>{formatMinutes(future.faltaMinutes)}</b></p>
-            <p>Acordos: <b>{formatMinutes(future.acordoMinutes)}</b></p>
-            <p>Outros (registro futuro): <b>{formatMinutes(future.otherMinutes)}</b></p>
-            <p>Já programado: <b className="text-sky-700">{formatMinutes(future.plannedMinutes)}</b></p>
-            <p>Ainda sem cobertura: <b className="text-amber-700">{formatMinutes(future.uncoveredMinutes)}</b></p>
+            <p className="sm:col-span-2 text-[11px] font-extrabold uppercase tracking-wider text-slate-400">
+              Origem
+            </p>
+            <p>Calendário: <b>{formatMinutes(future.calendarMinutes)}</b></p>
+            <p>Faltas: <b>{formatMinutes(future.faltaMinutes)}</b></p>
+            <p>Registros futuros: <b>{formatMinutes(future.otherMinutes)}</b></p>
+            <p>Acordos futuros: <b>{formatMinutes(future.acordoMinutes)}</b></p>
           </div>
-          <div className="mt-2 flex flex-wrap items-center gap-2">
+          <div className="mt-2">
             <button
               type="button"
               onClick={() => setFutureOpen((v) => !v)}
@@ -226,28 +228,22 @@ export function HourBankCard({
             >
               {futureOpen ? "Ocultar detalhes" : "Ver detalhes"}
             </button>
-            <Link href="/compensacoes" className="text-[11px] font-bold text-indigo-500 hover:underline">
-              Abrir Compensações
-            </Link>
           </div>
           {futureOpen && (
             <ul className="mt-2 space-y-1 text-xs text-slate-600">
-              {future.lines.map((l) => (
+              {[...future.lines]
+                .sort((a, b) => a.date.localeCompare(b.date))
+                .map((l) => (
                 <li key={`${l.kind}-${l.date}`}>
-                  {l.date.slice(8)}/{l.date.slice(5, 7)} ·{" "}
+                  {formatDateShortBR(l.date)} —{" "}
                   {l.kind === "calendario"
-                    ? "Calendário"
+                    ? "Calendário da empresa"
                     : l.kind === "falta"
-                      ? "Falta prevista"
+                      ? "Faltas"
                       : l.kind === "acordo"
-                        ? "Acordo"
-                        : "Déficit previsto"}
-                  : {formatMinutes(l.originalMinutes)}
-                  {l.plannedMinutes > 0 && <> · programado {formatMinutes(l.plannedMinutes)}</>}
-                  {" "}· sem cobertura {formatMinutes(l.uncoveredMinutes)}
-                  {l.uncoveredMinutes === 0 && l.originalMinutes > 0 && (
-                    <span className="ml-1 font-semibold text-sky-700">Programado</span>
-                  )}
+                        ? "Acordos futuros"
+                        : "Registros futuros"}
+                  {" "}— {formatMinutes(l.originalMinutes)}
                 </li>
               ))}
             </ul>
@@ -261,9 +257,6 @@ export function HourBankCard({
         Planejado (não altera o saldo realizado):{" "}
         <b className="text-sky-600">{formatMinutes(bank.plannedTotal)}</b> em compensações futuras pendentes
         {bank.plannedTotal === 0 && " · nada programado"}
-        <span className="ml-auto inline-flex items-center gap-1">
-          <ArrowLeftRight size={12} /> detalhes e ações na página <Link href="/compensacoes" className="font-bold text-indigo-500 hover:underline">Compensações</Link>
-        </span>
       </p>
     </Card>
   );

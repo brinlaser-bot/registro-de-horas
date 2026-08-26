@@ -420,7 +420,7 @@ export function DayCard({
                 <p className="mt-0.5 text-[11px] font-semibold text-emerald-700">✓ Excedente tratado</p>
               ) : (
                 <p className="mt-0.5 inline-flex items-center justify-end gap-1 text-[11px] font-extrabold text-rose-600">
-                  <TriangleAlert size={11} aria-hidden /> {formatMinutes(excessRemaining)} excedente
+                  <TriangleAlert size={11} aria-hidden /> {formatMinutes(excessRemaining)} a realocar
                 </p>
               )}
             </>
@@ -695,22 +695,22 @@ export function DayCard({
               </div>
               <div className="flex w-full flex-col gap-2 sm:ml-auto sm:w-auto sm:flex-row sm:flex-wrap">
               {!creditView?.reason && onRegisterReason && (
-                <Button size="sm" variant="secondary" onClick={() => onRegisterReason(d.date)}>
+                <Button size="sm" variant="secondary" className="w-full sm:w-auto" onClick={() => onRegisterReason(d.date)}>
                   Registrar motivo
                 </Button>
               )}
               {creditView?.reason && onRegisterReason && (
-                <Button size="sm" variant="ghost" onClick={() => onRegisterReason(d.date)}>
+                <Button size="sm" variant="ghost" className="w-full sm:w-auto" onClick={() => onRegisterReason(d.date)}>
                   Alterar motivo
                 </Button>
               )}
               {creditView?.reason && !excessTreated && onAllocateExcess && (
-                <Button size="sm" variant="danger" onClick={() => onAllocateExcess(d.date)}>
-                  <ArrowLeftRight size={13} /> Alocar excedente
+                <Button size="sm" variant="danger" className="w-full sm:w-auto" onClick={() => onAllocateExcess(d.date)}>
+                  <ArrowLeftRight size={13} /> Realocar excedente
                 </Button>
               )}
-              <Link href="/compensacoes#excedentes-prioridade">
-                <Button variant={excessTreated ? "secondary" : "danger"} size="sm">
+              <Link href="/compensacoes#excedentes-prioridade" className="w-full sm:w-auto">
+                <Button variant={excessTreated ? "secondary" : "danger"} size="sm" className="w-full sm:w-auto">
                   <ArrowLeftRight size={13} /> Gerenciar excedente
                 </Button>
               </Link>
@@ -788,7 +788,7 @@ export function DayCard({
               </p>
               <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
               {hasAvailableSpecialExcess && onUseAvailableExcess && (
-                <Button size="sm" variant="danger" onClick={() => onUseAvailableExcess(d.date)}>
+                <Button size="sm" variant="danger" className="w-full sm:w-auto" onClick={() => onUseAvailableExcess(d.date)}>
                   <ArrowLeftRight size={13} /> Usar excedente disponível
                 </Button>
               )}
@@ -796,6 +796,7 @@ export function DayCard({
                 <Button
                   size="sm"
                   variant="subtle"
+                  className="w-full sm:w-auto"
                   onClick={() =>
                     openComp("deficit", Math.max(0, deficitOpen - deficitPlanned), `Déficit de ${formatDateShortBR(d.date)}`)
                   }
@@ -854,18 +855,19 @@ export function DayCard({
                   <Button size="sm" variant="ghost" onClick={() => setEditingId(null)}>Cancelar</Button>
                 </div>
               ) : (
-                <div key={e.id} className="group flex items-center gap-3 rounded-xl border border-slate-100 bg-slate-50/50 px-3 py-2">
+                <div key={e.id} className="group flex min-w-0 items-center gap-2 rounded-lg border border-slate-100 bg-slate-50/50 px-2.5 py-2 sm:gap-3 sm:px-3 sm:py-1">
                   <span className={`h-2 w-2 shrink-0 rounded-full ${e.type === "entrada" ? "bg-emerald-500" : "bg-indigo-500"}`} />
-                  <span className="w-14 text-sm font-extrabold tabular-nums text-slate-900">{e.time}</span>
-                  <Badge tone={e.type === "entrada" ? "emerald" : "indigo"}>{e.type === "entrada" ? "Entrada" : "Saída"}</Badge>
-                  {e.note && <span className="hidden truncate text-xs text-slate-400 sm:block">· {e.note}</span>}
-                  {e.source === "manual" && <Badge tone="amber">Lançamento manual</Badge>}
-                  {e.edited && <Badge tone="slate">Editado manualmente</Badge>}
-                  <div className="ml-auto flex items-center gap-1 opacity-100 sm:opacity-0 sm:transition-opacity sm:group-hover:opacity-100">
-                    <button onClick={() => startEdit(e)} className="rounded-lg p-1.5 text-slate-400 hover:bg-white hover:text-slate-700 cursor-pointer" aria-label="Editar">
+                  <span className="w-14 shrink-0 text-sm font-extrabold tabular-nums text-slate-900">{e.time}</span>
+                  <span className="shrink-0 text-xs font-semibold text-slate-600 sm:hidden">{e.type === "entrada" ? "Entrada" : "Saída"}</span>
+                  <Badge tone={e.type === "entrada" ? "emerald" : "indigo"} className="hidden sm:inline-flex">{e.type === "entrada" ? "Entrada" : "Saída"}</Badge>
+                  {e.note && <span className="hidden min-w-0 truncate text-xs text-slate-400 sm:block">· {e.note}</span>}
+                  {e.source === "manual" && <Badge tone="amber" className="hidden sm:inline-flex">Lançamento manual</Badge>}
+                  {e.edited && <Badge tone="slate" className="hidden sm:inline-flex">Editado manualmente</Badge>}
+                  <div className="ml-auto flex shrink-0 items-center gap-1 opacity-100 sm:opacity-0 sm:transition-opacity sm:group-hover:opacity-100">
+                    <button onClick={() => startEdit(e)} className="rounded-lg p-2 text-slate-400 hover:bg-white hover:text-slate-700 cursor-pointer sm:p-1.5" aria-label="Editar">
                       <Pencil size={14} />
                     </button>
-                    <button onClick={() => remove(e.id)} className="rounded-lg p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-500 cursor-pointer" aria-label="Excluir">
+                    <button onClick={() => remove(e.id)} className="rounded-lg p-2 text-slate-400 hover:bg-rose-50 hover:text-rose-500 cursor-pointer sm:p-1.5" aria-label="Excluir">
                       <Trash2 size={14} />
                     </button>
                   </div>
@@ -873,9 +875,13 @@ export function DayCard({
               ),
             )}
 
+          </div>
+
+          {/* Adicionar + atalhos: duas guardas (form/atalhos), uma linha no desktop */}
+          <div className="mt-3 flex min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
             {/* Formulário adicionar — NUNCA em data futura nem em dia de Abono (card vira somente leitura) */}
             {!futureDay && !abonoDay && (showAdd ? (
-              <div className="flex flex-wrap items-end gap-2 rounded-xl border border-dashed border-slate-300 bg-white p-3">
+              <div className="flex w-full min-w-0 flex-wrap items-end gap-2 rounded-xl border border-dashed border-slate-300 bg-white p-3">
                 <Select
                   label="Tipo"
                   className="w-32"
@@ -895,31 +901,31 @@ export function DayCard({
             ) : (
               <button
                 onClick={() => { setShowAdd(true); setForm((f) => ({ ...f, time: nowTimeString() })); }}
-                className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-slate-300 py-2.5 text-xs font-bold text-slate-500 transition-colors hover:border-emerald-400 hover:text-emerald-600 cursor-pointer"
+                className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-slate-300 py-2.5 text-xs font-bold text-slate-500 transition-colors hover:border-emerald-400 hover:text-emerald-600 cursor-pointer sm:w-auto sm:shrink-0 sm:px-3 sm:py-1.5"
               >
                 <Plus size={14} /> Adicionar registro manual
               </button>
             ))}
-          </div>
 
-          {/* Atalhos — NUNCA em data futura nem em dia de Abono */}
-          {!futureDay && !abonoDay && (
-            <div className="mt-3 flex flex-wrap items-center gap-2">
-              <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Atalhos:</span>
-              <Button variant="ghost" size="sm" onClick={() => add("entrada", nowTimeString())}>
-                <LogIn size={13} /> Entrada agora
-              </Button>
-              <Button variant="ghost" size="sm" onClick={() => add("saida", nowTimeString())}>
-                <LogOut size={13} /> Saída agora
-              </Button>
-              <Button variant="ghost" size="sm" onClick={() => add("saida", settings.lunchStart)}>
-                <Coffee size={13} /> Almoço {settings.lunchStart}
-              </Button>
-              <Button variant="ghost" size="sm" onClick={() => add("entrada", settings.lunchEnd)}>
-                <Zap size={13} /> Volta {settings.lunchEnd}
-              </Button>
-            </div>
-          )}
+            {/* Atalhos — NUNCA em data futura nem em dia de Abono */}
+            {!futureDay && !abonoDay && (
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Atalhos:</span>
+                <Button variant="ghost" size="sm" onClick={() => add("entrada", nowTimeString())}>
+                  <LogIn size={13} /> Entrada agora
+                </Button>
+                <Button variant="ghost" size="sm" onClick={() => add("saida", nowTimeString())}>
+                  <LogOut size={13} /> Saída agora
+                </Button>
+                <Button variant="ghost" size="sm" onClick={() => add("saida", settings.lunchStart)}>
+                  <Coffee size={13} /> Almoço {settings.lunchStart}
+                </Button>
+                <Button variant="ghost" size="sm" onClick={() => add("entrada", settings.lunchEnd)}>
+                  <Zap size={13} /> Volta {settings.lunchEnd}
+                </Button>
+              </div>
+            )}
+          </div>
 
           {/* Rodapé explicativo do "No ponto" — em dia de Abono o card é
               SOMENTE INFORMATIVO e não exibe textos explicativos. */}

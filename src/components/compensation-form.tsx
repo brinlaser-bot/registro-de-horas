@@ -329,9 +329,6 @@ export function CompensationForm({
                   </p>
                 )}
                 <p>
-                  <b>Já planejado neste dia:</b> {formatMinutes(cap.alreadyAllocated)}
-                </p>
-                <p>
                   <b>Capacidade disponível no dia:</b> {formatMinutes(cap.available)}
                 </p>
                 <p>
@@ -339,10 +336,6 @@ export function CompensationForm({
                   <span className={maxOp < form.minutes ? "font-bold text-rose-600" : "font-bold text-emerald-600"}>
                     {formatMinutes(maxOp)}
                   </span>
-                </p>
-                <p>
-                  <b>Capacidade até o limite de {formatMinutes(cap.limitMinutes)}:</b>{" "}
-                  {formatMinutes(Math.max(0, cap.limitMinutes - (cap.effectiveBaseMinutes ?? cap.baseMinutes) - cap.alreadyAllocated))}
                 </p>
                 {cap.realExtra !== null && (
                   <p className="sm:col-span-2">

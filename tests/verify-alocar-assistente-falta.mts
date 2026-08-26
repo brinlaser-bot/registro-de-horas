@@ -102,23 +102,23 @@ let passed = 0;
 const check = (id: string, fn: () => void) => { fn(); passed++; console.log(`✔ ${id}`); };
 
 /* ── A. Causa raiz: "Compensar agora" abria o modal futuro ── */
-check("A. botão de excedente NÃO abre CompensationForm (sair mais cedo); rótulo Alocar excedente", () => {
+check("A. botão de excedente NÃO abre CompensationForm (sair mais cedo); rótulo Realocar excedente", () => {
   assert.ok(!panelSrc.includes('openFor(d.date, "excedente")'), "excedente não chama openFor futuro");
   assert.ok(!panelSrc.includes("Compensar agora"), "rótulo antigo removido");
-  assert.ok(panelSrc.includes("Alocar excedente"), "novo rótulo");
+  assert.ok(panelSrc.includes("Realocar excedente"), "novo rótulo");
   assert.ok(panelSrc.includes("AllocateExcessModal"), "modal próprio no painel");
   assert.ok(formSrc.includes("Nova compensação de horas"), "modal futuro permanece para programar");
   assert.ok(formSrc.includes("sair mais cedo"), "copy futuro intacto no formulário antigo");
   assert.ok(!allocSrc.includes("sair mais cedo"), "fluxo novo não fala em sair mais cedo");
   assert.ok(!allocSrc.includes("entrar mais tarde"), "fluxo novo não fala em entrar mais tarde");
-  assert.ok(allocSrc.includes('title="Alocar excedente"'));
+  assert.ok(allocSrc.includes("Realocar excedente"));
 });
 
 /* ── B. Modal próprio lista déficits factuais ─────────────── */
 check("B. modal próprio: origem + déficits com openMinutes > 0 (planejado NÃO quita)", () => {
   assert.ok(allocSrc.includes("eligibleDeficitsForSpecialAllocation"));
   assert.ok(!allocSrc.includes("2000-01-01"), "não varre todos os ciclos desde 2000");
-  assert.ok(allocSrc.includes("Restante factual"));
+  assert.ok(allocSrc.includes("Em aberto:"));
   assert.ok(allocSrc.includes("Máximo alocável agora") || allocSrc.includes("Máximo alocável neste déficit"));
   const entries = [...dayDef15(), ...daySat5(), ...day11h()];
   const comps = [concluded5(), planned10()];
@@ -297,11 +297,11 @@ check("K. libera as pendentes mais novas; concluídas fora da lista", () => {
 });
 
 /* ── L. UI: botão no card / compensações / registros ─────── */
-check("L. Alocar excedente aparece em Registros, Compensações e painel; modal montado", () => {
+check("L. Realocar excedente aparece em Registros, Compensações e painel; modal montado", () => {
   assert.ok(dayCardSrc.includes("onAllocateExcess"));
-  assert.ok(dayCardSrc.includes("Alocar excedente"));
+  assert.ok(dayCardSrc.includes("Realocar excedente"));
   assert.ok(registrosSrc.includes("AllocateExcessModal"));
-  assert.ok(compensacoesSrc.includes("Alocar excedente"));
+  assert.ok(compensacoesSrc.includes("Realocar excedente"));
   assert.ok(compensacoesSrc.includes("AllocateExcessModal"));
   assert.ok(panelSrc.includes("setAllocateDate(d.date)"));
 });

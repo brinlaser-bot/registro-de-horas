@@ -53,7 +53,7 @@ export function concludedForSource(comps: Compensation[], date: string, kind: Co
 }
 
 export const OVERPLAN_MSG =
-  "O planejamento ativo não pode ultrapassar o restante factual. Reduza os minutos ou cancele uma programação existente.";
+  "O planejamento ativo não pode ultrapassar o restante em aberto. Reduza os minutos ou cancele uma programação existente.";
 
 /**
  * Teto de NOVA programação (pendente) sobre uma dívida:

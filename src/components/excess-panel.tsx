@@ -18,7 +18,6 @@ import {
   totalsOf,
 } from "@/lib/debt";
 import { dayCreditView, deficitViews, excessReasonOnDate, hasEligibleSpecialExcessInCycle, specialExcessLedger } from "@/lib/hour-bank";
-import { actions } from "@/lib/store";
 import { useToast } from "@/components/toast";
 import { formatDateBR, formatDateShortBR, formatMinutes, todayString, weekdayShort } from "@/lib/time";
 import type { Absence } from "@/lib/absences";
@@ -104,17 +103,6 @@ export function ExcessPanel({
       ).reverse(),
     };
   }, [entries, compensations, absences, companyCalendars, faltas, settings, range, cycleBounds, today]);
-
-  /** §6–§8: quita déficit com crédito JÁ REALIZADO (prioridade do excedente >10h).
-   *  (nome sem prefixo "use" — não é hook; regra react-hooks/rules-of-hooks) */
-  const applyRealizedCredit = (sourceDate: string) => {
-    const res = actions.useRealizedCreditForDeficit(sourceDate);
-    if (!res.ok) {
-      toast.show(res.error ?? "Não foi possível usar horas realizadas.", "error");
-      return;
-    }
-    toast.show(res.warning ?? "Crédito vinculado ao déficit.");
-  };
 
   // Acordos a compensar: escopo = CICLO ANUAL (não o período 21→20).
   // Um acordo continua ativo até ser quitado, cancelado ou chegar o fechamento anual.
@@ -319,7 +307,7 @@ export function ExcessPanel({
                         )}
                         <Button size="sm" variant="danger" onClick={() => setAllocateDate(d.date)} disabled={!reason}
                           title={reason ? undefined : "Registre o motivo do excedente antes de alocá-lo."}>
-                          <ArrowLeftRight size={13} /> Alocar excedente
+                          <ArrowLeftRight size={13} /> Realocar excedente
                         </Button>
                       </div>
                     </div>
@@ -346,7 +334,7 @@ export function ExcessPanel({
         {/* Dias com déficit (dívida) — visão consolidada §19/§32 */}
         <Card
           title="Dias com saldo negativo"
-          subtitle={`Ciclo anual ${getAnnualPointCycle(today)} — déficits factuais ainda em aberto (planejado não quita)`}
+          subtitle={`Ciclo anual ${getAnnualPointCycle(today)} — déficits ainda em aberto (planejado não quita)`}
         >
           {deficitOpen.length === 0 ? (
             <EmptyState
@@ -376,15 +364,12 @@ export function ExcessPanel({
                     ) : (
                       <Badge tone="amber">Pendente</Badge>
                     )}
-                    <div className="ml-auto flex flex-wrap items-center gap-1.5">
+                    <div className="ml-auto flex w-full flex-col gap-1.5 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center">
                       {cycleHasSpecial && (
                         <Button size="sm" variant="danger" onClick={() => setAllocateFromDeficit(d.date)}>
                           <ArrowLeftRight size={13} /> Usar excedente disponível
                         </Button>
                       )}
-                      <Button size="sm" variant="secondary" onClick={() => applyRealizedCredit(d.date)}>
-                        <CheckCircle2 size={13} /> Usar horas livres
-                      </Button>
                       {d.unplannedMinutes > 0 && (
                         <Button size="sm" variant="subtle" onClick={() => openFor(d.date, "deficit")}>
                           <Zap size={13} /> Programar hora extra

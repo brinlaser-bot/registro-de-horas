@@ -160,9 +160,8 @@ export function AllocateExcessModal({
     <Modal
       open={open}
       onClose={onClose}
-      title={inverse ? "Quitar déficit com excedente disponível" : "Alocar excedente"}
-      /* title="Alocar excedente" — fluxo clássico preservado */
-      subtitle="Vincula o excedente do limite diário já realizado a um déficit factual — não cria programação futura."
+      title={inverse ? "Quitar déficit com excedente disponível" : "Realocar excedente"}
+      subtitle="Vincula o excedente do limite diário já realizado a um déficit em aberto — não cria programação futura."
       wide
       footer={
         <>
@@ -177,7 +176,7 @@ export function AllocateExcessModal({
         {inverse && selectedDeficit && (
           <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
             <p><span className="font-bold uppercase tracking-wide text-[11px] text-amber-500">Déficit</span> · {formatDateBR(selectedDeficit.date)}</p>
-            <p className="mt-1">Restante factual: <b>{formatMinutes(selectedDeficit.openMinutes)}</b></p>
+            <p className="mt-1">Déficit em aberto: <b>{formatMinutes(selectedDeficit.openMinutes)}</b></p>
           </div>
         )}
 
@@ -233,7 +232,7 @@ export function AllocateExcessModal({
           <div>
             <p className="mb-2 text-[11px] font-extrabold uppercase tracking-wider text-slate-400">Déficits em aberto</p>
             {deficits.length === 0 ? (
-              <p className="text-sm text-slate-500">Nenhum déficit factual em aberto para alocar.</p>
+              <p className="text-sm text-slate-500">Nenhum déficit em aberto para alocar.</p>
             ) : (
               <ul className="space-y-2">
                 {deficits.map((d) => {
@@ -251,7 +250,7 @@ export function AllocateExcessModal({
                         <p className="text-sm font-bold text-slate-800">{formatDateBR(d.date)}</p>
                         <p className="mt-0.5 text-xs text-slate-500">
                           Déficit original: <b>{formatMinutes(d.originalMinutes)}</b> · Já compensado:{" "}
-                          <b className="text-emerald-600">{formatMinutes(d.compensatedMinutes)}</b> · Restante factual:{" "}
+                          <b className="text-emerald-600">{formatMinutes(d.compensatedMinutes)}</b> · Em aberto:{" "}
                           <b className="text-amber-700">{formatMinutes(d.openMinutes)}</b>
                           {d.plannedMinutes > 0 && (
                             <> · Planejado: <b className="text-sky-600">{formatMinutes(d.plannedMinutes)}</b></>
@@ -280,7 +279,7 @@ export function AllocateExcessModal({
               setMinutes(Number(ev.target.value));
               setError(null);
             }}
-            hint={`Teto: ${formatMinutes(cap)} (mínimo entre excedente livre e restante factual)`}
+            hint={`Teto: ${formatMinutes(cap)} (mínimo entre excedente livre e déficit em aberto)`}
           />
         )}
 
@@ -290,15 +289,15 @@ export function AllocateExcessModal({
             {preview.plannedToRelease > 0 && (
               <p className="mt-1">
                 Este déficit possui {formatMinutes(preview.plannedNow)} planejados. A programação
-                será liberada na parte que ultrapassar o novo restante factual.
+                será liberada na parte que ultrapassar o novo déficit em aberto.
               </p>
             )}
             <ul className="mt-2 space-y-0.5 text-xs">
               <li>Vai alocar agora: <b>{formatMinutes(preview.minutes)}</b> ≈ {formatMinutes(preview.minutes)}</li>
               <li>Excedente disponível antes: <b>{formatMinutes(preview.freeSpecial)}</b></li>
               <li>Excedente que restará: <b>{formatMinutes(preview.remainingSpecialAfter)}</b></li>
-              <li>Déficit factual antes: <b>{formatMinutes(preview.openDeficit)}</b></li>
-              <li>Déficit factual depois: <b>{formatMinutes(preview.remainingDeficitAfter)}</b></li>
+              <li>Déficit em aberto antes: <b>{formatMinutes(preview.openDeficit)}</b></li>
+              <li>Déficit em aberto depois: <b>{formatMinutes(preview.remainingDeficitAfter)}</b></li>
               <li>Planejado atual: <b>{formatMinutes(preview.plannedNow)}</b></li>
               <li>Planejamento que será liberado: <b>{formatMinutes(preview.plannedToRelease)}</b></li>
               <li>Planejamento que continuará ativo: <b>{formatMinutes(preview.plannedAfter)}</b></li>
