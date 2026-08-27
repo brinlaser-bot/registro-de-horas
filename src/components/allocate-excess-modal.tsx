@@ -16,7 +16,7 @@ import { formatDateBR, formatMinutes, todayString } from "@/lib/time";
 import { useToast } from "@/components/toast";
 import type { Absence } from "@/lib/absences";
 import type { CompanyCalendars } from "@/lib/company-calendar";
-import type { Compensation, ExcessReason, Falta, TimeEntry, WorkSettings } from "@/lib/types";
+import type { CompKind, Compensation, ExcessReason, Falta, TimeEntry, WorkSettings } from "@/lib/types";
 
 interface Props {
   open: boolean;
@@ -25,6 +25,8 @@ interface Props {
   excessDate?: string;
   /** Déficit de partida (fluxo inverso: escolher a origem do excedente). */
   deficitDate?: string;
+  /** Kind da obrigação (acordo/calendário/déficit) quando o fluxo inverso já sabe a origem. */
+  deficitKind?: CompKind;
   entries: TimeEntry[];
   compensations: Compensation[];
   absences: Absence[];
@@ -44,6 +46,7 @@ export function AllocateExcessModal({
   onClose,
   excessDate,
   deficitDate,
+  deficitKind,
   entries,
   compensations,
   absences,
@@ -93,8 +96,9 @@ export function AllocateExcessModal({
   );
 
   const selectedDeficit = inverse
-    ? deficits.find((d) => d.date === deficitDate)
-    : (deficits.find((d) => d.date === pickedDeficit) ?? deficits[0]);
+    ? deficits.find((d) => d.date === deficitDate && (!deficitKind || d.kind === deficitKind))
+      ?? deficits.find((d) => d.date === deficitDate)
+    : (deficits.find((d) => `${d.kind}|${d.date}` === pickedDeficit) ?? deficits[0]);
 
   const cap = credit && selectedDeficit ? Math.min(credit.freeSpecial, selectedDeficit.openMinutes) : 0;
   const alloc = minutes > 0 ? minutes : cap;
@@ -103,13 +107,13 @@ export function AllocateExcessModal({
       ? previewAllocateSpecialExcess(
           originDate, selectedDeficit.date, alloc,
           entries, compensations, absences, companyCalendars, faltas,
-          settings, excessReasons, today,
+          settings, excessReasons, today, selectedDeficit.kind,
         )
       : null;
 
-  const pickDeficit = (date: string) => {
-    setPickedDeficit(date);
-    const d = deficits.find((x) => x.date === date);
+  const pickDeficit = (date: string, kind?: CompKind) => {
+    setPickedDeficit(kind ? `${kind}|${date}` : date);
+    const d = deficits.find((x) => x.date === date && (!kind || x.kind === kind));
     const nextCap = credit && d ? Math.min(credit.freeSpecial, d.openMinutes) : 0;
     setMinutes(nextCap);
     setError(null);
@@ -130,7 +134,7 @@ export function AllocateExcessModal({
     const pre = previewAllocateSpecialExcess(
       originDate, selectedDeficit.date, alloc,
       snap.entries, snap.compensations, snap.absences, snap.companyCalendars, snap.faltas,
-      s, snap.excessReasons, todayString(),
+      s, snap.excessReasons, todayString(), selectedDeficit.kind,
     );
     if (!pre.ok) {
       setError(pre.error ?? ALLOCATE_NO_REASON_MSG);
@@ -143,6 +147,7 @@ export function AllocateExcessModal({
         excessDate: originDate,
         deficitDate: selectedDeficit.date,
         minutes: pre.minutes,
+        kind: selectedDeficit.kind,
       });
       if (!res.ok) {
         setError(res.error ?? "Não foi possível alocar o excedente.");
@@ -230,26 +235,27 @@ export function AllocateExcessModal({
           </div>
         ) : (
           <div>
-            <p className="mb-2 text-[11px] font-extrabold uppercase tracking-wider text-slate-400">Déficits em aberto</p>
+            <p className="mb-2 text-[11px] font-extrabold uppercase tracking-wider text-slate-400">Saldo negativo em aberto</p>
             {deficits.length === 0 ? (
               <p className="text-sm text-slate-500">Nenhum déficit em aberto para alocar.</p>
             ) : (
               <ul className="space-y-2">
                 {deficits.map((d) => {
-                  const active = (pickedDeficit ?? deficits[0]?.date) === d.date;
+                  const key = `${d.kind}|${d.date}`;
+                  const active = (pickedDeficit ?? `${deficits[0]?.kind}|${deficits[0]?.date}`) === key;
                   const rowCap = credit ? Math.min(credit.freeSpecial, d.openMinutes) : 0;
                   return (
-                    <li key={d.date}>
+                    <li key={key}>
                       <button
                         type="button"
-                        onClick={() => pickDeficit(d.date)}
+                        onClick={() => pickDeficit(d.date, d.kind)}
                         className={`w-full rounded-xl border px-3 py-2.5 text-left cursor-pointer ${
                           active ? "border-indigo-400 bg-indigo-50 ring-1 ring-indigo-200" : "border-slate-200 bg-white hover:bg-slate-50"
                         }`}
                       >
-                        <p className="text-sm font-bold text-slate-800">{formatDateBR(d.date)}</p>
+                        <p className="text-sm font-bold text-slate-800">{formatDateBR(d.date)} · {d.originLabel}</p>
                         <p className="mt-0.5 text-xs text-slate-500">
-                          Déficit original: <b>{formatMinutes(d.originalMinutes)}</b> · Já compensado:{" "}
+                          Original: <b>{formatMinutes(d.originalMinutes)}</b> · Já compensado:{" "}
                           <b className="text-emerald-600">{formatMinutes(d.compensatedMinutes)}</b> · Em aberto:{" "}
                           <b className="text-amber-700">{formatMinutes(d.openMinutes)}</b>
                           {d.plannedMinutes > 0 && (

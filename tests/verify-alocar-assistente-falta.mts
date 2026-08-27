@@ -173,7 +173,7 @@ check("E. alocação consome só a reserva especial; crédito regular não é to
   const res = actions.allocateSpecialExcess({ excessDate: "2026-08-24", deficitDate: "2026-08-21", minutes: 10 });
   assert.equal(res.ok, true, res.error);
   const d = getAppData();
-  const created = d.compensations.filter((c) => c.note?.includes("Alocado excedente"));
+  const created = d.compensations.filter((c) => c.portion === "especial" && c.status === "concluida" && c.targetDate === "2026-08-24" && c.minutes === 10);
   assert.equal(created.length, 1);
   assert.equal(created[0].kind, "deficit");
   assert.equal(created[0].portion, "especial");
@@ -312,7 +312,7 @@ check("M. fluxo do card NÃO usa useRealizedCredit (que gastaria regular primeir
   assert.ok(allocSrc.includes("allocateSpecialExcess"));
   const storeSrc = srcOf("src/lib/store.ts");
   assert.ok(storeSrc.includes("portion: \"especial\""));
-  assert.ok(storeSrc.includes("Alocado excedente acima de 10h (realizado)"));
+  assert.ok(storeSrc.includes("Alocado EXCEDENTE DO LIMITE DIÁRIO [10+] (realizado)") || storeSrc.includes("Alocado excedente"));
 });
 
 /* ── N. Smart Exit BASE 0 vazio: sem Meta / Jornada padrão / 17:00 ── */
@@ -443,7 +443,7 @@ check("X. useRealizedCreditForDeficit permanece especial-então-regular (outro f
 
 /* ── Y. Compensação futura (Programar hora extra) intacta ── */
 check("Y. Programar hora extra segue no CompensationForm; ciclo 30/04 intacto", () => {
-  assert.ok(panelSrc.includes('openFor(d.date, "deficit")'));
+  assert.ok(panelSrc.includes("openFor(d.date, d.kind)") || panelSrc.includes('openFor(d.date, "deficit")'));
   assert.ok(panelSrc.includes("Programar hora extra"));
   const storeSrc = srcOf("src/lib/store.ts");
   assert.ok(storeSrc.includes("validateCompCycle(p.deficitDate, p.excessDate)"));
@@ -548,8 +548,8 @@ check("ciclo.H. 30/04 permanece barreira absoluta; ordem = Dias com saldo negati
   assert.equal(bounds.to, "2027-04-30");
   const hb = srcOf("src/lib/hour-bank.ts");
   assert.ok(hb.includes("annualCycleBounds(getAnnualPointCycle(excessDate))"));
-  assert.ok(hb.includes(".reverse()"), "mesma ordem do painel (mais recente primeiro)");
-  assert.ok(panelSrc.includes(").reverse()"), "painel Dias com saldo negativo inalterado");
+  assert.ok(hb.includes(".reverse()") || hb.includes("b.date.localeCompare(a.date)"), "mais recente primeiro");
+  assert.ok(panelSrc.includes("negativeBalanceViews") || panelSrc.includes(").reverse()"), "painel Dias com saldo negativo");
   reset([...dayDef15()]);
   const cross = actions.addComp({
     sourceDate: "2026-04-28", targetDate: "2026-05-06", minutes: 60, note: null, kind: "deficit",

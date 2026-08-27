@@ -159,10 +159,10 @@ export function HourBankCard({
 
         <Row
           icon={<TrendingDown size={17} />}
-          label="Déficits em aberto"
-          value={bank.openDeficitTotal > 0 ? `−${formatMinutes(bank.openDeficitTotal)}` : "0min"}
+          label="Saldo negativo em aberto"
+          value={(bank.openNegativeTotal ?? bank.openDeficitTotal) > 0 ? `−${formatMinutes(bank.openNegativeTotal ?? bank.openDeficitTotal)}` : "0min"}
           tone="bg-indigo-100 text-indigo-600"
-          title="Original menos o já CONCLUÍDO — o só planejado NÃO quita o déficit"
+          title="Déficit comum + obrigações COMPENSAR já ocorridas ainda em aberto — planejado NÃO quita"
         />
 
         <Row

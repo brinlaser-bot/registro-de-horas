@@ -34,6 +34,7 @@ import {
   sameAnnualCycle,
 } from "@/lib/periods";
 import { canCompleteComp, extraCapacityForDate, kindOf, usesHourExtra } from "@/lib/debt";
+import { compensarObligationOnDate, isAbonadoDay } from "@/lib/compensar";
 import { canRegisterFalta, dayBalanceContribution, faltaOnDate } from "@/lib/faltas";
 import { excessReasonOnDate, shouldPromptExcessReason } from "@/lib/hour-bank";
 import { HourBankCard } from "@/components/hour-bank-card";
@@ -526,6 +527,16 @@ export default function DashboardPage() {
                 onRegisterFalta={registerFaltaHoje}
                 onRemoveFalta={removeFaltaHoje}
                 idle={todayIdle}
+                compensarHint={(() => {
+                  const obl = compensarObligationOnDate(
+                    todayStr, entries, compensations, absences, companyCalendars, settings, todayStr,
+                  );
+                  return obl ? { label: obl.originLabel, originalMinutes: obl.originalMinutes } : null;
+                })()}
+                abonadoHint={(() => {
+                  const a = isAbonadoDay(todayStr, absences, companyCalendars);
+                  return a.abonado ? { label: a.label ?? "Dia abonado" } : null;
+                })()}
               />
             </section>
             <section className="min-w-0 lg:border-l lg:border-slate-100 lg:pl-5">

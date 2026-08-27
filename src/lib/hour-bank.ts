@@ -16,6 +16,7 @@ import { computeDay, formatMinutes, isRealizedDate } from "./time";
 export { isRealizedDate } from "./time";
 import { annualCycleBounds, getAnnualPointCycle, sameAnnualCycle } from "./periods";
 import { companyDayContext, type CompanyCalendars } from "./company-calendar";
+import { compensarObligationOnDate, compensarObligationsInRange } from "./compensar";
 import { dayBalanceContribution } from "./faltas";
 import {
   actualExtraForDate,
@@ -166,10 +167,21 @@ export function dayCreditView(
     settings,
   );
   const cctx = companyDayContext(date, entries, absences, calendars ?? [], settings);
+  const obl = compensarObligationOnDate(
+    date, entries, comps, absences, calendars, settings, date,
+  );
   const base = cctx.effectiveExpected;
   const finished = !day.empty && !day.open;
-  const realizedPositive = finished ? Math.max(0, day.workedMinutes - base) : 0;
-  const regularExtra = Math.min(realizedPositive, Math.max(0, settings.maxDailyMinutes - base));
+  const realizedPositive = finished
+    ? obl
+      ? obl.surplusMinutes
+      : Math.max(0, day.workedMinutes - base)
+    : 0;
+  const regularExtra = finished
+    ? obl
+      ? obl.regularCreditMinutes
+      : Math.min(realizedPositive, Math.max(0, settings.maxDailyMinutes - base))
+    : 0;
   const excessSpecial = day.excessMinutes;
 
   // §5/§8 atribuição POR PORÇÃO: parcelas explicitamente marcadas consomem a
@@ -213,8 +225,10 @@ export interface HourBankSummary {
   realizedBalance: number;
   /** Horas positivas REGULARES (até 10h) realizadas e ainda não destinadas. */
   freeRegularTotal: number;
-  /** Déficits em aberto: original − CONCLUÍDO (planejado NÃO conta). */
+  /** Déficits comuns em aberto: original − CONCLUÍDO (planejado NÃO conta). */
   openDeficitTotal: number;
+  /** Saldo negativo em aberto = déficits comuns + COMPENSAR já ocorridos. */
+  openNegativeTotal: number;
   /** Reserva especial livre: excedente acima de 10h a realocar. */
   excessSpecialFreeTotal: number;
   /** Total de excedente especial cuja destinação está bloqueada por falta de motivo. */
@@ -281,6 +295,15 @@ export function hourBankSummary(
   const openDeficitTotal = debts
     .filter((d) => d.kind === "deficit")
     .reduce((s, d) => s + d.openMinutes, 0);
+
+  const compensar = compensarObligationsInRange(
+    entries, comps, absences, calendars, settings, range, today,
+  );
+  const openCompensarRealized = compensar
+    .filter((v) => v.originDate < today)
+    .reduce((s, v) => s + v.openMinutes, 0);
+  realizedBalance -= openCompensarRealized;
+
   const plannedTotal = comps
     .filter((c) => c.status === "pendente" && c.targetDate >= range.from && c.targetDate <= range.to)
     .reduce((s, c) => s + c.minutes, 0);
@@ -289,6 +312,7 @@ export function hourBankSummary(
     realizedBalance,
     freeRegularTotal,
     openDeficitTotal,
+    openNegativeTotal: openDeficitTotal + openCompensarRealized,
     excessSpecialFreeTotal,
     excessWithoutReason,
     plannedTotal,
@@ -545,11 +569,69 @@ export function creditUseSummary(parcels: CreditUsePlan["parcels"]): string {
 export const ALLOCATE_NO_REASON_MSG = "Registre o motivo do excedente antes de alocá-lo.";
 export const ALLOCATE_CROSS_CYCLE_MSG = "Origem e déficit precisam pertencer ao mesmo ciclo anual.";
 
+export interface NegativeBalanceView {
+  date: string;
+  kind: CompKind;
+  originLabel: string;
+  originalMinutes: number;
+  workedOnOriginDateMinutes: number;
+  effectiveObligationMinutes: number;
+  compensatedMinutes: number;
+  plannedMinutes: number;
+  unplannedMinutes: number;
+  openMinutes: number;
+  status: "quitada" | "parcial" | "pendente";
+  parcels: DeficitParcelView[];
+}
+
+function toNegativeFromDeficit(d: DeficitView): NegativeBalanceView {
+  return {
+    date: d.date,
+    kind: "deficit",
+    originLabel: "Déficit de jornada",
+    originalMinutes: d.originalMinutes,
+    workedOnOriginDateMinutes: 0,
+    effectiveObligationMinutes: d.originalMinutes,
+    compensatedMinutes: d.compensatedMinutes,
+    plannedMinutes: d.plannedMinutes,
+    unplannedMinutes: d.unplannedMinutes,
+    openMinutes: d.openMinutes,
+    status: d.status,
+    parcels: d.parcels,
+  };
+}
+
+function toNegativeFromCompensar(
+  v: import("./compensar").CompensarObligationView,
+  entries: TimeEntry[],
+  comps: Compensation[],
+  calendars: CompanyCalendars | undefined,
+  settings: WorkSettings,
+  today: string,
+): NegativeBalanceView {
+  return {
+    date: v.originDate,
+    kind: v.compKind,
+    originLabel: v.originLabel,
+    originalMinutes: v.originalMinutes,
+    workedOnOriginDateMinutes: v.workedOnOriginDateMinutes,
+    effectiveObligationMinutes: v.effectiveObligationMinutes,
+    compensatedMinutes: v.completedMinutes,
+    plannedMinutes: v.plannedMinutes,
+    unplannedMinutes: v.unplannedMinutes,
+    openMinutes: v.openMinutes,
+    status: v.openMinutes <= 0 ? "quitada" : v.completedMinutes > 0 ? "parcial" : "pendente",
+    parcels: comps
+      .filter((c) => c.sourceDate === v.originDate && kindOf(c) === v.compKind && c.status !== "cancelada")
+      .map((comp) => ({
+        comp,
+        future: futureCompStatus(comp, entries, comps, settings, today, { companyCalendars: calendars }),
+      })),
+  };
+}
+
 /**
- * Déficits FACTUAIS elegíveis para alocar o excedente especial de `excessDate`:
- * mesmo CICLO ANUAL da origem (01/05→30/04 — helper central), em aberto
- * (original − concluído; planejado NÃO quita) e na MESMA ordem de
- * Visão geral → Dias com saldo negativo (mais recente primeiro).
+ * Déficits comuns + obrigações COMPENSAR em aberto no mesmo ciclo da origem.
  */
 export function eligibleDeficitsForSpecialAllocation(
   excessDate: string,
@@ -560,15 +642,40 @@ export function eligibleDeficitsForSpecialAllocation(
   faltas: Falta[] | undefined,
   settings: WorkSettings,
   today: string,
-): DeficitView[] {
+): NegativeBalanceView[] {
   const bounds = annualCycleBounds(getAnnualPointCycle(excessDate));
   const to = bounds.to < today ? bounds.to : today;
-  return deficitViews(
+  const defs = deficitViews(
     entries, comps, absences, calendars, faltas, settings,
     { from: bounds.from, to }, today,
   )
     .filter((d) => d.openMinutes > 0 && d.date !== excessDate && sameAnnualCycle(d.date, excessDate))
-    .reverse();
+    .map(toNegativeFromDeficit);
+  const compensar = compensarObligationsInRange(
+    entries, comps, absences, calendars, settings, { from: bounds.from, to }, today,
+  )
+    .filter((v) => v.openMinutes > 0 && v.originDate !== excessDate && v.originDate <= today && sameAnnualCycle(v.originDate, excessDate))
+    .map((v) => toNegativeFromCompensar(v, entries, comps, calendars, settings, today));
+  return [...defs, ...compensar].sort((a, b) => b.date.localeCompare(a.date));
+}
+
+export function negativeBalanceViews(
+  entries: TimeEntry[],
+  comps: Compensation[],
+  absences: Absence[],
+  calendars: CompanyCalendars | undefined,
+  faltas: Falta[] | undefined,
+  settings: WorkSettings,
+  range: { from: string; to: string },
+  today: string,
+): NegativeBalanceView[] {
+  const defs = deficitViews(entries, comps, absences, calendars, faltas, settings, range, today)
+    .filter((d) => d.openMinutes > 0 && d.date <= today)
+    .map(toNegativeFromDeficit);
+  const compensar = compensarObligationsInRange(entries, comps, absences, calendars, settings, range, today)
+    .filter((v) => v.openMinutes > 0 && v.originDate < today)
+    .map((v) => toNegativeFromCompensar(v, entries, comps, calendars, settings, today));
+  return [...defs, ...compensar].sort((a, b) => b.date.localeCompare(a.date));
 }
 
 /**
@@ -630,10 +737,20 @@ export function maxAllocatableSpecial(
   settings: WorkSettings,
   reasons: ExcessReason[] | undefined,
   today: string,
-): { max: number; freeSpecial: number; openDeficit: number; credit: DayCreditView; deficit: DeficitView | undefined } {
+  kind?: CompKind,
+): {
+  max: number;
+  freeSpecial: number;
+  openDeficit: number;
+  credit: DayCreditView;
+  deficit: NegativeBalanceView | undefined;
+} {
   const credit = dayCreditView(excessDate, entries, comps, absences, calendars, settings, reasons);
-  const views = deficitViews(entries, comps, absences, calendars, faltas, settings, { from: deficitDate, to: deficitDate }, today);
-  const deficit = views.find((d) => d.date === deficitDate);
+  const items = eligibleDeficitsForSpecialAllocation(
+    excessDate, entries, comps, absences, calendars, faltas, settings, today,
+  );
+  const deficit = items.find((d) => d.date === deficitDate && (!kind || d.kind === kind))
+    ?? items.find((d) => d.date === deficitDate);
   const openDeficit = deficit?.openMinutes ?? 0;
   const max = Math.max(0, Math.min(credit.freeSpecial, openDeficit));
   return { max, freeSpecial: credit.freeSpecial, openDeficit, credit, deficit };
@@ -649,10 +766,11 @@ export function releaseOverlappingPlanned(
   comps: Compensation[],
   deficitDate: string,
   remainingNeeded: number,
+  kind: CompKind = "deficit",
 ): { comps: Compensation[]; released: number } {
   const pending = comps
     .map((c, idx) => ({ c, idx }))
-    .filter(({ c }) => c.sourceDate === deficitDate && kindOf(c) === "deficit" && c.status === "pendente")
+    .filter(({ c }) => c.sourceDate === deficitDate && kindOf(c) === kind && c.status === "pendente")
     .sort((a, b) => b.c.createdAt - a.c.createdAt || b.c.id - a.c.id);
   const totalPending = pending.reduce((s, p) => s + p.c.minutes, 0);
   let toRelease = Math.max(0, totalPending - Math.max(0, remainingNeeded));
@@ -686,9 +804,10 @@ export function previewAllocateSpecialExcess(
   settings: WorkSettings,
   reasons: ExcessReason[] | undefined,
   today: string,
+  kind?: CompKind,
 ): AllocateSpecialPreview {
   const { max, freeSpecial, openDeficit, credit, deficit } = maxAllocatableSpecial(
-    excessDate, deficitDate, entries, comps, absences, calendars, faltas, settings, reasons, today,
+    excessDate, deficitDate, entries, comps, absences, calendars, faltas, settings, reasons, today, kind,
   );
   const original = deficit?.originalMinutes ?? 0;
   const compensatedNow = deficit?.compensatedMinutes ?? 0;
@@ -727,7 +846,10 @@ export function previewAllocateSpecialExcess(
     };
   }
   const compensatedAfter = compensatedNow + requestedMinutes;
-  const remainingDeficitAfter = Math.max(0, original - compensatedAfter);
+  const remainingDeficitAfter = Math.max(
+    0,
+    (deficit?.effectiveObligationMinutes ?? original) - compensatedAfter,
+  );
   const plannedAfter = Math.min(plannedNow, remainingDeficitAfter);
   return {
     ok: true,

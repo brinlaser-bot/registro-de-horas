@@ -28,6 +28,7 @@ import { SmartExit } from "@/components/smart-exit";
 import { allocatedForSource, overflowForSource, type ExtraCapacity } from "@/lib/debt";
 import { absenceLabel, type Absence, type DayBalanceView } from "@/lib/absences";
 import { excessReasonLabel, excessReasonObservation, specialExcessLedger, type DayCreditView } from "@/lib/hour-bank";
+import { COMPENSAR_EXPLAIN, isIncompletePastPunch, quitacaoLine } from "@/lib/compensar";
 import type { CompKind } from "@/lib/types";
 
 export function statusBadge(d: DayResult) {
@@ -149,9 +150,13 @@ interface Props {
   /** Abre o fluxo próprio de alocação do excedente especial já realizado. */
   onAllocateExcess?: (date: string) => void;
   /** Fluxo inverso: quitar o déficit DESTE dia com excedente realizado. */
-  onUseAvailableExcess?: (date: string) => void;
+  onUseAvailableExcess?: (date: string, kind?: CompKind) => void;
   /** Há excedente do limite diário elegível no ciclo (motivo + livre). */
   hasAvailableSpecialExcess?: boolean;
+  /** Obrigação COMPENSAR deste dia (fonte central). */
+  compensarHint?: { label: string; originalMinutes: number } | null;
+  /** Dia abonado/afastamento sem obrigação — só alerta visual se houver batidas. */
+  abonadoHint?: { label: string } | null;
 }
 
 export function DayCard({
@@ -180,6 +185,8 @@ export function DayCard({
   onAllocateExcess,
   onUseAvailableExcess,
   hasAvailableSpecialExcess,
+  compensarHint,
+  abonadoHint,
 }: Props) {
   // Regra: todos os dias iniciam RECOLHIDOS — o usuário expande apenas o dia desejado.
   const [expanded, setExpanded] = useState(false);
@@ -218,6 +225,7 @@ export function DayCard({
   // nenhum controle de batida (formulário de registro manual) é oferecido no card.
   // (Regra específica de kind === "abono" — NÃO generalizar para outros eventos.)
   const abonoDay = absence?.kind === "abono";
+  const incompletePast = isIncompletePastPunch(d.date, d.open, todayString());
 
   const add = async (type?: EntryType, time?: string) => {
     if (busy) return;
@@ -374,6 +382,8 @@ export function DayCard({
               d.empty ? <Badge tone="slate">—</Badge> : <Badge tone="slate">Registro futuro</Badge>
             ) : isToday && d.empty && !falta ? (
               <Badge tone="slate">Jornada não iniciada</Badge>
+            ) : incompletePast ? (
+              <Badge tone="amber">Registro incompleto</Badge>
             ) : (
               statusBadge(d)
             )}
@@ -398,7 +408,9 @@ export function DayCard({
                   Restante: {formatMinutes(shortcuts?.acordoRemaining ?? 0)}
                 </span>
               )}
-            {d.open && <span className="inline-flex items-center gap-1 text-[11px] font-bold text-indigo-500"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-indigo-500" /> em andamento</span>}
+            {d.open && isToday && (
+              <span className="inline-flex items-center gap-1 text-[11px] font-bold text-indigo-500"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-indigo-500" /> em andamento</span>
+            )}
             {d.lunchDeductedMinutes > 0 && (
               <span className="text-[11px] font-medium text-slate-400">
                 almoço descontado ({formatMinutes(d.lunchDeductedMinutes)})
@@ -445,7 +457,7 @@ export function DayCard({
       {expanded && (
         <div className="border-t border-slate-100 px-5 py-4">
           {/* Assistente de saída (somente para o dia em andamento; nunca no futuro) */}
-          {d.open && !futureDay && (
+          {d.open && isToday && (
             <div className="mb-4">
               <SmartExit
                 date={d.date}
@@ -465,6 +477,36 @@ export function DayCard({
                   absence?.kind === "abono"
                 }
               />
+            </div>
+          )}
+
+          {incompletePast && (
+            <div className="mb-3 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2.5 text-xs font-medium text-amber-800">
+              <p className="font-bold">Registro incompleto</p>
+              <p className="mt-0.5">Existe uma entrada sem saída neste dia. Corrija manualmente o registro.</p>
+            </div>
+          )}
+
+          {compensarHint && (
+            <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-900">
+              <p className="text-[11px] font-extrabold uppercase tracking-wider text-amber-700">Dia com regra especial</p>
+              <p className="mt-0.5 font-bold">{compensarHint.label}</p>
+              <p className="mt-1">
+                Obrigação original <b>{formatMinutes(compensarHint.originalMinutes)}</b>
+                {" · "}Trabalhado {isToday ? "hoje" : "no próprio dia"} <b>{formatMinutes(d.workedMinutes)}</b>
+                {" · "}Restante estimado <b>{formatMinutes(Math.max(0, compensarHint.originalMinutes - d.workedMinutes))}</b>
+              </p>
+              <p className="mt-1 text-[11px] text-amber-800">{COMPENSAR_EXPLAIN}</p>
+            </div>
+          )}
+
+          {abonadoHint && d.entries.length > 0 && (
+            <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-900">
+              <p className="font-bold">Trabalho registrado em dia abonado</p>
+              <p className="mt-0.5">
+                {formatMinutes(d.workedMinutes)} trabalhados · {abonadoHint.label}
+              </p>
+              <p className="mt-1 text-[11px]">As batidas foram preservadas. Nenhuma regra financeira extra foi aplicada automaticamente.</p>
             </div>
           )}
 
@@ -626,11 +668,7 @@ export function DayCard({
                     {deficitParcels
                       .filter((c) => c.status === "concluida")
                       .map((c) => (
-                        <li key={c.id}>
-                          {formatMinutes(c.minutes)}{" "}
-                          {c.portion === "especial" ? "de excedente do limite diário" : "de crédito regular"}{" "}
-                          em {formatDateBR(c.targetDate)}
-                        </li>
+                        <li key={c.id}>{quitacaoLine(c)}</li>
                       ))}
                   </ul>
                 )}
@@ -756,6 +794,11 @@ export function DayCard({
               <p className="flex-1 text-xs font-medium text-violet-800">
                 Há <b>{formatMinutes(Math.max(0, shortcuts.acordoRemaining - shortcuts.acordoPlanned))}</b> do acordo ainda sem programação.
               </p>
+              {hasAvailableSpecialExcess && onUseAvailableExcess && (
+                <Button size="sm" variant="danger" onClick={() => onUseAvailableExcess(d.date, "acordo")}>
+                  <ArrowLeftRight size={13} /> Usar excedente disponível
+                </Button>
+              )}
               <Button
                 size="sm"
                 variant="subtle"
@@ -785,7 +828,7 @@ export function DayCard({
               </p>
               <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
               {hasAvailableSpecialExcess && onUseAvailableExcess && (
-                <Button size="sm" variant="danger" className="w-full sm:w-auto" onClick={() => onUseAvailableExcess(d.date)}>
+                <Button size="sm" variant="danger" className="w-full sm:w-auto" onClick={() => onUseAvailableExcess(d.date, "deficit")}>
                   <ArrowLeftRight size={13} /> Usar excedente disponível
                 </Button>
               )}

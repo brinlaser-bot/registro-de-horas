@@ -34,6 +34,7 @@ import {
   type PointPeriod,
 } from "@/lib/periods";
 import { acordoViewOf, buildDebtDays, checkSourceOverflow, extraCapacityForDate } from "@/lib/debt";
+import { compensarObligationOnDate, isAbonadoDay } from "@/lib/compensar";
 import { dayBalanceContribution, effectiveFaltas, faltaOnDate, faltaStatusOf } from "@/lib/faltas";
 import { dayCreditView, excessReasonOnDate, hasEligibleSpecialExcessInCycle, shouldPromptExcessReason } from "@/lib/hour-bank";
 import type { CompKind, DayResult, WorkSettings } from "@/lib/types";
@@ -82,7 +83,7 @@ export default function RegistrosPage() {
   const [faltaOpen, setFaltaOpen] = useState(false);
   const [reasonDate, setReasonDate] = useState<string | null>(null);
   const [allocateDate, setAllocateDate] = useState<string | null>(null);
-  const [allocateFromDeficit, setAllocateFromDeficit] = useState<string | null>(null);
+  const [allocateFromDeficit, setAllocateFromDeficit] = useState<{ date: string; kind?: CompKind } | null>(null);
 
   // Faltas que JÁ valem (date <= hoje) — previstas não geram déficit/saldo
   const effectiveFaltaList = useMemo(() => effectiveFaltas(faltas, todayStr), [faltas, todayStr]);
@@ -612,8 +613,18 @@ export default function RegistrosPage() {
               creditView={dayCreditView(date, entries, compensations, absences, companyCalendars, settings, excessReasons)}
               onRegisterReason={(d) => setReasonDate(d)}
               onAllocateExcess={(d) => setAllocateDate(d)}
-              onUseAvailableExcess={(d) => setAllocateFromDeficit(d)}
+              onUseAvailableExcess={(d, kind) => setAllocateFromDeficit({ date: d, kind })}
               hasAvailableSpecialExcess={cycleHasSpecial}
+              compensarHint={(() => {
+                const obl = compensarObligationOnDate(
+                  date, entries, compensations, absences, companyCalendars, settings, todayStr,
+                );
+                return obl ? { label: obl.originLabel, originalMinutes: obl.originalMinutes } : null;
+              })()}
+              abonadoHint={(() => {
+                const a = isAbonadoDay(date, absences, companyCalendars);
+                return a.abonado ? { label: a.label ?? "Dia abonado" } : null;
+              })()}
             />
           ))}
         </div>
@@ -673,7 +684,8 @@ export default function RegistrosPage() {
         <AllocateExcessModal
           open
           onClose={() => setAllocateFromDeficit(null)}
-          deficitDate={allocateFromDeficit}
+          deficitDate={allocateFromDeficit.date}
+          deficitKind={allocateFromDeficit.kind}
           entries={entries}
           compensations={compensations}
           absences={absences}

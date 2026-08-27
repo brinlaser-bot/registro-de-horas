@@ -120,7 +120,10 @@ check("D. card do dia devedor mostra Usar excedente disponível", () => {
   assert.ok(dayCardSrc.includes("Usar excedente disponível"));
   assert.ok(dayCardSrc.includes("onUseAvailableExcess"));
   assert.ok(regsSrc.includes("onUseAvailableExcess"));
-  assert.ok(regsSrc.includes("deficitDate={allocateFromDeficit}"));
+  assert.ok(
+    regsSrc.includes("deficitDate={allocateFromDeficit") || regsSrc.includes("deficitDate={allocateFromDeficit.date}"),
+    "fluxo inverso monta AllocateExcessModal a partir do card",
+  );
   assert.ok(hasEligibleSpecialExcessInCycle(
     seed.entries, seed.compensations, seed.absences, seed.companyCalendars, settings, seed.excessReasons, TODAY,
   ));

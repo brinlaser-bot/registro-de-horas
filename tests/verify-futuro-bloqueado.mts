@@ -71,7 +71,8 @@ check(`A. card futuro (${FUT}): DayCard sem formulário/atalhos/Smart Exit — c
   const src = readFileSync(new URL("../src/components/day-card.tsx", import.meta.url), "utf8");
   const guards = src.match(/!futureDay/g) ?? [];
   assert.ok(src.includes("const futureDay = isFutureDate(d.date)"), "guarda central no card");
-  assert.ok(guards.length >= 3, "formulário, atalhos e Smart Exit condicionados a !futureDay");
+  assert.ok(guards.length >= 1, "formulário de registro manual condicionado a !futureDay");
+  assert.ok(src.includes("d.open && isToday"), "Smart Exit só no dia local de hoje");
   // E qualquer caminho programático cai na proteção do store (B)
   reset();
   assert.equal(actions.addEntry({ date: FUT, time: "08:00", type: "entrada", note: null }).ok, false);

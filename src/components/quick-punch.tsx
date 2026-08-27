@@ -5,6 +5,7 @@ import { Ban, Coffee, LogIn, LogOut, Pencil, Timer, Trash2, Zap } from "lucide-r
 import type { DayResult, WorkSettings } from "@/lib/types";
 import type { EntryType, TimeEntryLike } from "@/lib/time";
 import { formatMinutes, nextPunchType, nowTimeString, validatePunchSequence } from "@/lib/time";
+import { COMPENSAR_EXPLAIN } from "@/lib/compensar";
 import type { FaltaGate } from "@/lib/faltas";
 import { Badge, Button, Card, Input, Modal } from "@/components/ui";
 import { useToast } from "@/components/toast";
@@ -43,6 +44,10 @@ interface Props {
   embedded?: boolean;
   /** Jornada regular vazia (sem falta): mostra "jornada não iniciada" em vez de saldo −8h. */
   idle?: boolean;
+  /** Dia COMPENSAR: alerta âmbar com obrigação em tempo real. */
+  compensarHint?: { label: string; originalMinutes: number } | null;
+  /** Dia abonado com batidas: alerta visual, sem regra financeira nova. */
+  abonadoHint?: { label: string } | null;
 }
 
 export function QuickPunch({
@@ -60,6 +65,8 @@ export function QuickPunch({
   onRemoveFalta,
   embedded = false,
   idle = false,
+  compensarHint,
+  abonadoHint,
 }: Props) {
   const toast = useToast();
   // §6.2 Campo de horário MANUAL permanece: vazio → segue o relógio; quando o
@@ -245,6 +252,24 @@ export function QuickPunch({
 
   const body = (
     <>
+      {compensarHint && (
+        <div className="mb-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          <p className="text-[11px] font-extrabold uppercase tracking-wider text-amber-700">Dia com regra especial</p>
+          <p className="font-bold">{compensarHint.label}</p>
+          <p className="mt-0.5">
+            Obrigação original <b>{formatMinutes(compensarHint.originalMinutes)}</b>
+            {" · "}Trabalhado hoje <b>{formatMinutes(today.workedMinutes)}</b>
+            {" · "}Restante estimado <b>{formatMinutes(Math.max(0, compensarHint.originalMinutes - today.workedMinutes))}</b>
+          </p>
+          <p className="mt-1 text-[11px]">{COMPENSAR_EXPLAIN}</p>
+        </div>
+      )}
+      {abonadoHint && today.entries.length > 0 && (
+        <div className="mb-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          <p className="font-bold">Trabalho registrado em dia abonado</p>
+          <p>{formatMinutes(today.workedMinutes)} trabalhados · {abonadoHint.label}</p>
+        </div>
+      )}
       {/* §12 faixa de contexto compacta — só no modo embutido (o Card próprio
           já carrega a mesma informação no subtítulo, sem duplicar). */}
       {embedded && (

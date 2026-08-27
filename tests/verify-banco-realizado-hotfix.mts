@@ -133,7 +133,9 @@ check("C. useRealizedCredit com crédito de 07/09 (futuro) ⇒ rejeitado em 25/0
 /* ── D. Chegando 07/09, as 2h passam a ser fato realizado ──── */
 check("D. today avança para 07/09 ⇒ as 2h entram no realizado e no crédito normalmente", () => {
   scenario();
-  assert.equal(bank("2026-09-07").realizedBalance, 365, "+4h05 + 2h = +6h05 (agora é fato)");
+  // 25/08 (COMPENSAR 8h) já passou em 07/09: entra como dívida realizada −8h.
+  // +4h05 + 2h − 8h = −1h55.
+  assert.equal(bank("2026-09-07").realizedBalance, 365 - 480, "+4h05 + 2h − obrigação 25/08 8h");
   const st = getAppData();
   actions.replaceAll({ ...st, compensations: destinacoesCompletas() });
   assert.equal(bank("2026-09-07").freeRegularTotal, 120, "só sobram as 2h de 07/09 livres");

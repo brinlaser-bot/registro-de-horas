@@ -385,7 +385,11 @@ export function companyDayContext(
     const abonadasMinutes = Math.max(0, calendarEntry.horasAbonadas * 60);
     const calendarioACompensar = calendarEntry.tratamento === "COMPENSAR" ? Math.max(0, calendarEntry.horasACompensar * 60) : 0;
     const cargaConsiderada = Math.min(worked, expectedRegular) + abonadasMinutes;
-    const regularBalance = worked - expectedRegular;
+    // COMPENSAR: trabalho no próprio dia reduz a OBRIGAÇÃO, não gera crédito
+    // até ultrapassar o original. Déficit comum = 0 (a dívida é a obrigação).
+    const compensarSurplus =
+      calendarEntry.tratamento === "COMPENSAR" ? Math.max(0, worked - calendarioACompensar) : null;
+    const regularBalance = compensarSurplus ?? (worked - expectedRegular);
     const isHoliday = calendarEntry.categoria.includes("Feriado") || calendarEntry.categoria.includes("Aniversário") || calendarEntry.descricao.toLowerCase().includes("natal");
     const marker = calendarEntry.tratamento === "COMPENSAR"
       ? calendarEntry.categoria === "Recesso Final de Ano" ? "recesso" : "calendario-compensar"
@@ -413,6 +417,9 @@ export function companyDayContext(
       type: "evento",
       effectiveExpected: expectedRegular,
       adjustedBalance: regularBalance,
+      // COMPENSAR com jornada 0 (folga/recesso): déficit comum 0.
+      // Cinzas (jornada reduzida): o restante da jornada regular continua
+      // podendo gerar déficit comum; a obrigação COMPENSAR é conta à parte.
       adjustedDeficit: day.open ? 0 : Math.max(0, expectedRegular - worked),
       displayDay: { ...day, expectedMinutes: expectedRegular, balanceMinutes: regularBalance, status: statusOf() },
     };

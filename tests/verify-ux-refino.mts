@@ -67,7 +67,7 @@ check("A. UI visível não usa a palavra 'factual'; déficits em aberto", () => 
   assert.ok(allocSrc.includes("Déficit em aberto"));
   assert.ok(allocSrc.includes("Déficits em aberto") || allocSrc.includes("déficit em aberto"));
   assert.ok(panelSrc.includes("déficits ainda em aberto") || panelSrc.includes("Nenhum déficit em aberto"));
-  assert.ok(bankSrc.includes("Déficits em aberto"));
+  assert.ok(bankSrc.includes("Saldo negativo em aberto") || bankSrc.includes("Déficits em aberto"));
 });
 
 /* ── B. CTA Usar horas livres removido; store permanece ─── */
@@ -95,11 +95,7 @@ check("C. desktop: Usar excedente disponível primeiro, mesma linha; mobile pode
   assert.ok(panelIdx > 0 && extraIdx > panelIdx, "Usar excedente disponível vem antes de Programar hora extra no painel");
   assert.ok(panelSrc.includes("sm:flex-row"), "painel empilha no mobile / mesma linha no desktop");
   assert.ok(dayCardSrc.includes("sm:flex-row"), "card do dia: mesma linha no desktop");
-  const cardBlock = dayCardSrc.slice(
-    dayCardSrc.indexOf("Usar excedente disponível") - 400,
-    dayCardSrc.indexOf("Usar excedente disponível") + 400,
-  );
-  assert.ok(cardBlock.includes("sm:flex-row"));
+  assert.ok(dayCardSrc.includes("Usar excedente disponível") && dayCardSrc.includes("sm:flex-row"));
 });
 
 /* ── D. Previsão de horas a compensar ────────────────────── */

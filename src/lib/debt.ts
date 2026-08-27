@@ -2,6 +2,7 @@
 import { computeDay, expectedMinutesOf, formatDateBR, formatMinutes, isRealizedDate } from "./time";
 import { type Absence } from "./absences";
 import { calendarCycleOf, companyDayContext, type CompanyCalendars } from "./company-calendar";
+import { compensarObligationOnDate } from "./compensar";
 import { sameAnnualCycle } from "./periods";
 import type {
   CompKind,
@@ -178,8 +179,28 @@ export function buildDebtDays(
       push("excedente", excess);
       push("deficit", deficit);
     }
-    push("acordo", ctx.acordoMinutes);
-    push("calendario", cctx.calendarioACompensar);
+    // COMPENSAR: original IMUTÁVEL; open = efetiva − concluído (trabalho no
+    // próprio dia reduz a efetiva, não o original). Aparece mesmo no futuro
+    // para planejamento; o gating realizado fica no banco/hour-bank.
+    const todayRef = today ?? date;
+    const obl = compensarObligationOnDate(
+      date, entries, comps, absences, companyCalendars, settings, todayRef,
+    );
+    if (obl && obl.originalMinutes > 0) {
+      const allocated = allocatedForSource(comps, date, obl.compKind);
+      out.push({
+        date,
+        kind: obl.compKind,
+        workedMinutes: obl.workedOnOriginDateMinutes,
+        expectedMinutes: cctx.effectiveExpected,
+        debtMinutes: obl.originalMinutes,
+        allocatedMinutes: Math.min(allocated, obl.effectiveObligationMinutes),
+        pendingMinutes: obl.plannedMinutes,
+        concludedMinutes: obl.completedMinutes,
+        remainingMinutes: obl.unplannedMinutes,
+        openMinutes: obl.openMinutes,
+      });
+    }
   }
 
   return out.sort((a, b) => a.date.localeCompare(b.date));
@@ -369,7 +390,9 @@ export function extraCapacityForDate(
     settings,
   );
   const finished = !day.empty && !day.open;
-  const realExtra = finished ? Math.max(0, day.workedMinutes - effectiveBase) : null;
+  const realExtra = finished
+    ? actualExtraForDate(date, entries, settings, { companyCalendars: opts?.companyCalendars })
+    : null;
 
   let available = Math.max(0, headroom - alreadyAllocated);
   if (realExtra !== null) {
@@ -397,8 +420,12 @@ export function originalHourExtraDebt(
   settings: WorkSettings,
 ): number {
   const cctx = companyDayContext(date, entries, absences, companyCalendars, settings);
-  if (kind === "acordo") return cctx.ctx.acordoMinutes;
-  if (kind === "calendario") return cctx.calendarioACompensar;
+  if (kind === "acordo" || kind === "calendario") {
+    const obl = compensarObligationOnDate(
+      date, entries, comps, absences, companyCalendars, settings, date,
+    );
+    return obl?.effectiveObligationMinutes ?? 0;
+  }
   if (kind === "deficit") {
     const coveredByEarly = sumMinutes(
       comps.filter((c) => c.targetDate === date && kindOf(c) === "excedente" && isActive(c)),
@@ -448,9 +475,11 @@ export function actualExtraForDate(
     entries.filter((e) => e.date === date),
     settings,
   );
-  const base = opts?.companyCalendars
-    ? effectiveBaseForDate(date, entries, settings, opts.companyCalendars)
-    : day.expectedMinutes;
+  const obl = compensarObligationOnDate(
+    date, entries, [], [], opts?.companyCalendars, settings, date,
+  );
+  if (obl) return day.empty || day.open ? 0 : obl.surplusMinutes;
+  const base = effectiveBaseForDate(date, entries, settings, opts?.companyCalendars);
   return Math.max(0, day.workedMinutes - base);
 }
 
@@ -538,13 +567,15 @@ export function canCompleteComp(
 
 export interface AcordoView {
   date: string;
-  /** Total gerado pelo afastamento acordado. */
+  /** Total gerado pelo afastamento acordado (IMUTÁVEL). */
   originalMinutes: number;
+  workedOnOriginDateMinutes: number;
+  effectiveObligationMinutes: number;
   /** Soma SOMENTE das compensações de acordo concluídas. */
   compensatedMinutes: number;
   /** Soma das compensações de acordo apenas planejadas (pendentes). */
   plannedMinutes: number;
-  /** Original − Compensado (planejado NÃO abate). */
+  /** Efetiva − Compensado (planejado NÃO abate). */
   remainingMinutes: number;
   /** Restante factual − planejado ativo: ainda SEM PROGRAMAÇÃO. */
   unplannedMinutes: number;
@@ -557,14 +588,17 @@ export interface AcordoView {
  * Não altera a semântica de excedente/déficit em `buildDebtDays`.
  */
 export function acordoViewOf(day: DebtDay): AcordoView {
-  const remainingMinutes = Math.max(0, day.debtMinutes - day.concludedMinutes);
+  const remainingMinutes = day.openMinutes;
+  const planned = Math.min(day.pendingMinutes, remainingMinutes);
   return {
     date: day.date,
     originalMinutes: day.debtMinutes,
+    workedOnOriginDateMinutes: day.workedMinutes,
+    effectiveObligationMinutes: Math.max(0, remainingMinutes + day.concludedMinutes),
     compensatedMinutes: day.concludedMinutes,
     plannedMinutes: day.pendingMinutes,
     remainingMinutes,
-    unplannedMinutes: Math.max(0, remainingMinutes - day.pendingMinutes),
+    unplannedMinutes: Math.max(0, remainingMinutes - planned),
   };
 }
 
@@ -590,14 +624,17 @@ export interface CalendarioView {
   date: string;
   /** Ciclo anual da data de origem, ex.: "2026–2027". */
   cycleLabel: string;
-  /** Horas a compensar do evento (compensação parcial de Cinzas = 4h etc.). */
+  /** Horas a compensar do evento — IMUTÁVEL. */
   originalMinutes: number;
+  workedOnOriginDateMinutes: number;
+  effectiveObligationMinutes: number;
   /** Soma SOMENTE das compensações de calendário concluídas vinculadas à origem. */
   compensatedMinutes: number;
   /** Soma das compensações de calendário ainda pendentes (planejadas). */
   plannedMinutes: number;
-  /** Original − Compensado (planejado NÃO abate o restante). Nunca negativo. */
+  /** Efetiva − Compensado (planejado NÃO abate o restante). Nunca negativo. */
   remainingMinutes: number;
+  unplannedMinutes: number;
   /** True quando a data de origem ainda não chegou (visível para planejamento). */
   future: boolean;
 }
@@ -625,15 +662,22 @@ export function activeCalendarObligations(
 ): CalendarioView[] {
   return buildDebtDays(entries, comps, settings, range, [], companyCalendars)
     .filter((d) => d.kind === "calendario")
-    .map((d) => ({
-      date: d.date,
-      cycleLabel: calendarCycleOf(d.date).label,
-      originalMinutes: d.debtMinutes,
-      compensatedMinutes: d.concludedMinutes,
-      plannedMinutes: d.pendingMinutes,
-      remainingMinutes: Math.max(0, d.debtMinutes - d.concludedMinutes),
-      future: d.date > today,
-    }))
+    .map((d) => {
+      const remainingMinutes = d.openMinutes;
+      const planned = Math.min(d.pendingMinutes, remainingMinutes);
+      return {
+        date: d.date,
+        cycleLabel: calendarCycleOf(d.date).label,
+        originalMinutes: d.debtMinutes,
+        workedOnOriginDateMinutes: d.workedMinutes,
+        effectiveObligationMinutes: Math.max(0, remainingMinutes + d.concludedMinutes),
+        compensatedMinutes: d.concludedMinutes,
+        plannedMinutes: d.pendingMinutes,
+        remainingMinutes,
+        unplannedMinutes: Math.max(0, remainingMinutes - planned),
+        future: d.date > today,
+      };
+    })
     .filter((v) => v.remainingMinutes > 0)
     .sort((a, b) => a.date.localeCompare(b.date)); // mais próxima primeiro
 }

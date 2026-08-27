@@ -104,6 +104,7 @@ export function CompensationForm({
   });
   const [busy, setBusy] = useState(false);
   const inflight = useRef(false);
+  const minutesTouched = useRef(false);
   const copy = COPY[kind];
 
   const prefillOf = (targetDate: string, fallback?: number) => {
@@ -120,6 +121,7 @@ export function CompensationForm({
 
   useEffect(() => {
     if (!open) return;
+    minutesTouched.current = false;
     const targetDate = initial?.targetDate ?? todayString();
     setForm({
       sourceDate: initial?.sourceDate ?? todayString(),
@@ -261,7 +263,11 @@ export function CompensationForm({
             value={form.targetDate}
             onChange={(e) => {
               const targetDate = e.target.value;
-              setForm({ ...form, targetDate, minutes: prefillOf(targetDate, form.minutes) });
+              if (!minutesTouched.current) {
+                setForm({ ...form, targetDate, minutes: prefillOf(targetDate) });
+              } else {
+                setForm({ ...form, targetDate });
+              }
             }}
           />
         </div>
@@ -283,7 +289,14 @@ export function CompensationForm({
                   <button
                     key={s.date}
                     type="button"
-                    onClick={() => setForm({ ...form, targetDate: s.date })}
+                    onClick={() => {
+                      const targetDate = s.date;
+                      if (!minutesTouched.current) {
+                        setForm({ ...form, targetDate, minutes: prefillOf(targetDate) });
+                      } else {
+                        setForm({ ...form, targetDate });
+                      }
+                    }}
                     className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-bold transition-colors cursor-pointer ${
                       active
                         ? "border-indigo-500 bg-indigo-600 text-white"

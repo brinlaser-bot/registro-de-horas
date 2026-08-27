@@ -160,16 +160,20 @@ export function dayContext(
   const regularExpected = Math.max(0, expected - justified);
 
   if (absence.kind === "acordado" && absence.treatment === "compensar") {
-    // Horas do acordo NÃO são déficit comum. O que não foi trabalhado dentro da janela
-    // do acordo vira obrigação própria: "Acordo a compensar".
-    const acordo = Math.max(0, justified - workedInsideAbsence);
+    // original IMUTÁVEL = horas justificadas do acordo. Trabalho no próprio
+    // dia reduz a obrigação efetiva (ver compensarObligationOnDate); só o
+    // que ultrapassar o original vira crédito regular. Não é déficit comum.
+    const acordoOriginal = justified;
+    const surplus = Math.max(0, day.workedMinutes - acordoOriginal);
     return {
       day,
       absence,
       effectiveExpected: regularExpected,
-      adjustedBalance: regularWorked - regularExpected,
+      // Parcial: a jornada regular restante continua gerando saldo/déficit;
+      // o surplus (trabalho além do original do acordo) é crédito extra.
+      adjustedBalance: surplus + (regularWorked - regularExpected),
       adjustedDeficit: day.open ? 0 : Math.max(0, regularExpected - regularWorked),
-      acordoMinutes: acordo,
+      acordoMinutes: acordoOriginal,
       justifiedMinutes: justified,
       isVacation: false,
     };

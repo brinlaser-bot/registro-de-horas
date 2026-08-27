@@ -7,10 +7,12 @@ import { computeDay, formatMinutes, FUTURE_DATE_ERROR, insertPunchError, isFutur
 import { buildSeedData, DEFAULT_USER } from "./seed-data";
 import { absencesEqual, compsEqual, entriesEqual, excessReasonsEqual, mergeByIdAndContent } from "./backup";
 import { actualExtraForDate, allocatedForSource, canCompleteComp, concludedForSource, extraCapacityForDate, kindOf, usesHourExtra, acordoLinkedComps, originalHourExtraDebt, sourcePlanningHeadroom, OVERPLAN_MSG } from "./debt";
+import { compensarObligationOnDate, reconcileCompensarComps } from "./compensar";
 import {
   ALLOCATE_CROSS_CYCLE_MSG,
   ALLOCATE_NO_REASON_MSG,
   canAllocateExcess,
+  eligibleDeficitsForSpecialAllocation,
   planRealizedCreditUse,
   previewAllocateSpecialExcess,
   releaseOverlappingPlanned,
@@ -190,10 +192,11 @@ const CONCLUDED_TARGET_MSG =
  */
 function concludedCompGuard(d: AppData, date: string): ActionResult | null {
   const cctx = companyDayContext(date, d.entries, d.absences, d.companyCalendars, settingsOf(d.user));
+  // acordo/calendário COMPENSAR: a batida pode reduzir a obrigação efetiva
+  // abaixo do já concluído — reconciliação libera o excedente (não bloqueia).
   const debts: [CompKind, number][] = [
     ["excedente", cctx.ctx.day.excessMinutes],
     ["deficit", cctx.adjustedDeficit],
-    ["acordo", cctx.ctx.acordoMinutes],
   ];
   for (const [kind, debt] of debts) {
     if (concludedForSource(d.compensations, date, kind) > Math.max(0, debt)) {
@@ -229,6 +232,16 @@ function concludedTargetGuard(d: AppData, date: string): ActionResult | null {
 /** Roda as duas guardas (origem + destino) para um dia, no estado simulado. */
 function concludedGuardsFor(d: AppData, date: string): ActionResult | null {
   return concludedCompGuard(d, date) ?? concludedTargetGuard(d, date);
+}
+
+function withCompensarReconcile(d: AppData, date: string): AppData {
+  const settings = settingsOf(d.user);
+  const view = compensarObligationOnDate(
+    date, d.entries, d.compensations, d.absences, d.companyCalendars, settings, todayString(),
+  );
+  if (!view) return d;
+  const comps = reconcileCompensarComps(d.compensations, view);
+  return comps === d.compensations ? d : { ...d, compensations: comps };
 }
 
 export const actions = {
@@ -268,7 +281,7 @@ export const actions = {
         result = { ok: false, code: "sequence", error: seqError };
         return d;
       }
-      return { ...d, entries: [...d.entries, created] };
+      return withCompensarReconcile({ ...d, entries: [...d.entries, created] }, p.date);
     });
     return result;
   },
@@ -318,7 +331,9 @@ export const actions = {
           return d;
         }
       }
-      return { ...d, entries: sim.entries };
+      let reconciled: AppData = { ...d, entries: sim.entries };
+      for (const date of affectedDates) reconciled = withCompensarReconcile(reconciled, date);
+      return reconciled;
     });
     return result;
   },
@@ -342,7 +357,7 @@ export const actions = {
         result = guard;
         return d; // bloqueia: batida sustenta compensação concluída
       }
-      return sim;
+      return withCompensarReconcile(sim, target.date);
     });
     return result;
   },
@@ -912,20 +927,9 @@ export const actions = {
       const debt = d.compensations
         .filter((c) => c.sourceDate === p.sourceDate && kindOf(c) === kind && c.status !== "cancelada")
         .reduce((s, c) => s + c.minutes, 0);
-      const cctxSrc = companyDayContext(p.sourceDate, d.entries, d.absences, d.companyCalendars, settingsOf(d.user));
-      const totalDebt =
-        // cobertura por saída antecipada reduz o déficit comum (mesma regra central)
-        kind === "deficit"
-          ? Math.max(
-              0,
-              cctxSrc.adjustedDeficit -
-                d.compensations
-                  .filter((c) => c.targetDate === p.sourceDate && kindOf(c) === "excedente" && c.status !== "cancelada")
-                  .reduce((s, c) => s + c.minutes, 0),
-            )
-          : kind === "acordo"
-            ? cctxSrc.ctx.acordoMinutes
-            : cctxSrc.calendarioACompensar;
+      const totalDebt = originalHourExtraDebt(
+        p.sourceDate, kind, d.entries, d.compensations, d.absences, d.companyCalendars, settingsOf(d.user),
+      );
       if (debt + p.minutes > totalDebt) {
         result = {
           ok: false,
@@ -1095,7 +1099,7 @@ export const actions = {
    * e libera o planejado futuro sobreposto na mesma proporção.
    * NÃO altera batidas nem o Saldo realizado.
    */
-  allocateSpecialExcess(p: { excessDate: string; deficitDate: string; minutes: number }): ActionResult {
+  allocateSpecialExcess(p: { excessDate: string; deficitDate: string; minutes: number; kind?: CompKind }): ActionResult {
     let result: ActionResult = OK;
     mutate((d) => {
       const createKey = `alloc:${p.excessDate}|${p.deficitDate}|${p.minutes}`;
@@ -1112,7 +1116,7 @@ export const actions = {
       const preview = previewAllocateSpecialExcess(
         p.excessDate, p.deficitDate, p.minutes,
         d.entries, d.compensations, d.absences, d.companyCalendars, d.faltas,
-        settings, d.excessReasons, today,
+        settings, d.excessReasons, today, p.kind,
       );
       if (!preview.ok) {
         result = { ok: false, code: "invalid", error: preview.error ?? ALLOCATE_NO_REASON_MSG };
@@ -1128,14 +1132,20 @@ export const actions = {
         result = { ok: false, code: "invalid", error: ALLOCATE_NO_REASON_MSG };
         return d;
       }
+      const debtKind: CompKind =
+        p.kind ??
+        eligibleDeficitsForSpecialAllocation(
+          p.excessDate, d.entries, d.compensations, d.absences, d.companyCalendars, d.faltas, settings, today,
+        ).find((x) => x.date === p.deficitDate)?.kind ??
+        "deficit";
       const created: Compensation = {
         id: nextId(d.compensations),
         sourceDate: p.deficitDate,
         targetDate: p.excessDate,
         minutes: preview.minutes,
         status: "concluida",
-        note: "Alocado excedente acima de 10h (realizado)",
-        kind: "deficit",
+        note: "Alocado EXCEDENTE DO LIMITE DIÁRIO [10+] (realizado)",
+        kind: debtKind,
         portion: "especial",
         createdAt: Date.now(),
       };
@@ -1144,6 +1154,7 @@ export const actions = {
         withNew,
         p.deficitDate,
         preview.remainingDeficitAfter,
+        debtKind,
       );
       result = {
         ok: true,
