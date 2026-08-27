@@ -7,10 +7,10 @@
 //    (não são déficit comum), compensáveis com hora extra no mesmo ciclo.
 // ─────────────────────────────────────────────────────────────
 import { computeDay, expectedMinutesOf, toMinutes } from "./time";
-import { annualCycleClose, getAnnualPointCycle, nextCycleStart, sameAnnualCycle } from "./periods";
-import type { DayResult, TimeEntry, WorkSettings } from "./types";
+import { annualCycleClose, annualCycleBounds, getAnnualPointCycle, nextCycleStart, sameAnnualCycle } from "./periods";
+import type { DayResult, Falta, TimeEntry, WorkSettings } from "./types";
 
-export type AbsenceKind = "ferias" | "saude" | "acordado" | "outro";
+export type AbsenceKind = "ferias" | "saude" | "acordado" | "abono" | "outro";
 export type AbsenceDuration = "integral" | "parcial";
 export type AbsenceTreatment = "dispensado" | "compensar";
 
@@ -35,6 +35,7 @@ export const ABSENCE_LABELS: Record<AbsenceKind, string> = {
   ferias: "Férias",
   saude: "Afastamento por saúde",
   acordado: "Afastamento acordado",
+  abono: "Abono de aniversário",
   outro: "Outro afastamento justificado",
 };
 
@@ -159,16 +160,20 @@ export function dayContext(
   const regularExpected = Math.max(0, expected - justified);
 
   if (absence.kind === "acordado" && absence.treatment === "compensar") {
-    // Horas do acordo NÃO são déficit comum. O que não foi trabalhado dentro da janela
-    // do acordo vira obrigação própria: "Acordo a compensar".
-    const acordo = Math.max(0, justified - workedInsideAbsence);
+    // original IMUTÁVEL = horas justificadas do acordo. Trabalho no próprio
+    // dia reduz a obrigação efetiva (ver compensarObligationOnDate); só o
+    // que ultrapassar o original vira crédito regular. Não é déficit comum.
+    const acordoOriginal = justified;
+    const surplus = Math.max(0, day.workedMinutes - acordoOriginal);
     return {
       day,
       absence,
       effectiveExpected: regularExpected,
-      adjustedBalance: regularWorked - regularExpected,
+      // Parcial: a jornada regular restante continua gerando saldo/déficit;
+      // o surplus (trabalho além do original do acordo) é crédito extra.
+      adjustedBalance: surplus + (regularWorked - regularExpected),
       adjustedDeficit: day.open ? 0 : Math.max(0, regularExpected - regularWorked),
-      acordoMinutes: acordo,
+      acordoMinutes: acordoOriginal,
       justifiedMinutes: justified,
       isVacation: false,
     };
@@ -220,76 +225,11 @@ export function regularBalanceContribution(view: DayBalanceView): number {
   return view.adjustedBalance;
 }
 
-/* ── Visão central de dia da empresa (apresentação) ─────────
- * Regra de folga comum: sábado/domingo sem evento explícito e sem jornada
- * exigida não gera déficit. Se houver batidas, é "Trabalho em folga".
- * Esta função NÃO altera dayContext(): é uma visão central para telas que
- * precisam apresentar o tipo do dia (ex.: Visão geral).
+/* ── Visão central de dia da empresa ─────────────────────────
+ * A resolução consolidada do dia (fim de semana/folga/evento/calendário)
+ * vive em ./company-calendar.ts (companyDayContext) — fonte única de verdade.
+ * Este módulo mantém apenas a matemática de férias/afastamentos (dayContext).
  */
-export type CompanyDayType = "regular" | "folga" | "trabalho-folga" | "evento";
-
-export interface CompanyDayContext extends DayContext {
-  type: CompanyDayType;
-  label: string;
-  /** DayResult pronto para UI: expected/balance já refletem folga/evento. */
-  displayDay: DayResult;
-}
-
-export function companyDayContext(
-  date: string,
-  entries: TimeEntry[],
-  absences: Absence[],
-  settings: WorkSettings,
-  nowMinutes?: number,
-): CompanyDayContext {
-  const ctx = dayContext(date, entries, absences, settings, nowMinutes);
-  const wd = new Date(`${date}T12:00:00`).getDay();
-  const weekend = wd === 0 || wd === 6;
-
-  if (ctx.absence) {
-    return {
-      ...ctx,
-      type: "evento",
-      label: absenceLabel(ctx.absence),
-      displayDay: {
-        ...ctx.day,
-        expectedMinutes: ctx.effectiveExpected,
-        balanceMinutes: ctx.adjustedBalance,
-        status: ctx.day.open ? "in-progress" : ctx.day.entries.length > 0 ? "ok" : "empty",
-      },
-    };
-  }
-
-  if (weekend) {
-    const worked = ctx.day.workedMinutes;
-    const type: CompanyDayType = ctx.day.entries.length > 0 ? "trabalho-folga" : "folga";
-    return {
-      ...ctx,
-      type,
-      label: type === "folga" ? "Folga hoje" : "Trabalho em folga",
-      effectiveExpected: 0,
-      adjustedBalance: worked,
-      adjustedDeficit: 0,
-      displayDay: {
-        ...ctx.day,
-        expectedMinutes: 0,
-        balanceMinutes: worked,
-        status: ctx.day.open ? "in-progress" : ctx.day.entries.length > 0 ? "ok" : "empty",
-      },
-    };
-  }
-
-  return {
-    ...ctx,
-    type: "regular",
-    label: "Jornada regular",
-    displayDay: {
-      ...ctx.day,
-      expectedMinutes: ctx.effectiveExpected,
-      balanceMinutes: ctx.adjustedBalance,
-    },
-  };
-}
 
 /* ── Validação central de férias/afastamentos ────────────── */
 
@@ -313,6 +253,7 @@ export function validateAbsence(
   allAbsences: Absence[],
   entries: TimeEntry[],
   excludeId?: number,
+  faltas: Falta[] = [],
 ): AbsenceValidation {
   const { startDate, endDate } = draft;
   if (!startDate || !endDate) return { ok: false, code: "invalid", error: "Informe as datas." };
@@ -331,7 +272,35 @@ export function validateAbsence(
     return { ok: false, code: "invalid", error: "Informe como tratar as horas do afastamento acordado." };
   }
 
-  // Barreira do fechamento anual: evento não pode atravessar 30/04 → 01/05
+  // Regra do ABONO DE ANIVERSÁRIO: sempre dia inteiro (não existe parcial).
+  if (draft.kind === "abono" && draft.duration !== "integral") {
+    return {
+      ok: false,
+      code: "invalid",
+      error: "O Abono de aniversário é sempre um dia inteiro.",
+    };
+  }
+  // O Abono é um benefício de UM único dia (nunca abrange 2+ dias).
+  if (draft.kind === "abono" && startDate !== endDate) {
+    return {
+      ok: false,
+      code: "invalid",
+      error: "O Abono de aniversário é de um único dia — mantenha as datas inicial e final iguais.",
+    };
+  }
+
+  // Parte A: FÉRIAS nunca atravessam o fechamento anual (30/04 → 01/05).
+  // Diferente de saúde/acordado/outro, NÃO se oferece divisão: ajuste das datas.
+  if (draft.kind === "ferias" && !sameAnnualCycle(startDate, endDate)) {
+    return {
+      ok: false,
+      code: "cross-cycle",
+      error:
+        "As férias não podem ultrapassar o fechamento do ciclo anual em 30/04. Ajuste a data final para até 30/04. A partir de 01/05 inicia-se um novo ciclo anual.",
+    };
+  }
+
+  // Barreira do fechamento anual: saúde/acordado/outro podem ser divididos.
   if (!sameAnnualCycle(startDate, endDate)) {
     const cycle = getAnnualPointCycle(startDate);
     return {
@@ -344,6 +313,41 @@ export function validateAbsence(
         second: { startDate: nextCycleStart(cycle), endDate },
       },
     };
+  }
+
+  // Regra do ABONO: um benefício por ciclo anual (resolução central do ciclo,
+  // nunca ano-calendário). Mostra a data já cadastrada para orientar a edição.
+  if (draft.kind === "abono") {
+    const existing = allAbsences.find(
+      (a) => a.kind === "abono" && a.id !== excludeId && sameAnnualCycle(a.startDate, startDate),
+    );
+    if (existing) {
+      return {
+        ok: false,
+        code: "overlap",
+        error: `Já existe um Abono de aniversário neste ciclo anual, em ${existing.startDate.slice(8, 10)}/${existing.startDate.slice(5, 7)}/${existing.startDate.slice(0, 4)}. Altere o evento existente ou exclua-o para cadastrar outra data.`,
+      };
+    }
+    // K6: dia com Falta/Falta prevista — conflito explícito, nunca converte em silêncio
+    const faltaNoDia = faltas.some((f) => f.date >= startDate && f.date <= endDate);
+    if (faltaNoDia) {
+      return {
+        ok: false,
+        code: "overlap",
+        error:
+          "Esta data possui uma falta registrada. Exclua a falta (ou a falta prevista) antes de usar o dia para o Abono de aniversário.",
+      };
+    }
+    // K7: dia com batidas — exigir resolução explícita (nunca abono sobre dia trabalhado)
+    const punchNoDia = entries.some((e) => e.date >= startDate && e.date <= endDate);
+    if (punchNoDia) {
+      return {
+        ok: false,
+        code: "overlap",
+        error:
+          "Esta data possui registros de ponto. Exclua os registros ou escolha outra data para o Abono de aniversário.",
+      };
+    }
   }
 
   // Sobreposição com outro evento existente → bloqueio
@@ -366,4 +370,114 @@ export function validateAbsence(
       : undefined;
 
   return { ok: true, warning };
+}
+
+/* ── ABONO DE ANIVERSÁRIO & DATA DE NASCIMENTO ─────────────
+ * O Abono é um benefício próprio da empresa: dia inteiro, jornada efetiva 0h,
+ * saldo 0, déficit 0, sem obrigação de compensação, NO MÁXIMO um por ciclo.
+ */
+
+/** Verdadeiro se hoje (data local) é o aniversário (dia+mês) do nascimento. */
+export function isBirthdayToday(birthDate: string | null | undefined, today: string): boolean {
+  if (!birthDate) return false;
+  // Compara somente mês e dia — data LOCAL (strings YYYY-MM-DD), nunca UTC.
+  return birthDate.slice(5, 10) === today.slice(5, 10);
+}
+
+/**
+ * Data SUGERIDA do Abono: o aniversário que cai dentro do ciclo anual da data
+ * de referência (01/05 → 30/04). Ex.: nascimento 15/08 + ciclo 2026/2027 →
+ * 15/08/2026; nascimento 10/01 + mesmo ciclo → 10/01/2027.
+ * 29/02 em ciclo sem 29/02 → 01/03. É só sugestão — a escolha final é LIVRE.
+ */
+export function suggestedAbonoDate(birthDate: string | null | undefined, referenceDate: string): string | null {
+  if (!birthDate) return null;
+  const bounds = annualCycleBounds(getAnnualPointCycle(referenceDate));
+  const startYear = Number(bounds.from.slice(0, 4));
+  const mm = birthDate.slice(5, 7);
+  const dd = birthDate.slice(8, 10);
+  // mm-dd >= "05-01" → mesmo ano do início do ciclo; senão, ano de término
+  const year = `${mm}-${dd}` >= "05-01" ? startYear : startYear + 1;
+  // Edge 29/02: se o ano alvo não é bissexto, sugerir 01/03
+  if (mm === "02" && dd === "29") {
+    const leap = (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+    return leap ? `${year}-02-29` : `${year}-03-01`;
+  }
+  return `${year}-${mm}-${dd}`;
+}
+
+/** Abono já cadastrado no mesmo ciclo anual da data (para UI de atalho). */
+export function abonoInCycle(absences: Absence[], referenceDate: string): Absence | undefined {
+  return absences.find(
+    (a) => a.kind === "abono" && sameAnnualCycle(a.startDate, referenceDate),
+  );
+}
+
+/* ── Decisão central do ABONO DE ANIVERSÁRIO sobre uma data ─────────────
+ * Fonte ÚNICA de verdade usada pelo modal de Configurações (validação
+ * imediata) e pelo store (setAbono) — nunca duplicar essa lógica na UI.
+ *  - "ok"             → data livre (avisos de calendário/folga são feitos
+ *                       à parte, via abonoDateAdvisory, e não bloqueiam);
+ *  - "blocked"        → férias/saúde/horas dispensadas/outro integral, falta
+ *                       ou batidas: exige resolução explícita, nunca substitui;
+ *  - "replace-acordo" → regra especial: o Abono PODE prevalecer sobre um
+ *                       "Afastamento acordado — compensar posteriormente",
+ *                       mediante confirmação explícita e sem compensações
+ *                       concluídas vinculadas (checagem no store).
+ */
+export type AbonoDayDecision =
+  | { status: "ok" }
+  | {
+      status: "blocked";
+      code: "falta" | "punches" | "overlap";
+      error: string;
+      absence?: Absence;
+    }
+  | { status: "replace-acordo"; acordo: Absence };
+
+export const ABONO_FALTA_ERROR =
+  "Esta data possui uma falta registrada. Exclua a falta (ou a falta prevista) antes de usar o dia para o Abono de aniversário.";
+export const ABONO_PUNCHES_ERROR =
+  "Esta data já possui registros de horário. Resolva os registros antes de aplicar o Abono de aniversário.";
+
+export function abonoDayDecision(
+  date: string,
+  opts: {
+    absences: Absence[];
+    entries: TimeEntry[];
+    faltas?: Falta[];
+    /** Ao editar o abono existente, excluir um id da análise de sobreposição. */
+    excludeAbsenceId?: number;
+  },
+): AbonoDayDecision {
+  const { absences, entries, faltas = [], excludeAbsenceId } = opts;
+  // Falta (efetiva OU prevista) — conflito explícito, nunca converte em silêncio
+  if (faltas.some((f) => f.date === date)) {
+    return { status: "blocked", code: "falta", error: ABONO_FALTA_ERROR };
+  }
+  // Batidas — nunca abono silencioso sobre dia trabalhado
+  if (entries.some((e) => e.date === date)) {
+    return { status: "blocked", code: "punches", error: ABONO_PUNCHES_ERROR };
+  }
+  const covering = absences.filter(
+    (a) => a.id !== excludeAbsenceId && a.startDate <= date && date <= a.endDate,
+  );
+  // Férias / saúde / acordado-dispensado / outro: conflito BLOQUEANTE
+  const hard = covering.find(
+    (a) => !(a.kind === "acordado" && a.treatment === "compensar"),
+  );
+  if (hard) {
+    return {
+      status: "blocked",
+      code: "overlap",
+      absence: hard,
+      error: `Esta data já está coberta por ${absenceLabel(hard)}. Escolha outra data para o Abono de aniversário.`,
+    };
+  }
+  // Regra especial: acordado-compensar pode ceder ao Abono (com confirmação)
+  const acordo = covering.find(
+    (a) => a.kind === "acordado" && a.treatment === "compensar",
+  );
+  if (acordo) return { status: "replace-acordo", acordo };
+  return { status: "ok" };
 }

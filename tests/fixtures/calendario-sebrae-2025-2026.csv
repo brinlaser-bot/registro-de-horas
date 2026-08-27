@@ -30,7 +30,7 @@ data;descricao;categoria;tratamento;horas_a_compensar;jornada_esperada_horas;obs
 2026-01-20;São Sebastião;Feriado Estadual/Municipal;ABONADO;0;0;
 2026-02-16;Compensado;Compensação 8 Horas;COMPENSAR;8;0;Folga com 8h a compensar.
 2026-02-17;Carnaval;Feriado Nacional;ABONADO;0;0;
-2026-02-18;Cinzas;Compensação 4 Horas;COMPENSAR;4;4;"Compensação parcial de 4h; jornada esperada no dia: 4h."
+2026-02-18;Cinzas;Abono;ABONADO_PARCIAL;0;4;"Abono parcial 08:00-12:00; jornada regular 13:00-17:00."
 2026-04-02;Compensado;Compensação 8 Horas;COMPENSAR;8;0;Folga com 8h a compensar.
 2026-04-03;Paixão de Cristo;Feriado Nacional;ABONADO;0;0;
 2026-04-05;Páscoa;Feriado Nacional;ABONADO;0;0;

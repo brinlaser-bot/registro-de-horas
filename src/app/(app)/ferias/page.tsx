@@ -1,12 +1,13 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { CalendarPlus, CheckCircle2, Pencil, Trash2, Umbrella } from "lucide-react";
+import { Cake, CalendarDays, CalendarPlus, CheckCircle2, Handshake, HeartPulse, Pencil, Trash2, Umbrella } from "lucide-react";
 import { actions, settingsOf, useAppData, useIsClient } from "@/lib/store";
 import {
   absenceLabel,
   dayContext,
   type Absence,
+  type AbsenceSplit,
 } from "@/lib/absences";
 import { acordoViewOf, buildDebtDays } from "@/lib/debt";
 import { getAnnualPointCycle } from "@/lib/periods";
@@ -49,26 +50,31 @@ export default function FeriasPage() {
     return { emAndamento, proximos, encerrados };
   }, [absences, today]);
 
-  const save = async (draft: AbsenceDraft, editingId?: number) => {
+  /**
+   * Salva um evento e devolve o RESULTADO VERDADEIRO para o modal decidir
+   * o fluxo (Parte B: toast de sucesso e segunda etapa só se ok === true).
+   */
+  const save = async (draft: AbsenceDraft, editingId?: number): Promise<{ ok: boolean; split?: AbsenceSplit }> => {
     if (editingId !== undefined) {
       const res = actions.updateAbsence(editingId, draft);
       if (!res.ok) {
-        if (res.split) return { split: res.split };
+        if (res.split) return { ok: false, split: res.split };
         toast.show(res.error ?? "Não foi possível salvar.", "error");
-        return { split: res.split };
+        return { ok: false };
       }
       if (res.warning) toast.show(res.warning, "info");
       toast.show("Evento atualizado.");
-      return;
+      return { ok: true };
     }
     const res = actions.addAbsence(draft);
     if (!res.ok) {
-      if (res.split) return { split: res.split };
+      if (res.split) return { ok: false, split: res.split };
       toast.show(res.error ?? "Não foi possível salvar.", "error");
-      return { split: res.split };
+      return { ok: false };
     }
     if (res.warning) toast.show(res.warning, "info");
     toast.show("Evento adicionado.");
+    return { ok: true };
   };
 
   const remove = (a: Absence) => {
@@ -119,8 +125,24 @@ export default function FeriasPage() {
     return (
       <li key={a.id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="flex flex-wrap items-start gap-3">
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-sky-50 text-sky-600 ring-1 ring-inset ring-sky-200">
-            <Umbrella size={20} />
+          <div
+            className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ring-1 ring-inset ${
+              a.kind === "abono"
+                ? "bg-amber-50 text-amber-600 ring-amber-200"
+                : "bg-sky-50 text-sky-600 ring-sky-200"
+            }`}
+          >
+            {a.kind === "abono" ? (
+              <Cake size={20} />
+            ) : a.kind === "saude" ? (
+              <HeartPulse size={20} />
+            ) : a.kind === "acordado" ? (
+              <Handshake size={20} />
+            ) : a.kind === "outro" ? (
+              <CalendarDays size={20} />
+            ) : (
+              <Umbrella size={20} />
+            )}
           </div>
           <div className="min-w-0 flex-1">
             <p className="text-sm font-extrabold text-slate-900">{absenceLabel(a)}</p>
@@ -149,17 +171,20 @@ export default function FeriasPage() {
             )}
           </div>
           <div className="flex items-center gap-1">
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => {
-                setEditing(a);
-                setModalOpen(true);
-              }}
-              aria-label="Editar"
-            >
-              <Pencil size={14} />
-            </Button>
+            {/* §7: abono é somente histórico aqui — Definir/Alterar só em Configurações */}
+            {a.kind !== "abono" && (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  setEditing(a);
+                  setModalOpen(true);
+                }}
+                aria-label="Editar"
+              >
+                <Pencil size={14} />
+              </Button>
+            )}
             <Button
               size="sm"
               variant="ghost"

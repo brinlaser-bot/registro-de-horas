@@ -1,6 +1,6 @@
 "use client";
 
-import { CalendarDays, Handshake, HeartPulse, Umbrella } from "lucide-react";
+import { Ban, Cake, CalendarDays, Handshake, HeartPulse, Umbrella } from "lucide-react";
 import { formatMinutes, weekdayShort } from "@/lib/time";
 
 /* ── Anel de progresso (SVG) ────────────────────────────── */
@@ -149,7 +149,16 @@ export type ChartAbsenceMarker =
   | "saude"
   | "acordado-dispensado"
   | "acordado-compensar"
-  | "outro";
+  | "abono-aniversario"
+  | "falta"
+  | "outro"
+  | "folga"
+  | "trabalho-folga"
+  | "feriado"
+  | "trabalho-feriado"
+  | "abono"
+  | "calendario-compensar"
+  | "recesso";
 
 export interface StackedDatum {
   date: string;
@@ -166,8 +175,14 @@ export interface StackedDatum {
   markerLabel?: string;
   /** Linhas extras do tooltip, já calculadas pelas funções centrais. */
   markerLines?: string[];
-  /** Saldo regular do dia (para o tooltip). */
+  /** Saldo regular do dia (para o tooltip). Ausente = neutro (futuro/idle). */
   regularBalance?: number;
+  tooltipTone?: "factual" | "idle" | "future";
+  predictedWorked?: number;
+  /** Compensações CONCLUÍDAS neste destino (tooltip — só após quitação). */
+  compensatedConcluded?: number;
+  /** Compensações PENDENTES neste destino (tooltip — programado, não compensado). */
+  compensatedPending?: number;
 }
 
 const MARKER_ICON: Record<ChartAbsenceMarker, typeof Umbrella> = {
@@ -175,7 +190,16 @@ const MARKER_ICON: Record<ChartAbsenceMarker, typeof Umbrella> = {
   saude: HeartPulse,
   "acordado-dispensado": Handshake,
   "acordado-compensar": Handshake,
+  "abono-aniversario": Cake,
+  falta: Ban,
   outro: CalendarDays,
+  folga: CalendarDays,
+  "trabalho-folga": CalendarDays,
+  feriado: CalendarDays,
+  "trabalho-feriado": CalendarDays,
+  abono: CalendarDays,
+  "calendario-compensar": CalendarDays,
+  recesso: CalendarDays,
 };
 
 const MARKER_TONE: Record<ChartAbsenceMarker, string> = {
@@ -183,14 +207,30 @@ const MARKER_TONE: Record<ChartAbsenceMarker, string> = {
   saude: "text-rose-600",
   "acordado-dispensado": "text-emerald-600",
   "acordado-compensar": "text-violet-600",
+  "abono-aniversario": "text-amber-500",
+  falta: "text-rose-600",
   outro: "text-slate-500",
+  folga: "text-slate-400",
+  "trabalho-folga": "text-emerald-600",
+  feriado: "text-indigo-600",
+  "trabalho-feriado": "text-emerald-600",
+  abono: "text-teal-600",
+  "calendario-compensar": "text-amber-600",
+  recesso: "text-amber-600",
 };
 
 const MARKER_LEGEND: Array<{ marker: ChartAbsenceMarker; label: string }> = [
   { marker: "ferias", label: "Férias" },
   { marker: "saude", label: "Saúde" },
-  { marker: "acordado-dispensado", label: "Afast. acordado (dispensado)" },
-  { marker: "acordado-compensar", label: "Afast. acordado (a compensar)" },
+  { marker: "acordado-dispensado", label: "Folga/abono acordado" },
+  { marker: "acordado-compensar", label: "Folga a compensar" },
+  { marker: "abono-aniversario", label: "Abono de aniversário 🎂" },
+  { marker: "falta", label: "Falta" },
+  { marker: "folga", label: "Folga" },
+  { marker: "feriado", label: "Feriado" },
+  { marker: "abono", label: "Abono" },
+  { marker: "calendario-compensar", label: "Calendário a compensar" },
+  { marker: "recesso", label: "Recesso" },
   { marker: "outro", label: "Outro afastamento" },
 ];
 
@@ -294,18 +334,33 @@ export function StackedBarsChart({
                 {d.marker && (
                   <span className="mt-0.5 block text-sky-200">{d.markerLabel}</span>
                 )}
-                <span className="mt-0.5 block text-slate-300">
-                  Trabalhado: {formatMinutes(d.workedMinutes)}
-                </span>
-                {d.regularBalance !== undefined && (
+                {d.tooltipTone === "idle" ? (
+                  <span className="mt-0.5 block text-slate-300">Jornada não iniciada</span>
+                ) : d.tooltipTone === "future" ? (
+                  <span className="mt-0.5 block text-slate-300">
+                    {d.predictedWorked && d.predictedWorked > 0
+                      ? `Previsto: ${formatMinutes(d.predictedWorked)}`
+                      : "Sem registro realizado"}
+                  </span>
+                ) : (
+                  <span className="mt-0.5 block text-slate-300">
+                    Trabalhado: {formatMinutes(d.workedMinutes)}
+                  </span>
+                )}
+                {d.regularBalance !== undefined && d.tooltipTone !== "idle" && d.tooltipTone !== "future" && (
                   <span className="block text-slate-300">
                     Saldo regular: {d.regularBalance >= 0 ? "+" : ""}
                     {formatMinutes(d.regularBalance)}
                   </span>
                 )}
-                {d.compensated > 0 && (
+                {(d.compensatedConcluded ?? 0) > 0 && (
                   <span className="block text-slate-300">
-                    Compensado no dia: {formatMinutes(d.compensated)}
+                    Compensado no dia: {formatMinutes(d.compensatedConcluded ?? 0)}
+                  </span>
+                )}
+                {(d.compensatedPending ?? 0) > 0 && (
+                  <span className="block text-slate-300">
+                    Programado para hoje: {formatMinutes(d.compensatedPending ?? 0)}
                   </span>
                 )}
                 {d.markerLines?.map((line) => (
@@ -350,7 +405,7 @@ export function StackedBarsChart({
           <span className="h-2.5 w-2.5 rounded-sm bg-amber-400" /> Extra no ponto ({formatMinutes(expected)}→{formatMinutes(cap)})
         </span>
         <span className="inline-flex items-center gap-1.5">
-          <span className="h-2.5 w-2.5 rounded-sm bg-rose-500" /> Excedente (dívida, &gt;{formatMinutes(cap)})
+          <span className="h-2.5 w-2.5 rounded-sm bg-rose-500" /> Excedente do limite diário
         </span>
         <span className="inline-flex items-center gap-1.5">
           <span

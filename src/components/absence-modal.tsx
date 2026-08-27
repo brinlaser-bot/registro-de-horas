@@ -4,19 +4,24 @@ import { useEffect, useState } from "react";
 import { CalendarPlus, Scissors } from "lucide-react";
 import { Button, Input, Modal, Select, Toggle } from "@/components/ui";
 import { useToast } from "@/components/toast";
-import type { Absence, AbsenceKind, AbsenceTreatment } from "@/lib/absences";
+import { type Absence, type AbsenceKind, type AbsenceTreatment } from "@/lib/absences";
 import { formatDateBR } from "@/lib/time";
 import type { AbsenceSplit } from "@/lib/absences";
 
 export type AbsenceDraft = Omit<Absence, "id" | "createdAt">;
 
+/** Resultado verdadeiro do save — o fluxo de tela depende dele (Parte B). */
+export type AbsenceSaveOutcome = { ok: boolean; split?: AbsenceSplit };
+
 interface Props {
   open: boolean;
   onClose: () => void;
   initial?: AbsenceDraft & { id?: number };
-  onSave: (draft: AbsenceDraft, editingId?: number) => Promise<{ split?: AbsenceSplit } | void>;
+  onSave: (draft: AbsenceDraft, editingId?: number) => Promise<AbsenceSaveOutcome>;
 }
 
+/* §7: o Abono de aniversário é somente histórico aqui — Definir/Alterar
+ * acontece EXCLUSIVAMENTE em Configurações (AbonoModal). */
 const KIND_OPTIONS: Array<{ value: AbsenceKind; label: string }> = [
   { value: "ferias", label: "Férias" },
   { value: "saude", label: "Afastamento por saúde / atestado" },
@@ -64,21 +69,27 @@ export function AbsenceModal({ open, onClose, initial, onSave }: Props) {
         setPendingSplit({ draft: d, split: res.split });
         return;
       }
+      // Falha real (conflito/validação — ex.: férias atravessando 30/04):
+      // permanece no formulário para o usuário corrigir as datas (Parte A).
+      if (!res?.ok) return;
       onClose();
     } finally {
       setBusy(false);
     }
   };
 
-  /** Salva somente a parte até 30/04. */
+  /** Salva somente a parte até 30/04 (só avança se o save real funcionar). */
   const saveFirstOnly = async () => {
     if (!pendingSplit) return;
     setBusy(true);
     try {
-      await onSave(
+      const res = await onSave(
         { ...pendingSplit.draft, startDate: pendingSplit.split.first.startDate, endDate: pendingSplit.split.first.endDate },
         editingId,
       );
+      // Parte B: primeiro trecho falhou → SEM toast de sucesso, SEM fechar;
+      // permanece na decisão e o erro real já foi exibido pela página.
+      if (!res?.ok) return;
       toast.show("Evento salvo até o fechamento anual (30/04).");
       onClose();
     } finally {
@@ -91,10 +102,13 @@ export function AbsenceModal({ open, onClose, initial, onSave }: Props) {
     if (!pendingSplit) return;
     setBusy(true);
     try {
-      await onSave(
+      const res = await onSave(
         { ...pendingSplit.draft, startDate: pendingSplit.split.first.startDate, endDate: pendingSplit.split.first.endDate },
         editingId,
       );
+      // Parte B: primeiro trecho falhou → SEM toast de sucesso e NÃO abre a
+      // segunda etapa; permanece no fluxo atual com o erro real.
+      if (!res?.ok) return;
       // Novo registro independente: novo id (sem editingId), vida própria
       setEditingId(undefined);
       setDraft({
@@ -173,7 +187,7 @@ export function AbsenceModal({ open, onClose, initial, onSave }: Props) {
         <Select
           label="Tipo"
           value={draft.kind}
-          onChange={(e) => setDraft({ ...draft, kind: e.target.value as AbsenceKind })}
+          onChange={(e) => setDraft((d) => ({ ...d, kind: e.target.value as AbsenceKind }))}
         >
           {KIND_OPTIONS.map((o) => (
             <option key={o.value} value={o.value}>{o.label}</option>

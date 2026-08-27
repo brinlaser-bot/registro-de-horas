@@ -13,6 +13,9 @@ export interface User {
   lunchEnd: string;
   maxDailyMinutes: number;
   autoDeductLunch: boolean;
+  /** Data de nascimento (YYYY-MM-DD, data local) — usada no banner de
+   *  aniversário e na SUGESTÃO de data do Abono de aniversário. Opcional. */
+  birthDate?: string | null;
 }
 
 export interface TimeEntry {
@@ -35,7 +38,7 @@ export type CompStatus = "pendente" | "concluida" | "cancelada";
  * acordo:    horas de afastamento acordado "a compensar" → HORA EXTRA no destino
  *            (sempre dentro do mesmo ciclo anual da origem).
  */
-export type CompKind = "excedente" | "deficit" | "acordo";
+export type CompKind = "excedente" | "deficit" | "acordo" | "calendario";
 
 export interface Compensation {
   id: number;
@@ -46,6 +49,13 @@ export interface Compensation {
   note: string | null;
   createdAt: number;
   kind?: CompKind; // ausente = "excedente" (compatível com dados antigos)
+  /**
+   * Porção do crédito REALIZADO consumida no dia de destino (§5/§8):
+   * "especial" = reserva do excedente acima de 10h (exige motivo);
+   * "regular"/ausente = crédito comum até o limite diário.
+   * Ausente em registros antigos → atribuição regular primeiro (legado).
+   */
+  portion?: "regular" | "especial";
 }
 
 /** Resumo de um dia que gerou dívida de horas (excesso ou déficit). */
@@ -55,10 +65,12 @@ export interface DebtDay {
   workedMinutes: number;
   expectedMinutes: number;
   debtMinutes: number; // total original (excedente ou déficit)
-  allocatedMinutes: number; // já vinculado a compensações ativas
+  allocatedMinutes: number; // já vinculado a compensações ativas (planejado + concluído)
   pendingMinutes: number; // vinculado e ainda pendente de execução
   concludedMinutes: number; // vinculado e já concluído
-  remainingMinutes: number; // ainda falta alocar
+  remainingMinutes: number; // ainda falta ALOCAR (sem destinação nenhuma)
+  /** EM ABERTO de verdade: original − CONCLUÍDO (planejado NÃO quita a dívida). */
+  openMinutes: number;
 }
 
 /** Totais agregados para as barras de progresso. */
@@ -83,6 +95,53 @@ export interface AppData {
   entries: TimeEntry[];
   compensations: Compensation[];
   absences: import("./absences").Absence[];
+  /** Calendários da empresa — um por ciclo anual (01/05→30/04). */
+  companyCalendars?: import("./company-calendar").CompanyCalendar[];
+  /** Faltas registradas manualmente (integrais, um registro por dia). */
+  faltas: Falta[];
+  /**
+   * Motivo do EXCEDENTE acima de 10h (um registro por data). Obrigatório antes
+   * de destinar a reserva especial. Dados antigos sem o campo convivem: a
+   * quantidade continua derivada das batidas; apenas o motivo fica "não
+   * informado" até o usuário registrar.
+   */
+  excessReasons?: ExcessReason[];
+}
+
+/** Códigos do MOTIVO DO EXCEDENTE acima de 10h (select do modal). */
+export type ExcessReasonCode =
+  | "demanda-urgente" // Demanda urgente de trabalho
+  | "reuniao-prolongada" // Reunião/atividade prolongada
+  | "viagem-deslocamento" // Viagem/deslocamento
+  | "atendimento-evento" // Atendimento/evento
+  | "necessidade-operacional" // Necessidade operacional
+  | "outro"; // Outro → exige texto
+
+/** Registro do motivo do excedente de um dia (histórico §11 — um por data). */
+export interface ExcessReason {
+  id: number;
+  /** YYYY-MM-DD do dia com jornada acima de 10h. */
+  date: string;
+  reason: ExcessReasonCode;
+  /** Texto obrigatório quando reason = "outro". */
+  customReason: string | null;
+  /** Observação opcional. */
+  observation: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/**
+ * Falta — ocorrência de ponto (NÃO é férias/afastamento): o dia tinha jornada
+ * efetiva e o usuário não trabalhou. Só existe por registro explícito; dia
+ * vazio nunca vira falta automaticamente. Futura = "Falta prevista" (sem
+ * déficit até a data chegar): a vigência é derivada de date vs. hoje.
+ */
+export interface Falta {
+  id: number;
+  /** YYYY-MM-DD — um registro por dia. */
+  date: string;
+  createdAt: number;
 }
 
 export interface CompWithDays extends Compensation {

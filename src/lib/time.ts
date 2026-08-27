@@ -3,6 +3,7 @@
 // Regras da empresa: jornada 08:00–17:00, almoço 12:00–13:00,
 // base diária de 8h e limite de registro de 10h/dia.
 // ─────────────────────────────────────────────────────────────
+import { analyzePunches, lunchDeductionOf, punchMutationError, segmentsOf, sequenceErrorMessage } from "./punches";
 
 export type EntryType = "entrada" | "saida";
 
@@ -46,6 +47,15 @@ export interface DayResult {
   open: boolean;
   empty: boolean;
   status: DayStatus;
+  /** Sequência cronológica sem órfãos/duplicatas/sobreposição. */
+  consistent: boolean;
+  /** Pares Entrada→Saída inequivocamente fechados (mesmo em dia inconsistente). */
+  confirmedMinutes: number;
+  /**
+   * Saldo financeiro NÃO é definitivo: sequência inconsistente OU dia passado
+   * incompleto. Déficit/crédito/10+ não consolidam.
+   */
+  financialPending: boolean;
 }
 
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -83,6 +93,30 @@ export function dateToString(d: Date): string {
 
 export function todayString(): string {
   return dateToString(new Date());
+}
+
+/**
+ * REGRA ABSOLUTA de ponto: registros de horário (TimeEntry) só podem ser
+ * criados/movidos para data <= hoje. Comparação pura de strings
+ * YYYY-MM-DD (data LOCAL — nunca UTC, para não virar o dia no fuso).
+ *
+ * ATENÇÃO: esta regra é exclusiva de BATIDAS. Falta prevista PODE ser
+ * futura; férias/afastamentos e compensações têm regras próprias.
+ */
+export const FUTURE_DATE_ERROR = "Não é possível registrar horários em uma data futura.";
+
+/** Verdadeiro quando a data é posterior a hoje (também usado para ocultar controles na UI). */
+export function isFutureDate(date: string, today: string = todayString()): boolean {
+  return date > today;
+}
+
+/**
+ * REALIZADO = date <= hoje. Batidas futuras podem existir no dataset, mas
+ * antes da data não são fato: não geram saldo, déficit, crédito, totais
+ * trabalhados nem "No ponto". Fonte única do cutoff temporal.
+ */
+export function isRealizedDate(date: string, today: string = todayString()): boolean {
+  return date <= today;
 }
 
 /** "YYYY-MM-DD" -> Date (meio-dia local, evita off-by-one de UTC) */
@@ -146,9 +180,10 @@ export function expectedMinutesOf(s: WorkSettings): number {
 
 /**
  * Calcula o resumo de um dia a partir das batidas.
- * Batidas são emparelhadas sequencialmente (entrada → saída).
- * Se a última batida for entrada sem saída, o dia fica "em andamento"
- * e o tempo é calculado até `nowMinutes` (opcional).
+ * Emparelha SOMENTE pares Entrada→Saída consecutivos (analyzePunches).
+ * Nunca "pula" órfãos para juntar 08→17 quando há 13 no meio.
+ * Almoço automático é FALLBACK: intervalo explícito na faixa de almoço
+ * substitui o desconto de 1h.
  */
 export function computeDay(
   entries: TimeEntryLike[],
@@ -156,68 +191,44 @@ export function computeDay(
   nowMinutes?: number,
 ): DayResult {
   const expected = expectedMinutesOf(settings);
-  const sorted = [...entries].sort((a, b) => a.time.localeCompare(b.time));
+  const analysis = analyzePunches(entries);
+  const sorted = analysis.sorted;
+  const segments = segmentsOf(analysis.pairs);
+  let worked = analysis.workedMinutesConfirmed;
+  const consistent = analysis.isConsistent;
+  const open = consistent && !analysis.isComplete && entries.length > 0;
 
-  let worked = 0;
-  let open = false;
-  let openStart: string | null = null;
-  const segments: Segment[] = [];
-
-  for (const e of sorted) {
-    if (e.type === "entrada") {
-      if (openStart === null) openStart = e.time;
-    } else {
-      if (openStart !== null) {
-        const mins = toMinutes(e.time) - toMinutes(openStart);
-        if (mins > 0) {
-          worked += mins;
-          segments.push({ start: openStart, end: e.time, minutes: mins });
-        }
-        openStart = null;
-      }
+  if (open && nowMinutes !== undefined) {
+    const last = sorted[sorted.length - 1];
+    if (last?.type === "entrada" && nowMinutes > toMinutes(last.time)) {
+      worked += nowMinutes - toMinutes(last.time);
     }
   }
 
-  if (openStart !== null) {
-    open = true;
-    if (nowMinutes !== undefined && nowMinutes > toMinutes(openStart)) {
-      worked += nowMinutes - toMinutes(openStart);
-    }
-  }
+  const lunchDeductedMinutes = lunchDeductionOf(analysis, settings);
+  if (lunchDeductedMinutes > 0) worked = Math.max(0, worked - lunchDeductedMinutes);
 
-  // Desconto automático do almoço quando não há batida no intervalo
-  let lunchDeductedMinutes = 0;
-  if (settings.autoDeductLunch && entries.length > 0) {
-    const ls = toMinutes(settings.lunchStart);
-    const le = toMinutes(settings.lunchEnd);
-    const hasPunchInLunch = sorted.some((e) => {
-      const m = toMinutes(e.time);
-      return m >= ls && m <= le;
-    });
-    const first = toMinutes(sorted[0].time);
-    const last = toMinutes(sorted[sorted.length - 1].time);
-    if (!hasPunchInLunch && first <= ls && last >= le) {
-      lunchDeductedMinutes = le - ls;
-      worked = Math.max(0, worked - lunchDeductedMinutes);
-    }
-  }
+  const date = entries[0]?.date ?? "";
+  const incompletePast = open && date !== "" && date < todayString();
+  const financialPending = !consistent || incompletePast;
+  const finalized = consistent && analysis.isComplete && !financialPending;
 
   const balance = worked - expected;
-  const excess = Math.max(0, worked - settings.maxDailyMinutes);
-  const registrable = Math.max(0, Math.min(worked, settings.maxDailyMinutes));
+  const excess = finalized ? Math.max(0, worked - settings.maxDailyMinutes) : 0;
+  const registrable = finalized ? Math.max(0, Math.min(worked, settings.maxDailyMinutes)) : 0;
 
   let status: DayStatus = "ok";
   if (entries.length === 0) status = "empty";
-  else if (open) status = "in-progress";
+  else if (financialPending || open) status = "in-progress";
   else if (excess > 0) status = "excess";
   else if (balance < 0) status = "deficit";
 
   return {
-    date: entries[0]?.date ?? "",
+    date,
     entries: sorted,
-    workedMinutes: worked,
+    workedMinutes: finalized || (open && consistent) ? worked : analysis.workedMinutesConfirmed,
     expectedMinutes: expected,
-    balanceMinutes: balance,
+    balanceMinutes: finalized ? balance : 0,
     excessMinutes: excess,
     registrableMinutes: registrable,
     lunchDeductedMinutes,
@@ -225,12 +236,83 @@ export function computeDay(
     open,
     empty: entries.length === 0,
     status,
+    consistent,
+    confirmedMinutes: analysis.workedMinutesConfirmed,
+    financialPending,
   };
 }
 
 export function nowTimeString(): string {
   const d = new Date();
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/* ── Sequência de batidas (validação central) ────────────── */
+
+/**
+ * Batidas de um dia em ORDEM CRONOLÓGICA (desempate: id — ordem de criação).
+ * A validação NUNCA confia na posição do array persistido: o array reflete a
+ * ordem de LANÇAMENTO, e um histórico válido pode ter sido lançado fora de
+ * ordem (ex.: saídas importadas antes das entradas correspondentes).
+ */
+export function sortedPunchEntries<T extends TimeEntryLike>(entries: T[]): T[] {
+  return [...entries].sort((a, b) => a.time.localeCompare(b.time) || a.id - b.id);
+}
+
+/**
+ * Próximo tipo de batida esperado no dia, pela ÚLTIMA batida CRONOLÓGICA:
+ * nenhuma batida → entrada; última = entrada → saída; última = saída → entrada.
+ */
+export function nextPunchType(entries: TimeEntryLike[]): EntryType {
+  return analyzePunches(entries).nextExpectedType ?? "entrada";
+}
+
+/** Mensagem central de violação da alternância Entrada/Saída. */
+export function punchSequenceError(nextType: EntryType): string {
+  return nextType === "saida"
+    ? "Já existe uma entrada aberta. A próxima batida deve ser uma saída."
+    : "A próxima batida deve ser uma entrada.";
+}
+
+/**
+ * VALIDAÇÃO CENTRAL DE SEQUÊNCIA: o RESULTADO FINAL do dia, depois de
+ * ordenado cronologicamente, deve começar com entrada e alternar
+ * estritamente entrada → saída → entrada…
+ *
+ * Valida-se sempre a sequência FINAL ORDENADA — nunca a ordem de inclusão —
+ * para que inserções históricas válidas no MEIO do dia não sejam rejeitadas
+ * (ex.: lançar mais tarde um par de almoço entre batidas já existentes).
+ */
+export function validatePunchSequence(entries: TimeEntryLike[]): { ok: boolean; error?: string } {
+  const sorted = sortedPunchEntries(entries);
+  if (sorted.length === 0) return { ok: true };
+  if (sorted[0].type !== "entrada") {
+    return { ok: false, error: punchSequenceError("entrada") };
+  }
+  for (let i = 1; i < sorted.length; i++) {
+    if (sorted[i].type === sorted[i - 1].type) {
+      // O prefixo 0..i-1 é válido: o tipo esperado é o "próximo" dele.
+      return { ok: false, error: punchSequenceError(nextPunchType(sorted.slice(0, i))) };
+    }
+  }
+  return { ok: true };
+}
+
+/**
+ * Erro CONTEXTUAL de inserção (§28): valida a sequência final do dia com a
+ * nova batida incluída e escolhe a mensagem correta:
+ *
+ * - batida ACRESCENTADA NO FIM (é a última cronológica): a alternância clássica
+ *   se aplica — preserva "Já existe uma entrada aberta…"/"A próxima batida…";
+ * - batida inserida NO MEIO da sequência (existe registro cronologicamente
+ *   posterior a ela): não é "entrada aberta" — a mensagem explica que o
+ *   horário retrocede na linha do tempo e sugere um horário compatível
+ *   (posterior à última batida do dia).
+ *
+ * Retorna null quando a inserção é válida.
+ */
+export function insertPunchError(dayEntries: TimeEntryLike[], added: TimeEntryLike | TimeEntryLike[]): string | null {
+  return punchMutationError(dayEntries, added);
 }
 
 export function nowMinutesLocal(): number {
@@ -312,7 +394,13 @@ export function plannedExitTime(
     return m >= ls && m <= le;
   });
 
-  let exit = openStart + Math.max(0, targetMinutes - rawClosed);
+  const remaining = Math.max(0, targetMinutes - rawClosed);
+  // §29 META JÁ ATINGIDA: com o trecho aberto já cobrindo a meta, a saída é
+  // AGORA (o início do trecho aberto) — nunca somar almoço artificialmente
+  // nem projetar horário futuro. O almoço só entra quando ainda falta tempo
+  // E o trecho futuro cruza o intervalo do almoço.
+  if (remaining === 0) return clampClock(openStart);
+  let exit = openStart + remaining;
   // Se o almoço será descontado automaticamente e a saída cruza o intervalo, soma o almoço
   if (settings.autoDeductLunch && !hasLunchPunch && firstPunch <= ls && exit > ls && len > 0) {
     exit += len;

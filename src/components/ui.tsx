@@ -5,7 +5,7 @@ import { Loader2, X } from "lucide-react";
 
 /* ── Button ─────────────────────────────────────────────── */
 
-type ButtonVariant = "primary" | "secondary" | "ghost" | "danger" | "subtle";
+type ButtonVariant = "primary" | "secondary" | "ghost" | "danger" | "subtle" | "warning";
 type ButtonSize = "sm" | "md" | "lg";
 
 const variantClasses: Record<ButtonVariant, string> = {
@@ -16,6 +16,7 @@ const variantClasses: Record<ButtonVariant, string> = {
   ghost: "text-slate-600 hover:bg-slate-100 active:bg-slate-200",
   danger: "bg-rose-600 text-white hover:bg-rose-700 shadow-sm shadow-rose-600/20",
   subtle: "bg-emerald-50 text-emerald-700 hover:bg-emerald-100 active:bg-emerald-200",
+  warning: "bg-amber-500 text-white hover:bg-amber-600 active:bg-amber-700 shadow-sm shadow-amber-500/20",
 };
 
 const sizeClasses: Record<ButtonSize, string> = {
@@ -133,6 +134,18 @@ export function Badge({ tone = "slate", children, className = "" }: { tone?: Bad
   );
 }
 
+/** Badge visual "10+" — NÃO significa "+10 horas"; só marca o limite diário. */
+export function ExcessTenBadge({ className = "" }: { className?: string }) {
+  return (
+    <span
+      title="Horas trabalhadas além do limite diário de 10h"
+      className={`inline-flex items-center rounded px-1 py-px text-[10px] font-extrabold leading-none tracking-tight text-rose-700 ring-1 ring-inset ring-rose-600/30 bg-rose-50 ${className}`}
+    >
+      10+
+    </span>
+  );
+}
+
 /* ── Card ───────────────────────────────────────────────── */
 
 export function Card({
@@ -142,6 +155,7 @@ export function Card({
   children,
   className = "",
   padded = true,
+  compact = false,
 }: {
   title?: ReactNode;
   subtitle?: ReactNode;
@@ -149,11 +163,17 @@ export function Card({
   children: ReactNode;
   className?: string;
   padded?: boolean;
+  /** Menor padding/gap do cabeçalho e do corpo — sem reduzir controles. */
+  compact?: boolean;
 }) {
   return (
     <section className={`rounded-2xl border border-slate-200 bg-white shadow-sm ${className}`}>
       {(title || actions) && (
-        <header className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-5 py-4">
+        <header
+          className={`flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 ${
+            compact ? "px-4 py-2.5 lg:px-5 lg:py-3" : "px-5 py-4"
+          }`}
+        >
           <div>
             {title && <h2 className="text-sm font-bold text-slate-900">{title}</h2>}
             {subtitle && <p className="mt-0.5 text-xs text-slate-500">{subtitle}</p>}
@@ -161,7 +181,7 @@ export function Card({
           {actions && <div className="flex items-center gap-2">{actions}</div>}
         </header>
       )}
-      <div className={padded ? "p-5" : ""}>{children}</div>
+      <div className={padded ? (compact ? "p-3 lg:p-4" : "p-5") : ""}>{children}</div>
     </section>
   );
 }
@@ -293,6 +313,7 @@ export function StatCard({
   tone = "slate",
   icon,
   onClick,
+  compact = false,
 }: {
   label: string;
   value: ReactNode;
@@ -300,6 +321,8 @@ export function StatCard({
   tone?: "emerald" | "rose" | "amber" | "slate" | "indigo";
   icon?: ReactNode;
   onClick?: () => void;
+  /** Menor padding vertical e gap interno — ícone e número permanecem iguais. */
+  compact?: boolean;
 }) {
   const tones: Record<string, string> = {
     emerald: "text-emerald-600",
@@ -318,7 +341,9 @@ export function StatCard({
   return (
     <div
       onClick={onClick}
-      className={`rounded-2xl border border-slate-200 bg-white p-4 shadow-sm ${onClick ? "cursor-pointer transition-shadow hover:shadow-md" : ""}`}
+      className={`rounded-2xl border border-slate-200 bg-white shadow-sm ${
+        compact ? "px-3 py-2.5" : "p-4"
+      } ${onClick ? "cursor-pointer transition-shadow hover:shadow-md" : ""}`}
     >
       <div className="flex items-start justify-between gap-2">
         <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">{label}</p>
@@ -328,13 +353,47 @@ export function StatCard({
           </span>
         )}
       </div>
-      <p className={`mt-1.5 text-2xl font-extrabold tabular-nums tracking-tight ${tones[tone]}`}>{value}</p>
-      {sub && <div className="mt-1 text-xs text-slate-500">{sub}</div>}
+      <p className={`${compact ? "mt-0.5" : "mt-1.5"} text-2xl font-extrabold tabular-nums tracking-tight ${tones[tone]}`}>{value}</p>
+      {sub && <div className={`${compact ? "mt-0.5" : "mt-1"} text-xs text-slate-500`}>{sub}</div>}
     </div>
   );
 }
 
 /* ── Toggle ─────────────────────────────────────────────── */
+
+export function ConfirmDialog({
+  open,
+  title,
+  message,
+  confirmLabel = "Confirmar",
+  danger = false,
+  onConfirm,
+  onClose,
+}: {
+  open: boolean;
+  title: string;
+  message: ReactNode;
+  confirmLabel?: string;
+  danger?: boolean;
+  onConfirm: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title={title}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>Cancelar</Button>
+          <Button variant={danger ? "danger" : "primary"} onClick={onConfirm}>{confirmLabel}</Button>
+        </>
+      }
+    >
+      <div className="text-sm text-slate-700">{message}</div>
+    </Modal>
+  );
+}
 
 export function Toggle({
   checked,

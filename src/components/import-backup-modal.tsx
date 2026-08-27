@@ -98,7 +98,15 @@ export function ImportBackupModal({ open, onClose }: Props) {
     );
     if (!ok) return;
     setBusy(true);
-    actions.replaceAll({ user: parsed.user, entries: parsed.entries, compensations: parsed.compensations });
+    actions.replaceAll({
+      user: parsed.user,
+      entries: parsed.entries,
+      compensations: parsed.compensations,
+      absences: parsed.absences,
+      companyCalendars: parsed.companyCalendars,
+      faltas: parsed.faltas,
+      excessReasons: parsed.excessReasons,
+    });
     setBusy(false);
     toast.show("Backup restaurado com sucesso.");
     onClose();
@@ -107,7 +115,14 @@ export function ImportBackupModal({ open, onClose }: Props) {
   const merge = async () => {
     if (!parsed) return;
     setBusy(true);
-    actions.mergeBackup({ entries: parsed.entries, compensations: parsed.compensations });
+    actions.mergeBackup({
+      entries: parsed.entries,
+      compensations: parsed.compensations,
+      absences: parsed.absences,
+      companyCalendars: parsed.companyCalendars,
+      faltas: parsed.faltas,
+      excessReasons: parsed.excessReasons,
+    });
     setBusy(false);
     toast.show("Backup mesclado com sucesso.");
     onClose();

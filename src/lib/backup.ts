@@ -1,12 +1,15 @@
 // Import/Export de backup (JSON) com versionamento e validação.
-import type { AppData, Compensation, TimeEntry, User } from "./types";
+import type { AppData, Compensation, ExcessReason, Falta, TimeEntry, User } from "./types";
 import type { Absence } from "./absences";
+import { normalizeCompanyCalendars, type CompanyCalendars } from "./company-calendar";
 
 /**
  * v1: user + entries + compensations.
  * v2: + absences (férias/afastamentos). Backups v1 importam com lista vazia.
+ * v3: + companyCalendars (um por ciclo anual). Backups v2 com o campo antigo
+ *     "companyCalendar" (único) importam como coleção com 1 calendário.
  */
-export const BACKUP_VERSION = 2;
+export const BACKUP_VERSION = 3;
 export const INVALID_BACKUP_MSG = "Este arquivo não é um backup válido do Meu Horário.";
 
 export interface BackupPayload {
@@ -16,6 +19,11 @@ export interface BackupPayload {
   entries: TimeEntry[];
   compensations: Compensation[];
   absences: Absence[];
+  companyCalendars?: CompanyCalendars;
+  /** Faltas (inclusive previstas). Campo opcional: backups antigos não o têm. */
+  faltas?: Falta[];
+  /** Motivos de excedente >10h. Campo opcional: backups antigos não o têm. */
+  excessReasons?: ExcessReason[];
 }
 
 export interface BackupSummary {
@@ -33,6 +41,9 @@ export interface ParsedBackup {
   entries: TimeEntry[];
   compensations: Compensation[];
   absences: Absence[];
+  companyCalendars?: CompanyCalendars;
+  faltas: Falta[];
+  excessReasons: ExcessReason[];
   version: number;
   summary: BackupSummary;
 }
@@ -57,7 +68,9 @@ function validUser(v: unknown): v is User {
     isTime(u.lunchStart) &&
     isTime(u.lunchEnd) &&
     isNum(u.maxDailyMinutes) &&
-    isBool(u.autoDeductLunch)
+    isBool(u.autoDeductLunch) &&
+    // birthDate é opcional (backups v1/v2/v3 antigos não o tinham)
+    (u.birthDate === undefined || u.birthDate === null || isDate(u.birthDate))
   );
 }
 
@@ -92,11 +105,57 @@ function validAbsence(v: unknown): v is Absence {
   const a = v as Record<string, unknown>;
   return (
     isNum(a.id) &&
-    (a.kind === "ferias" || a.kind === "saude" || a.kind === "acordado" || a.kind === "outro") &&
+    (a.kind === "ferias" || a.kind === "saude" || a.kind === "acordado" || a.kind === "abono" || a.kind === "outro") &&
     isDate(a.startDate) &&
     isDate(a.endDate) &&
     (a.duration === "integral" || a.duration === "parcial") &&
     isNum(a.createdAt)
+  );
+}
+
+/** Validação de falta em backups (campo opcional, introduzido sem nova versão). */
+function validFalta(v: unknown): v is Falta {
+  if (!v || typeof v !== "object") return false;
+  const f = v as Record<string, unknown>;
+  return isNum(f.id) && isDate(f.date) && isNum(f.createdAt);
+}
+
+/** Comparação de conteúdo para mesclagem de faltas: uma falta por dia. */
+export function faltasEqual(a: Falta, b: Falta): boolean {
+  return a.date === b.date;
+}
+
+const EXCESS_REASON_CODES = new Set([
+  "demanda-urgente",
+  "reuniao-prolongada",
+  "viagem-deslocamento",
+  "atendimento-evento",
+  "necessidade-operacional",
+  "outro",
+]);
+
+/** Validação de motivo de excedente em backups (campo opcional, retrocompatível). */
+function validExcessReason(v: unknown): v is ExcessReason {
+  if (!v || typeof v !== "object") return false;
+  const r = v as Record<string, unknown>;
+  return (
+    isNum(r.id) &&
+    isDate(r.date) &&
+    EXCESS_REASON_CODES.has(r.reason as string) &&
+    (r.customReason == null || isStr(r.customReason)) &&
+    (r.observation == null || isStr(r.observation)) &&
+    isNum(r.createdAt) &&
+    isNum(r.updatedAt)
+  );
+}
+
+/** Comparação para mesclagem de motivos: um motivo por data. */
+export function excessReasonsEqual(a: ExcessReason, b: ExcessReason): boolean {
+  return (
+    a.date === b.date &&
+    a.reason === b.reason &&
+    (a.customReason ?? null) === (b.customReason ?? null) &&
+    (a.observation ?? null) === (b.observation ?? null)
   );
 }
 
@@ -124,6 +183,9 @@ export function buildBackupPayload(data: AppData): BackupPayload {
     entries: data.entries,
     compensations: data.compensations,
     absences: data.absences ?? [],
+    companyCalendars: data.companyCalendars,
+    faltas: data.faltas ?? [],
+    excessReasons: data.excessReasons ?? [],
   };
 }
 
@@ -171,6 +233,23 @@ export function parseBackup(
     return { ok: false, error: "bad-absences" };
   }
   const absences = (rawAbsences as Absence[] | undefined) ?? [];
+  // Compatibilidade: v3 lê "companyCalendars" (coleção); v2/antigos trazem
+  // "companyCalendar" (objeto único) — ambos normalizados para a coleção.
+  const companyCalendars =
+    normalizeCompanyCalendars(obj.companyCalendars) ??
+    normalizeCompanyCalendars(obj.companyCalendar);
+  // Retrocompatibilidade: backups v1/v2/v3 antigos não possuem "faltas" → [].
+  const rawFaltas = obj.faltas;
+  if (rawFaltas !== undefined && (!Array.isArray(rawFaltas) || !rawFaltas.every(validFalta))) {
+    return { ok: false, error: "bad-faltas" };
+  }
+  const faltas = (rawFaltas as Falta[] | undefined) ?? [];
+  // Retrocompatibilidade: backups antigos não possuem "excessReasons" → [].
+  const rawReasons = obj.excessReasons;
+  if (rawReasons !== undefined && (!Array.isArray(rawReasons) || !rawReasons.every(validExcessReason))) {
+    return { ok: false, error: "bad-excess-reasons" };
+  }
+  const excessReasons = (rawReasons as ExcessReason[] | undefined) ?? [];
 
   const allDates = [
     ...entries.map((e) => e.date),
@@ -189,7 +268,7 @@ export function parseBackup(
     periodTo,
   };
 
-  return { ok: true, backup: { user, entries, compensations, absences, version, summary } };
+  return { ok: true, backup: { user, entries, compensations, absences, companyCalendars, faltas, excessReasons, version, summary } };
 }
 
 /* ──────────────────────────────────────────────────────────

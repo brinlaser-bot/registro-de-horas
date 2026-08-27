@@ -1,6 +1,12 @@
-// Gera o conjunto de dados de exemplo no primeiro acesso (localStorage vazio)
-import { addDays, isWeekend, nextWorkday, todayString } from "./time";
-import type { AppData, Compensation, TimeEntry, User } from "./types";
+// Seed determinístico 3.1 — bancada permanente de testes manuais.
+// Datas fixas (não relativas a "hoje"): Restaurar dados de exemplo reproduz o mesmo conjunto,
+// inclusive calendário fictício da empresa e excessReasons.
+// 3.1 adiciona 14/08 com 6 batidas (wrap/responsividade) sem alterar os cenários 3.0.
+import type { Absence } from "./absences";
+import { seedCompanyCalendars } from "./seed-calendars";
+import type { AppData, Compensation, ExcessReason, Falta, TimeEntry, User } from "./types";
+
+export const SEED_VERSION = "3.1";
 
 export const DEFAULT_USER: User = {
   id: 1,
@@ -12,98 +18,132 @@ export const DEFAULT_USER: User = {
   lunchEnd: "13:00",
   maxDailyMinutes: 600,
   autoDeductLunch: true,
+  birthDate: "1990-08-10",
 };
 
-type Pattern = Array<[string, "entrada" | "saida"]>;
-
-/** Padrões de dia (do mais recente para o mais antigo), pulando fins de semana. */
-const PATTERNS: Pattern[] = [
-  [["08:00", "entrada"], ["12:00", "saida"], ["13:00", "entrada"], ["17:00", "saida"]],
-  [["08:00", "entrada"], ["12:00", "saida"], ["13:00", "entrada"], ["19:45", "saida"]], // 10h45 — excedente 45min
-  [["08:02", "entrada"], ["12:00", "saida"], ["13:00", "entrada"], ["17:00", "saida"]],
-  [["08:00", "entrada"], ["12:00", "saida"], ["13:00", "entrada"], ["20:30", "saida"]], // 11h30 — excedente 1h30
-  [["08:00", "entrada"], ["12:00", "saida"], ["13:00", "entrada"], ["15:30", "saida"]], // 6h30 — dia de compensação
-  [["08:00", "entrada"], ["12:00", "saida"], ["13:00", "entrada"], ["17:00", "saida"]],
-  [["08:00", "entrada"], ["12:00", "saida"], ["13:00", "entrada"], ["17:00", "saida"]],
-  [["08:00", "entrada"], ["12:00", "saida"], ["13:00", "entrada"], ["17:30", "saida"]], // 8h30
-  [["07:45", "entrada"], ["12:00", "saida"], ["13:00", "entrada"], ["16:45", "saida"]], // 8h
-  [["08:00", "entrada"], ["12:00", "saida"], ["13:00", "entrada"], ["19:15", "saida"]], // 10h15 — excedente 15min
-  [["08:00", "entrada"], ["12:00", "saida"], ["13:00", "entrada"], ["16:45", "saida"]], // 7h45
-  [["08:00", "entrada"], ["12:00", "saida"], ["13:00", "entrada"], ["17:00", "saida"]],
-  [["08:10", "entrada"], ["12:00", "saida"], ["13:00", "entrada"], ["17:20", "saida"]], // 8h10
-  [["08:00", "entrada"], ["12:00", "saida"], ["13:00", "entrada"], ["17:00", "saida"]],
-  [["08:00", "entrada"], ["12:00", "saida"], ["13:00", "entrada"], ["16:30", "saida"]], // 7h30
-  [["08:00", "entrada"], ["12:00", "saida"], ["13:00", "entrada"], ["17:00", "saida"]],
-  [["08:00", "entrada"], ["12:00", "saida"], ["13:00", "entrada"], ["18:45", "saida"]], // 9h45
-  [["08:00", "entrada"], ["12:00", "saida"], ["13:00", "entrada"], ["17:00", "saida"]],
-  [["08:00", "entrada"], ["12:00", "saida"], ["13:00", "entrada"], ["17:00", "saida"]],
-  [["08:00", "entrada"], ["12:00", "saida"], ["13:00", "entrada"], ["17:00", "saida"]],
-];
+function e(id: number, date: string, time: string, type: "entrada" | "saida", note: string | null = null): TimeEntry {
+  return { id, date, time, type, note };
+}
+function day(id0: number, date: string, end: string, note: string | null = null): TimeEntry[] {
+  return [
+    e(id0, date, "08:00", "entrada"),
+    e(id0 + 1, date, "12:00", "saida"),
+    e(id0 + 2, date, "13:00", "entrada"),
+    e(id0 + 3, date, end, "saida", note),
+  ];
+}
 
 export function buildSeedData(): AppData {
-  const today = todayString();
-  const days: string[] = [];
-  let offset = 1;
-  for (let i = 0; i < PATTERNS.length; i++) {
-    let date = addDays(today, -offset);
-    while (isWeekend(date)) {
-      offset += 1;
-      date = addDays(today, -offset);
-    }
-    days.push(date);
-    offset += 1;
-  }
-
-  const entries: TimeEntry[] = [];
-  let id = 1;
-  days.forEach((date, i) => {
-    const pattern = PATTERNS[i];
-    pattern.forEach(([time, type], j) => {
-      const note =
-        i === 1 && j === 3
-          ? "Fechamento de projeto — excedeu o limite"
-          : i === 3 && j === 3
-            ? "Dia longo, compensar amanhã"
-            : i === 9
-              ? "Home office"
-              : null;
-      entries.push({ id: id++, date, time, type, note });
-    });
-  });
-
-  const dayOf = (n: number) => days[n] ?? today;
-  const pendingTarget = isWeekend(today) ? nextWorkday(today) : today;
-  const now = Date.now();
+  const now = Date.parse("2026-08-25T12:00:00");
+  const entries: TimeEntry[] = [
+    // 29/04 ciclo anterior — déficit 1h (NÃO elegível para 24/08)
+    ...day(1, "2026-04-29", "16:00"),
+    // 06/08 acordo a compensar + 07/08 9h (hora extra que quita 2h do acordo)
+    ...day(10, "2026-08-07", "19:00"),
+    // 11/08 10h15 — especial 15min SEM motivo (testa "Registrar motivo")
+    ...day(20, "2026-08-11", "19:15"),
+    // 14/08 8h com 6 batidas — só layout (wrap desktop / 2 colunas mobile)
+    e(94, "2026-08-14", "08:00", "entrada"),
+    e(95, "2026-08-14", "10:00", "saida"),
+    e(96, "2026-08-14", "10:15", "entrada"),
+    e(97, "2026-08-14", "12:00", "saida"),
+    e(98, "2026-08-14", "13:00", "entrada"),
+    e(99, "2026-08-14", "17:15", "saida"),
+    // 16/08 7h30 — déficit 30min, quitado pelo especial de 17/08
+    ...day(30, "2026-08-16", "16:30"),
+    // 17/08 10h30 — especial 30min tratado ✓
+    ...day(40, "2026-08-17", "19:30", "Demanda urgente"),
+    // 18/08 10h45 — especial 45min PROGRAMADO (não realizado)
+    ...day(50, "2026-08-18", "19:45", "Atendimento/evento"),
+    // 19/08 7h30 — déficit 30, 10 concluídos + 10 planejados, 20 em aberto
+    ...day(60, "2026-08-19", "16:30"),
+    // 20/08 7h45 — déficit 15 totalmente quitado com excedente de 24/08
+    ...day(70, "2026-08-20", "16:45"),
+    // 21/08 7h45 — déficit 15 quitado (5 regular + 10 especial de 24/08)
+    ...day(80, "2026-08-21", "16:45"),
+    // 22/08 sábado +2h
+    e(90, "2026-08-22", "10:00", "entrada"),
+    e(91, "2026-08-22", "12:00", "saida"),
+    // 23/08 domingo +1h
+    e(92, "2026-08-23", "09:00", "entrada"),
+    e(93, "2026-08-23", "10:00", "saida"),
+    // 24/08 11h — regular +2h, especial 1h, 25min realocados / 35min livres
+    ...day(100, "2026-08-24", "20:00", "Demanda urgente de trabalho"),
+    // 03/09 futuro parcial 08:00–10:00 — previsto, não entra no realizado
+    e(108, "2026-09-03", "08:00", "entrada"),
+    e(109, "2026-09-03", "10:00", "saida"),
+    // 07/09 futuro +2h em feriado abonado — NÃO entra no realizado antes da data
+    e(110, "2026-09-07", "08:00", "entrada"),
+    e(111, "2026-09-07", "10:00", "saida"),
+  ];
 
   const compensations: Compensation[] = [
     {
-      id: 1,
-      sourceDate: dayOf(3), // 11h30 → excedente 1h30
-      targetDate: dayOf(4), // compensado no dia seguinte (6h30)
-      minutes: 90,
-      status: "concluida",
-      note: "Compensação do dia com 11h30 de trabalho.",
-      createdAt: now - 86_400_000 * 3,
+      id: 1, sourceDate: "2026-08-06", targetDate: "2026-08-07", minutes: 120,
+      status: "concluida", note: "Quitação parcial do acordo de 06/08 (hora extra de 07/08)", kind: "acordo", createdAt: now - 18 * 86_400_000,
     },
     {
-      id: 2,
-      sourceDate: dayOf(9), // 10h15 → excedente 15min
-      targetDate: dayOf(10), // saiu 15min mais cedo
-      minutes: 15,
-      status: "concluida",
-      note: "Saída 15min antes do horário.",
-      createdAt: now - 86_400_000 * 8,
+      id: 2, sourceDate: "2026-08-16", targetDate: "2026-08-17", minutes: 30,
+      status: "concluida", note: "Alocado excedente acima de 10h (realizado)", kind: "deficit", portion: "especial", createdAt: now - 8 * 86_400_000,
     },
     {
-      id: 3,
-      sourceDate: dayOf(1), // 10h45 → excedente 45min
-      targetDate: pendingTarget,
-      minutes: 45,
-      status: "pendente",
-      note: "Planejo sair mais cedo para compensar.",
-      createdAt: now,
+      id: 3, sourceDate: "2026-08-18", targetDate: "2026-08-26", minutes: 45,
+      status: "pendente", note: "Planejo sair mais cedo para compensar.", kind: "excedente", createdAt: now - 7 * 86_400_000,
+    },
+    {
+      id: 4, sourceDate: "2026-08-19", targetDate: "2026-08-22", minutes: 10,
+      status: "concluida", note: "Usadas horas positivas realizadas", kind: "deficit", portion: "regular", createdAt: now - 5 * 86_400_000,
+    },
+    {
+      id: 5, sourceDate: "2026-08-19", targetDate: "2026-08-28", minutes: 10,
+      status: "pendente", note: "Hora extra planejada", kind: "deficit", createdAt: now - 5 * 86_400_000,
+    },
+    {
+      id: 6, sourceDate: "2026-08-21", targetDate: "2026-08-24", minutes: 5,
+      status: "concluida", note: "Usadas horas positivas realizadas", kind: "deficit", portion: "regular", createdAt: now - 1 * 86_400_000,
+    },
+    {
+      id: 7, sourceDate: "2026-08-21", targetDate: "2026-08-24", minutes: 10,
+      status: "concluida", note: "Alocado excedente acima de 10h (realizado)", kind: "deficit", portion: "especial", createdAt: now - 1 * 86_400_000,
+    },
+    {
+      id: 8, sourceDate: "2026-08-20", targetDate: "2026-08-24", minutes: 15,
+      status: "concluida", note: "Alocado excedente acima de 10h (realizado)", kind: "deficit", portion: "especial", createdAt: now - 1 * 86_400_000,
+    },
+    {
+      id: 9, sourceDate: "2026-08-06", targetDate: "2026-08-28", minutes: 60,
+      status: "pendente", note: "Hora extra planejada do acordo de 06/08", kind: "acordo", createdAt: now - 4 * 86_400_000,
     },
   ];
 
-  return { user: { ...DEFAULT_USER }, entries, compensations, absences: [] };
+  const absences: Absence[] = [
+    {
+      id: 1, kind: "acordado", startDate: "2026-08-06", endDate: "2026-08-06",
+      duration: "integral", treatment: "compensar", note: "Folga acordada", createdAt: now - 20 * 86_400_000,
+    },
+    {
+      id: 2, kind: "abono", startDate: "2026-08-10", endDate: "2026-08-10",
+      duration: "integral", note: "Abono de aniversário", createdAt: now - 15 * 86_400_000,
+    },
+  ];
+
+  const faltas: Falta[] = [
+    { id: 1, date: "2026-08-31", createdAt: now },
+  ];
+
+  const excessReasons: ExcessReason[] = [
+    { id: 1, date: "2026-08-17", reason: "demanda-urgente", customReason: null, observation: null, createdAt: now - 8 * 86_400_000, updatedAt: now - 8 * 86_400_000 },
+    { id: 2, date: "2026-08-18", reason: "atendimento-evento", customReason: null, observation: null, createdAt: now - 7 * 86_400_000, updatedAt: now - 7 * 86_400_000 },
+    { id: 3, date: "2026-08-24", reason: "demanda-urgente", customReason: null, observation: null, createdAt: now - 1 * 86_400_000, updatedAt: now - 1 * 86_400_000 },
+  ];
+
+  return {
+    user: { ...DEFAULT_USER },
+    entries,
+    compensations,
+    absences,
+    companyCalendars: seedCompanyCalendars(),
+    faltas,
+    excessReasons,
+  };
 }

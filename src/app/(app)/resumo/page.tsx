@@ -3,13 +3,12 @@
 import { useMemo, useState } from "react";
 import { BarChart3, ChevronLeft, ChevronRight, Download } from "lucide-react";
 import { settingsOf, useAppData, useIsClient } from "@/lib/store";
-import { expectedMinutesOf, formatMinutes, isWeekend, weekdayShort } from "@/lib/time";
+import { formatMinutes, isRealizedDate, isWeekend, todayString, weekdayShort } from "@/lib/time";
 import {
   absenceLabel,
   absenceOnDate,
-  dayContext,
-  regularBalanceContribution,
 } from "@/lib/absences";
+import { dayBalanceContribution, faltaOnDate, faltaStatusOf } from "@/lib/faltas";
 import {
   getNextPointPeriod,
   getPointPeriod,
@@ -18,26 +17,10 @@ import {
   periodLabel,
   type PointPeriod,
 } from "@/lib/periods";
-import { acordoViewOf, appliedOnDate, buildDebtDays } from "@/lib/debt";
-import { stackedSegments } from "@/lib/time";
+import { companyDayContext } from "@/lib/company-calendar";
 import { Badge, Button, Card, EmptyState, Skeleton, StatCard } from "@/components/ui";
-import {
-  StackedBarsChart,
-  type ChartAbsenceMarker,
-  type StackedDatum,
-} from "@/components/charts";
+import { StackedPeriodChart } from "@/components/stacked-period-chart";
 import type { Absence } from "@/lib/absences";
-import type { AcordoView } from "@/lib/debt";
-
-/** Marcador visual do dia (férias/afastamentos) — apenas informativo. */
-function markerOf(a: Absence): ChartAbsenceMarker {
-  if (a.kind === "ferias") return "ferias";
-  if (a.kind === "saude") return "saude";
-  if (a.kind === "acordado") {
-    return a.treatment === "compensar" ? "acordado-compensar" : "acordado-dispensado";
-  }
-  return "outro";
-}
 
 interface DayRow {
   date: string;
@@ -51,65 +34,77 @@ interface DayRow {
   eventLabel: string | null;
   /** Contribuição central deste dia ao Saldo do período. */
   balanceContribution: number;
+  /** Falta do dia: \"efetiva\" vale (saldo/déficit); \"prevista\" mascarada. */
+  faltaStatus: "efetiva" | "prevista" | null;
   absence: Absence | undefined;
-  acordo: AcordoView | null;
 }
 
 export default function ResumoPage() {
   const mounted = useIsClient();
-  const { user, entries, compensations, absences } = useAppData();
+  const { user, entries, compensations, absences, companyCalendars, faltas } = useAppData();
   const settings = settingsOf(user);
+  const todayStr = todayString();
   const [period, setPeriod] = useState<PointPeriod>(() => getPointPeriod(new Date().toISOString().slice(0, 10)));
-
-  // Visão central dos acordos do período (original/compensado/planejado/restante)
-  const acordoByDate = useMemo(() => {
-    const map = new Map<string, AcordoView>();
-    for (const d of buildDebtDays(entries, compensations, settings, period, absences)) {
-      if (d.kind === "acordo") map.set(d.date, acordoViewOf(d));
-    }
-    return map;
-  }, [entries, compensations, absences, settings, period]);
 
   const allDays: DayRow[] = useMemo(() => {
     return listDaysBetween(period.from, period.to)
       .map((date) => {
-        const ctx = dayContext(date, entries, absences, settings);
+        const cctx = companyDayContext(date, entries, absences, companyCalendars, settings);
+        const ctx = cctx.ctx;
         const absence = absenceOnDate(absences, date);
+        const falta = faltaOnDate(faltas, date);
+        const faltaStatus = falta ? faltaStatusOf(date, todayStr) : null;
+        const realized = isRealizedDate(date, todayStr);
+        const idleToday = date === todayStr && ctx.day.empty && faltaStatus !== "efetiva" && !absence && cctx.effectiveExpected > 0;
         return {
           date,
-          workedMinutes: ctx.day.workedMinutes,
-          expectedMinutes: ctx.effectiveExpected,
-          balanceMinutes: ctx.adjustedBalance,
-          excessMinutes: ctx.day.excessMinutes,
-          registrableMinutes: ctx.day.registrableMinutes,
-          status: absence
-            ? absence.kind === "ferias"
-              ? "ferias"
-              : "afastamento"
-            : ctx.day.open
-              ? "in-progress"
-              : ctx.day.excessMinutes > 0
-                ? "excess"
-                : ctx.adjustedDeficit > 0
-                  ? "deficit"
-                  : ctx.day.entries.length > 0
-                    ? "ok"
-                    : "empty",
+          workedMinutes: realized ? ctx.day.workedMinutes : 0,
+          expectedMinutes: cctx.expectedRegular,
+          balanceMinutes: realized ? cctx.regularBalance : 0,
+          excessMinutes: realized ? ctx.day.excessMinutes : 0,
+          registrableMinutes: realized ? ctx.day.registrableMinutes : 0,
+          status: !realized
+            ? ctx.day.entries.length > 0
+              ? "future"
+              : "empty"
+            : idleToday
+              ? "idle"
+            : faltaStatus === "efetiva"
+            ? "falta"
+            : absence
+              ? absence.kind === "ferias"
+                ? "ferias"
+                : "afastamento"
+              : ctx.day.open
+                ? "in-progress"
+                : ctx.day.excessMinutes > 0
+                  ? "excess"
+                  : ctx.adjustedDeficit > 0
+                    ? "deficit"
+                    : ctx.day.entries.length > 0
+                      ? "ok"
+                      : "empty",
           entryCount: ctx.day.entries.length,
-          eventLabel: absence ? absenceLabel(absence) : null,
-          balanceContribution: regularBalanceContribution(ctx),
+          eventLabel:
+            cctx.label ??
+            (absence ? absenceLabel(absence) : null) ??
+            (faltaStatus === "efetiva" ? "Falta" : faltaStatus === "prevista" ? "Falta prevista" : null),
+          /* Contribuição CENTRAL (dayBalanceContribution) — a MESMA soma da
+           * Visão geral e de Registros: falta efetiva conta (−jornada efetiva),
+           * prevista é mascarada em 0, demais dias pelo agregador central. */
+          balanceContribution: dayBalanceContribution(cctx, faltas, date, todayStr),
+          faltaStatus,
           absence,
-          acordo: acordoByDate.get(date) ?? null,
         };
       })
       .filter((d) => d.entryCount > 0 || d.eventLabel || !isWeekend(d.date));
-  }, [entries, absences, settings, period, acordoByDate]);
+  }, [entries, absences, companyCalendars, faltas, settings, period, todayStr]);
 
   const totals = useMemo(
     () =>
       allDays.reduce(
         (acc, d) => {
-          if (d.entryCount > 0) acc.trackedDays += 1;
+          if (d.entryCount > 0 && isRealizedDate(d.date, todayStr)) acc.trackedDays += 1;
           acc.workedTotal += d.workedMinutes;
           acc.registrableTotal += d.registrableMinutes;
           // Mesmo agregador central usado em Registros; dias sem dados e jornada aberta = 0.
@@ -119,55 +114,8 @@ export default function ResumoPage() {
         },
         { trackedDays: 0, workedTotal: 0, registrableTotal: 0, balanceTotal: 0, excessTotal: 0 },
       ),
-    [allDays],
+    [allDays, todayStr],
   );
-
-  // Gráfico empilhado: blocos sobre a jornada EFETIVA + compensação aplicada.
-  // Os valores das barras permanecem exatamente os já aprovados — o marcador de
-  // férias/afastamento é apenas informativo (não soma horas à barra).
-  const chartData: StackedDatum[] = allDays.map((d) => {
-    const seg = stackedSegments(d.workedMinutes, d.expectedMinutes, settings.maxDailyMinutes);
-    const used = appliedOnDate(compensations, d.date);
-
-    const lines: string[] = [];
-    if (d.absence) {
-      lines.push(
-        d.absence.duration === "parcial"
-          ? `Período: ${d.absence.partialStart}–${d.absence.partialEnd}`
-          : "Dia integral",
-      );
-      if (d.absence.kind === "saude") {
-        lines.push(
-          d.absence.medicalCert ? "Atestado apresentado" : "Atestado não apresentado",
-        );
-      }
-    }
-    if (d.acordo && d.acordo.originalMinutes > 0) {
-      lines.push(
-        `Acordo original: ${formatMinutes(d.acordo.originalMinutes)}`,
-        `Compensado: ${formatMinutes(d.acordo.compensatedMinutes)}`,
-      );
-      if (d.acordo.plannedMinutes > 0) {
-        lines.push(`Planejado: ${formatMinutes(d.acordo.plannedMinutes)}`);
-      }
-      lines.push(`Restante: ${formatMinutes(d.acordo.remainingMinutes)}`);
-    }
-
-    return {
-      date: d.date,
-      label: d.date.slice(8),
-      workedMinutes: d.workedMinutes,
-      expectedMinutes: d.expectedMinutes,
-      base: seg.base,
-      extra: seg.extra,
-      excess: seg.excess,
-      compensated: Math.max(0, Math.min(used, Math.max(0, d.expectedMinutes - d.workedMinutes))),
-      marker: d.absence ? markerOf(d.absence) : undefined,
-      markerLabel: d.eventLabel ?? undefined,
-      markerLines: lines.length > 0 ? lines : undefined,
-      regularBalance: d.balanceMinutes,
-    };
-  });
 
   const exportCsv = () => {
     const rows = [
@@ -249,22 +197,21 @@ export default function ResumoPage() {
 
       <Card
         title="Barras empilhadas do período"
-        subtitle="Base · extra no ponto · excedente (dívida) · horas compensadas — férias/afastamentos reduzem a base"
+        subtitle="Base · extra no ponto · excedente do limite diário · horas compensadas — férias/afastamentos reduzem a base"
       >
-        {chartData.length === 0 ? (
-          <EmptyState
-            icon={<BarChart3 size={24} />}
-            title="Sem dados neste período"
-            description="Registre seus horários para ver o gráfico e o resumo."
-          />
-        ) : (
-          <StackedBarsChart
-            data={chartData}
-            expected={expectedMinutesOf(settings)}
-            cap={settings.maxDailyMinutes}
-            height={210}
-          />
-        )}
+        {/* Preparação + componente COMPARTILHADOS (src/components/stacked-period-chart):
+            mesma fonte usada pela Visão geral — dados idênticos para o mesmo período. */}
+        <StackedPeriodChart
+          entries={entries}
+          compensations={compensations}
+          absences={absences}
+          companyCalendars={companyCalendars}
+          settings={settings}
+          period={period}
+          faltas={faltas}
+          today={todayStr}
+          height={210}
+        />
       </Card>
 
       <Card title="Detalhamento diário" subtitle="Clique em um dia na aba Registros para ver as batidas">
@@ -294,11 +241,15 @@ export default function ResumoPage() {
                     </td>
                     <td className="py-2.5 pr-3">
                       {d.eventLabel ? (
-                        <Badge tone="sky">{d.eventLabel}</Badge>
+                        <Badge tone={d.eventLabel === "Falta" ? "rose" : "sky"}>{d.eventLabel}</Badge>
                       ) : d.status === "excess" ? (
                         <Badge tone="rose">Acima do limite</Badge>
                       ) : d.status === "deficit" ? (
                         <Badge tone="amber">Abaixo da base</Badge>
+                      ) : d.status === "idle" ? (
+                        <Badge tone="slate">Jornada não iniciada</Badge>
+                      ) : d.status === "future" ? (
+                        <Badge tone="slate">Registro futuro</Badge>
                       ) : d.status === "in-progress" ? (
                         <Badge tone="indigo">Em andamento</Badge>
                       ) : d.status === "ok" ? (
@@ -322,9 +273,11 @@ export default function ResumoPage() {
                             : "text-slate-400"
                       }`}
                     >
-                      {d.entryCount > 0 || d.eventLabel
-                        ? `${d.balanceMinutes >= 0 ? "+" : ""}${formatMinutes(d.balanceMinutes)}`
-                        : "—"}
+                      {d.faltaStatus === "prevista" || d.status === "idle" || d.status === "future" || d.status === "empty"
+                        ? "—"
+                        : d.entryCount > 0 || d.eventLabel
+                          ? `${d.balanceMinutes >= 0 ? "+" : ""}${formatMinutes(d.balanceMinutes)}`
+                          : "—"}
                     </td>
                     <td className="py-2.5 pr-3 text-right font-semibold tabular-nums text-indigo-600">
                       {d.entryCount > 0 ? formatMinutes(d.registrableMinutes) : "—"}
