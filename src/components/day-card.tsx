@@ -180,6 +180,8 @@ interface Props {
   compact?: boolean;
   /** Abre o fluxo existente de registrar falta (card Sem registro). */
   onRegisterFalta?: () => void;
+  /** Abre o modal atômico Preencher registros do dia (card Sem registro). */
+  onFillDayRecords?: () => void;
 }
 
 export function DayCard({
@@ -215,6 +217,7 @@ export function DayCard({
   missingExpected,
   compact,
   onRegisterFalta,
+  onFillDayRecords,
 }: Props) {
   // Regra: todos os dias iniciam RECOLHIDOS — o usuário expande apenas o dia desejado.
   const [expanded, setExpanded] = useState(false);
@@ -547,9 +550,11 @@ export function DayCard({
               <p className="font-extrabold uppercase tracking-wide">⚠ Sem registro</p>
               <p className="mt-0.5">Este dia tinha jornada prevista, mas não possui registros ou justificativa.</p>
               <div className="mt-2 flex flex-wrap gap-2">
-                <Button size="sm" onClick={() => { setShowAdd(true); setForm((f) => ({ ...f, time: nowTimeString() })); }}>
-                  <Plus size={13} /> Adicionar batida
-                </Button>
+                {onFillDayRecords && (
+                  <Button size="sm" onClick={onFillDayRecords}>
+                    Preencher registros do dia
+                  </Button>
+                )}
                 {onRegisterFalta && (
                   <Button size="sm" variant="secondary" onClick={onRegisterFalta}>
                     <Ban size={13} /> Registrar falta
@@ -1110,7 +1115,8 @@ export function DayCard({
             )}
           </div>
 
-          {/* Registro manual — NUNCA em data futura nem em dia de Abono (card vira somente leitura) */}
+          {/* Registro manual — NUNCA em data futura, Abono, nem Sem registro (usa o modal atômico). */}
+          {!missingExpected && (
           <div className="mt-3 flex min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
             {!futureDay && !abonoDay && (showAdd ? (
               <div className="flex w-full min-w-0 flex-wrap items-end gap-2 rounded-xl border border-dashed border-slate-300 bg-white p-3">
@@ -1156,6 +1162,7 @@ export function DayCard({
             ))}
 
           </div>
+          )}
 
           {/* Rodapé explicativo do "No ponto" — em dia de Abono o card é
               SOMENTE INFORMATIVO e não exibe textos explicativos. */}

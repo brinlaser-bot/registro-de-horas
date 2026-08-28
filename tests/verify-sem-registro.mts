@@ -248,6 +248,7 @@ check("26. card Sem registro usa aviso âmbar (não vermelho) e ações existent
   const card = srcOf("src/components/day-card.tsx");
   assert.ok(card.includes("⚠ Sem registro"));
   assert.ok(card.includes("Este dia tinha jornada prevista, mas não possui registros ou justificativa."));
+  assert.ok(card.includes("Preencher registros do dia"));
   assert.ok(card.includes("Registrar falta"));
   assert.ok(card.includes("missingExpected"));
   assert.ok(!card.includes("Falta automática"));

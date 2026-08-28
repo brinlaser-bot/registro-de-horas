@@ -42,6 +42,7 @@ import type { CompKind, WorkSettings } from "@/lib/types";
 import { DayCard } from "@/components/day-card";
 import { ManualEntryModal, type ManualPairData } from "@/components/manual-entry-modal";
 import { FaltaModal } from "@/components/falta-modal";
+import { FillDayRecordsModal } from "@/components/fill-day-records-modal";
 import { ExcessReasonModal } from "@/components/excess-reason-modal";
 import { AllocateExcessModal } from "@/components/allocate-excess-modal";
 import { Button, Card, EmptyState, Skeleton } from "@/components/ui";
@@ -102,6 +103,7 @@ function RegistrosBody() {
   const [allocateDate, setAllocateDate] = useState<string | null>(null);
   const [allocateFromDeficit, setAllocateFromDeficit] = useState<{ date: string; kind?: CompKind } | null>(null);
   const [faltaInitialDate, setFaltaInitialDate] = useState<string | null>(null);
+  const [fillDate, setFillDate] = useState<string | null>(null);
   const wantPending = searchParams.get("pendentes") === "1";
   const wantMissing = searchParams.get("semRegistro") === "1";
 
@@ -688,6 +690,7 @@ function RegistrosBody() {
                     }
                   : undefined
               }
+              onFillDayRecords={missingExpected ? () => setFillDate(date) : undefined}
               effectiveExpected={balanceView.effectiveExpected}
               balanceView={balanceView}
               shortcuts={shortcutsByDate.get(date)}
@@ -752,6 +755,21 @@ function RegistrosBody() {
       </Card>
 
       <ManualEntryModal open={manualOpen} onClose={() => setManualOpen(false)} />
+      {fillDate && (
+        <FillDayRecordsModal
+          date={fillDate}
+          onClose={() => setFillDate(null)}
+          onSaved={() => {
+            const d = fillDate;
+            setFillDate(null);
+            toast.show("Registros do dia salvos!");
+            if (d) {
+              promptExcessReasonIfNeeded(d, { excessMinutes: 0, open: false });
+              reconcileDay(d);
+            }
+          }}
+        />
+      )}
       {reasonDate &&
         (() => {
           const reasonDay = computeDay(
