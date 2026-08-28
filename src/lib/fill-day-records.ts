@@ -24,8 +24,21 @@ export interface FillDayPunch {
 }
 
 export const FILL_INCOMPLETE_MSG = "Complete os horários deste dia antes de salvar.";
+export const FILL_ENTRADA_MSG = "Informe a hora de entrada.";
+export const FILL_SAIDA_MSG = "Informe a hora de saída.";
 export const FILL_ORDER_MSG = "A hora de saída deve ser depois da entrada.";
 export const FILL_OVERLAP_MSG = "Os períodos informados se sobrepõem. Ajuste os horários.";
+export const FILL_DUPLICATE_MSG = "Há horários duplicados ou incompatíveis. Ajuste os registros.";
+
+export type FillTouched = { entrada: boolean; saida: boolean };
+
+export interface FillDayUiState {
+  /** Sempre derivado de validateFillDaySave — única regra de “pode salvar”. */
+  canSave: boolean;
+  /** Erro entre períodos (sobreposição / duplicidade) ou da análise central. */
+  formError: string | null;
+  periodErrors: Array<{ entrada?: string; saida?: string }>;
+}
 
 function overlapMinutes(a1: number, a2: number, b1: number, b2: number): number {
   return Math.max(0, Math.min(a2, b2) - Math.max(a1, b1));
@@ -100,4 +113,40 @@ export function validateFillDaySave(
     return { ok: false, error: FILL_INCOMPLETE_MSG };
   }
   return { ok: true, punches };
+}
+
+/**
+ * Estado reativo da UI. `canSave` é SEMPRE validateFillDaySave().ok.
+ * Mensagens de campo vazio só aparecem depois que o campo foi tocado.
+ * Ordem/sobreposição/duplicidade aparecem assim que os horários envolvidos existem.
+ */
+export function fillDayUiState(
+  date: string,
+  periods: FillPeriod[],
+  touched: FillTouched[],
+): FillDayUiState {
+  const save = validateFillDaySave(date, periods);
+  const periodErrors = periods.map((p, i) => {
+    const t = touched[i] ?? { entrada: false, saida: false };
+    const err: { entrada?: string; saida?: string } = {};
+    if (!p.entrada && t.entrada) err.entrada = FILL_ENTRADA_MSG;
+    if (!p.saida && t.saida) err.saida = FILL_SAIDA_MSG;
+    if (p.entrada && p.saida && toMinutes(p.saida) <= toMinutes(p.entrada)) {
+      err.saida = FILL_ORDER_MSG;
+    }
+    return err;
+  });
+
+  let formError: string | null = null;
+  const complete = periods.filter((p) => p.entrada && p.saida);
+  if (complete.length > 0) {
+    const v = validateFillDayPeriods(complete);
+    if (!v.ok && v.error && v.error !== FILL_ORDER_MSG) {
+      formError = v.error;
+    } else if (v.ok && !save.ok && periods.every((p) => p.entrada && p.saida)) {
+      formError = save.error ?? FILL_INCOMPLETE_MSG;
+    }
+  }
+
+  return { canSave: save.ok, formError, periodErrors };
 }

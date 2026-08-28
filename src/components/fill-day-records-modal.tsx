@@ -4,7 +4,13 @@ import { useRef, useState } from "react";
 import { CalendarPlus, Plus, Trash2 } from "lucide-react";
 import { Button, Input, Modal } from "@/components/ui";
 import { formatDateBR, formatMinutes } from "@/lib/time";
-import { fillDayPreview, validateFillDaySave, type FillPeriod } from "@/lib/fill-day-records";
+import {
+  fillDayPreview,
+  fillDayUiState,
+  validateFillDaySave,
+  type FillPeriod,
+  type FillTouched,
+} from "@/lib/fill-day-records";
 import { actions, settingsOf, useAppData } from "@/lib/store";
 
 interface Props {
@@ -16,34 +22,33 @@ interface Props {
 /**
  * Modal contextual do card SEM REGISTRO.
  * Data travada. Estado 100% local até SALVAR REGISTROS DO DIA.
- * Montado só quando aberto (sem useEffect) para não criar lint novo.
+ * Validação reativa via fillDayUiState (mesma regra de validateFillDaySave).
  */
 export function FillDayRecordsModal({ date, onClose, onSaved }: Props) {
   const { user } = useAppData();
   const settings = settingsOf(user);
   const [periods, setPeriods] = useState<FillPeriod[]>([{ entrada: "", saida: "" }]);
+  const [touched, setTouched] = useState<FillTouched[]>([{ entrada: false, saida: false }]);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const inflight = useRef(false);
 
+  const ui = fillDayUiState(date, periods, touched);
   const preview = fillDayPreview(periods, settings);
+  const canSave = ui.canSave;
+
+  const markTouched = (index: number, field: "entrada" | "saida") => {
+    setTouched((cur) => cur.map((t, j) => (j === index ? { ...t, [field]: true } : t)));
+  };
 
   const save = () => {
-    if (inflight.current || busy) return;
+    if (inflight.current || busy || !canSave) return;
     const v = validateFillDaySave(date, periods);
-    if (!v.ok || !v.punches) {
-      setError(v.error ?? "Complete os horários deste dia antes de salvar.");
-      return;
-    }
+    if (!v.ok || !v.punches) return;
     inflight.current = true;
     setBusy(true);
-    setError(null);
     try {
       const res = actions.addEntries(v.punches);
-      if (!res.ok) {
-        setError(res.error ?? "Não foi possível salvar.");
-        return;
-      }
+      if (!res.ok) return;
       onSaved();
     } finally {
       inflight.current = false;
@@ -59,8 +64,14 @@ export function FillDayRecordsModal({ date, onClose, onSaved }: Props) {
       subtitle={formatDateBR(date)}
       footer={
         <>
-          <Button variant="secondary" onClick={onClose}>Cancelar</Button>
-          <Button onClick={save} loading={busy} disabled={busy}>
+          <Button type="button" variant="secondary" onClick={onClose}>Cancelar</Button>
+          <Button
+            type="button"
+            onClick={save}
+            loading={busy}
+            disabled={busy || !canSave}
+            aria-disabled={busy || !canSave}
+          >
             <CalendarPlus size={15} /> Salvar registros do dia
           </Button>
         </>
@@ -72,61 +83,72 @@ export function FillDayRecordsModal({ date, onClose, onSaved }: Props) {
           sequência estiver completa e válida.
         </p>
 
-        {periods.map((p, i) => (
-          <div key={i} className="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
-            <div className="mb-2 flex items-center justify-between">
-              <p className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400">
-                Período {i + 1}
-              </p>
-              {periods.length > 1 && (
-                <button
-                  type="button"
-                  className="text-slate-400 hover:text-rose-500 cursor-pointer"
-                  onClick={() => {
-                    setPeriods((cur) => cur.filter((_, j) => j !== i));
-                    setError(null);
+        {periods.map((p, i) => {
+          const errs = ui.periodErrors[i] ?? {};
+          return (
+            <div key={i} className="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
+              <div className="mb-2 flex items-center justify-between">
+                <p className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400">
+                  Período {i + 1}
+                </p>
+                {periods.length > 1 && (
+                  <button
+                    type="button"
+                    className="text-slate-400 hover:text-rose-500 cursor-pointer"
+                    onClick={() => {
+                      setPeriods((cur) => cur.filter((_, j) => j !== i));
+                      setTouched((cur) => cur.filter((_, j) => j !== i));
+                    }}
+                    aria-label="Remover período"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                )}
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <Input
+                  id={`fill-entrada-${i}`}
+                  label="Entrada"
+                  type="time"
+                  value={p.entrada}
+                  error={errs.entrada}
+                  aria-invalid={!!errs.entrada}
+                  onBlur={() => markTouched(i, "entrada")}
+                  onChange={(e) => {
+                    markTouched(i, "entrada");
+                    setPeriods((cur) => cur.map((x, j) => (j === i ? { ...x, entrada: e.target.value } : x)));
                   }}
-                  aria-label="Remover período"
-                >
-                  <Trash2 size={14} />
-                </button>
-              )}
+                />
+                <Input
+                  id={`fill-saida-${i}`}
+                  label="Saída"
+                  type="time"
+                  value={p.saida}
+                  error={errs.saida}
+                  aria-invalid={!!errs.saida}
+                  onBlur={() => markTouched(i, "saida")}
+                  onChange={(e) => {
+                    markTouched(i, "saida");
+                    setPeriods((cur) => cur.map((x, j) => (j === i ? { ...x, saida: e.target.value } : x)));
+                  }}
+                />
+              </div>
             </div>
-            <div className="grid grid-cols-2 gap-4">
-              <Input
-                label="Entrada"
-                type="time"
-                value={p.entrada}
-                onChange={(e) => {
-                  setError(null);
-                  setPeriods((cur) => cur.map((x, j) => (j === i ? { ...x, entrada: e.target.value } : x)));
-                }}
-              />
-              <Input
-                label="Saída"
-                type="time"
-                value={p.saida}
-                onChange={(e) => {
-                  setError(null);
-                  setPeriods((cur) => cur.map((x, j) => (j === i ? { ...x, saida: e.target.value } : x)));
-                }}
-              />
-            </div>
-          </div>
-        ))}
+          );
+        })}
 
         <button
           type="button"
           onClick={() => {
-            setError(null);
             setPeriods((cur) => [...cur, { entrada: "", saida: "" }]);
+            setTouched((cur) => [...cur, { entrada: false, saida: false }]);
           }}
           className="inline-flex items-center gap-1.5 text-xs font-bold text-indigo-600 hover:underline cursor-pointer"
         >
           <Plus size={14} /> Adicionar outro período
         </button>
 
-        {preview.stay > 0 && (
+        {canSave && preview.stay > 0 && (
           <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs text-slate-600">
             <p>Permanência: <b className="text-slate-800">{formatMinutes(preview.stay)}</b></p>
             {preview.autoBreak > 0 && (
@@ -136,9 +158,9 @@ export function FillDayRecordsModal({ date, onClose, onSaved }: Props) {
           </div>
         )}
 
-        {error && (
-          <div className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2.5 text-xs font-medium text-amber-800">
-            {error}
+        {ui.formError && (
+          <div role="alert" className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2.5 text-xs font-medium text-amber-800">
+            {ui.formError}
           </div>
         )}
       </div>

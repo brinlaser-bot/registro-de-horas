@@ -10,8 +10,10 @@ import {
   FILL_INCOMPLETE_MSG,
   FILL_ORDER_MSG,
   FILL_OVERLAP_MSG,
+  FILL_SAIDA_MSG,
   fillDayPreview,
   fillDayPunches,
+  fillDayUiState,
   validateFillDayPeriods,
   validateFillDaySave,
 } from "../src/lib/fill-day-records.ts";
@@ -254,6 +256,126 @@ check("19. Registrar falta continua resolvendo Sem registro pelo fluxo existente
   const card = srcOf("src/components/day-card.tsx");
   assert.ok(card.includes("Registrar falta"));
   assert.ok(card.includes("onRegisterFalta"));
+});
+
+const untouched = [{ entrada: false, saida: false }];
+const bothTouched = [{ entrada: true, saida: true }];
+
+check("20. modal recém-aberto: Salvar desabilitado e sem mensagem agressiva", () => {
+  const ui = fillDayUiState(WED, [{ entrada: "", saida: "" }], untouched);
+  assert.equal(ui.canSave, false);
+  assert.equal(ui.formError, null);
+  assert.equal(ui.periodErrors[0]?.entrada, undefined);
+  assert.equal(ui.periodErrors[0]?.saida, undefined);
+  const modal = srcOf("src/components/fill-day-records-modal.tsx");
+  assert.ok(modal.includes("disabled={busy || !canSave}"));
+  assert.ok(modal.includes("fillDayUiState"));
+});
+
+check("21. somente Entrada preenchida: botão continua desabilitado", () => {
+  const ui = fillDayUiState(WED, [{ entrada: "08:00", saida: "" }], [{ entrada: true, saida: false }]);
+  assert.equal(ui.canSave, false);
+  assert.equal(ui.periodErrors[0]?.saida, undefined, "Saída ainda não tocada: sem mensagem");
+});
+
+check("22. somente Saída preenchida: botão continua desabilitado", () => {
+  const ui = fillDayUiState(WED, [{ entrada: "", saida: "17:00" }], [{ entrada: false, saida: true }]);
+  assert.equal(ui.canSave, false);
+  assert.equal(ui.periodErrors[0]?.entrada, undefined);
+});
+
+check("23. 17:00→08:00: mensagem aparece sem clicar em Salvar", () => {
+  const ui = fillDayUiState(WED, [{ entrada: "17:00", saida: "08:00" }], bothTouched);
+  assert.equal(ui.periodErrors[0]?.saida, FILL_ORDER_MSG);
+  assert.equal(validateFillDaySave(WED, [{ entrada: "17:00", saida: "08:00" }]).error, FILL_ORDER_MSG);
+});
+
+check("24. 17:00→08:00: botão Salvar desabilitado", () => {
+  const ui = fillDayUiState(WED, [{ entrada: "17:00", saida: "08:00" }], bothTouched);
+  assert.equal(ui.canSave, false);
+});
+
+check("25. corrigir para 17:00→18:00: erro some e Salvar habilita", () => {
+  const bad = fillDayUiState(WED, [{ entrada: "17:00", saida: "08:00" }], bothTouched);
+  assert.equal(bad.canSave, false);
+  const ok = fillDayUiState(WED, [{ entrada: "17:00", saida: "18:00" }], bothTouched);
+  assert.equal(ok.canSave, true);
+  assert.equal(ok.periodErrors[0]?.saida, undefined);
+  assert.equal(ok.formError, null);
+  const p = fillDayPreview([{ entrada: "17:00", saida: "18:00" }], S);
+  assert.ok(p.stay > 0);
+});
+
+check("26. 08:00→17:00: botão habilitado e prévia 9h / 1h / 8h", () => {
+  const ui = fillDayUiState(WED, [{ entrada: "08:00", saida: "17:00" }], bothTouched);
+  assert.equal(ui.canSave, true);
+  assert.equal(ui.formError, null);
+  const p = fillDayPreview([{ entrada: "08:00", saida: "17:00" }], S);
+  assert.equal(p.stay, 540);
+  assert.equal(p.autoBreak, 60);
+  assert.equal(p.net, 480);
+  const modal = srcOf("src/components/fill-day-records-modal.tsx");
+  assert.ok(modal.includes("canSave && preview.stay > 0"));
+});
+
+check("27. períodos sobrepostos: mensagem reativa e Salvar desabilitado", () => {
+  const periods = [
+    { entrada: "08:00", saida: "12:00" },
+    { entrada: "11:30", saida: "17:00" },
+  ];
+  const ui = fillDayUiState(WED, periods, [bothTouched[0], bothTouched[0]]);
+  assert.equal(ui.canSave, false);
+  assert.equal(ui.formError, FILL_OVERLAP_MSG);
+});
+
+check("28. corrigir sobreposição: erro some e Salvar habilita", () => {
+  const fixed = [
+    { entrada: "08:00", saida: "12:00" },
+    { entrada: "13:00", saida: "17:00" },
+  ];
+  const ui = fillDayUiState(WED, fixed, [bothTouched[0], bothTouched[0]]);
+  assert.equal(ui.canSave, true);
+  assert.equal(ui.formError, null);
+});
+
+check("29. cancelar/X continua sem persistir nada", () => {
+  resetStore();
+  fillDayUiState(WED, [{ entrada: "08:00", saida: "17:00" }], bothTouched);
+  assert.equal(getAppData().entries.length, 0);
+  const modal = srcOf("src/components/fill-day-records-modal.tsx");
+  assert.ok(modal.includes("onClose"));
+  assert.ok(modal.includes('aria-label="Remover período"') || modal.includes("Cancelar"));
+});
+
+check("30. submit válido continua atômico", () => {
+  resetStore();
+  const ui = fillDayUiState(WED, [{ entrada: "08:00", saida: "17:00" }], bothTouched);
+  assert.equal(ui.canSave, true);
+  const v = validateFillDaySave(WED, [{ entrada: "08:00", saida: "17:00" }]);
+  assert.equal(v.punches?.length, 2);
+  const res = actions.addEntries(v.punches!);
+  assert.equal(res.ok, true, res.error);
+  assert.equal(getAppData().entries.filter((e) => e.date === WED).length, 2);
+  const modal = srcOf("src/components/fill-day-records-modal.tsx");
+  assert.ok(modal.includes("validateFillDaySave(date, periods)"));
+  assert.ok(modal.includes("actions.addEntries(v.punches)"));
+});
+
+check("31. nenhuma regressão no filtro ?semRegistro=1", () => {
+  const reg = srcOf("src/app/(app)/registros/page.tsx");
+  assert.ok(reg.includes('searchParams.get("semRegistro") === "1"'));
+  assert.ok(reg.includes("wantMissing && missingCount === 0"));
+  resetStore();
+  assert.equal(missingExpectedRecordDates(TWO, TODAY, [], [], cals, S, []).length, 2);
+  const v = validateFillDaySave(THU, [{ entrada: "08:00", saida: "17:00" }]);
+  actions.addEntries(v.punches!);
+  assert.equal(missingExpectedRecordDates(TWO, TODAY, getAppData().entries, [], cals, S, []).length, 1);
+});
+
+check("32. Saída tocada e vazia mostra Informe a hora de saída", () => {
+  const ui = fillDayUiState(WED, [{ entrada: "08:00", saida: "" }], [{ entrada: true, saida: true }]);
+  assert.equal(ui.canSave, false);
+  assert.equal(ui.periodErrors[0]?.saida, FILL_SAIDA_MSG);
 });
 
 console.log(`\nPREENCHER DIA — OK (${passed} testes)`);

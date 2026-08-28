@@ -70,6 +70,7 @@ export function Input({ label, hint, error, className = "", id, ...rest }: Input
       )}
       <input
         id={id}
+        aria-invalid={error ? true : undefined}
         className={`w-full h-10 rounded-xl border bg-white px-3 text-sm text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:ring-2 ${
           error
             ? "border-rose-400 focus:border-rose-500 focus:ring-rose-100"
