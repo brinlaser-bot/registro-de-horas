@@ -1,7 +1,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { BarChart3, ChevronLeft, ChevronRight, Download } from "lucide-react";
+import Link from "next/link";
+import { BarChart3, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Download } from "lucide-react";
 import { settingsOf, useAppData, useIsClient } from "@/lib/store";
 import { formatMinutes, isRealizedDate, isWeekend, todayString, weekdayShort } from "@/lib/time";
 import {
@@ -17,7 +18,7 @@ import {
   periodLabel,
   type PointPeriod,
 } from "@/lib/periods";
-import { companyDayContext } from "@/lib/company-calendar";
+import { companyDayContext, companyDeficitContribution } from "@/lib/company-calendar";
 import { pendingPunchDates } from "@/lib/pending-punches";
 import { buildDebtDays } from "@/lib/debt";
 import { Badge, Button, Card, EmptyState, Skeleton, StatCard } from "@/components/ui";
@@ -36,6 +37,8 @@ interface DayRow {
   eventLabel: string | null;
   /** Contribuição central deste dia ao Saldo do período. */
   balanceContribution: number;
+  /** Déficit comum (resolução central). */
+  deficitContribution: number;
   /** Falta do dia: \"efetiva\" vale (saldo/déficit); \"prevista\" mascarada. */
   faltaStatus: "efetiva" | "prevista" | null;
   absence: Absence | undefined;
@@ -96,6 +99,7 @@ export default function ResumoPage() {
            * Visão geral e de Registros: falta efetiva conta (−jornada efetiva),
            * prevista é mascarada em 0, demais dias pelo agregador central. */
           balanceContribution: dayBalanceContribution(cctx, faltas, date, todayStr),
+          deficitContribution: date > todayStr || faltaStatus === "prevista" ? 0 : companyDeficitContribution(cctx),
           faltaStatus,
           absence,
         };
@@ -132,13 +136,46 @@ export default function ResumoPage() {
       todayStr,
     );
     const acordo = debts.filter((d) => d.kind === "acordo");
+    let vacationDays = 0, healthDays = 0, waivedDays = 0;
+    for (const d of allDays) {
+      if (d.absence?.kind === "ferias") vacationDays += 1;
+      if (d.absence?.kind === "saude") healthDays += 1;
+      if (d.absence && (d.absence.kind === "outro" || (d.absence.kind === "acordado" && d.absence.treatment === "dispensado"))) {
+        waivedDays += 1;
+      }
+    }
+    let compensatedMinutes = 0, pendingCompMinutes = 0;
+    for (const c of compensations) {
+      if (c.sourceDate < period.from || c.sourceDate > period.to) continue;
+      if (c.status === "concluida") compensatedMinutes += c.minutes;
+      if (c.status === "pendente") pendingCompMinutes += c.minutes;
+    }
+    let faltaDays = 0, faltaPrevistaDays = 0;
+    for (const f of faltas) {
+      if (f.date < period.from || f.date > period.to) continue;
+      if (f.date <= todayStr) faltaDays += 1;
+      else faltaPrevistaDays += 1;
+    }
     return {
+      workedDays: totals.trackedDays,
+      workedMinutes: totals.workedTotal,
+      registrableMinutes: totals.registrableTotal,
+      balanceMinutes: totals.balanceTotal,
+      excessMinutes: totals.excessTotal,
+      deficitMinutes: allDays.reduce((s, d) => s + d.deficitContribution, 0),
+      compensatedMinutes,
+      pendingCompMinutes,
+      vacationDays,
+      healthDays,
+      waivedDays,
+      faltaDays,
+      faltaPrevistaDays,
       acordoTotal: acordo.reduce((s, d) => s + d.debtMinutes, 0),
       acordoDone: acordo.reduce((s, d) => s + d.concludedMinutes, 0),
       acordoPending: acordo.reduce((s, d) => s + d.remainingMinutes, 0),
       pendingPunches: pendingPunchDates(entries, settings, todayStr, period).length,
     };
-  }, [entries, compensations, settings, period, absences, companyCalendars, faltas, todayStr]);
+  }, [allDays, totals, entries, compensations, settings, period, absences, companyCalendars, faltas, todayStr]);
 
   const exportCsv = () => {
     const rows = [
@@ -200,9 +237,14 @@ export default function ResumoPage() {
         const n = pendingPunchDates(entries, settings, todayStr, period).length;
         if (n <= 0) return null;
         return (
-          <div className="rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3">
-            <p className="text-sm font-extrabold text-amber-800">Registros pendentes: {n}</p>
-            <p className="mt-0.5 text-xs text-amber-700">O saldo pode sofrer alteração após a correção dos registros pendentes.</p>
+          <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3">
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-extrabold text-amber-800">Registros pendentes: {n}</p>
+              <p className="mt-0.5 text-xs text-amber-700">O saldo pode sofrer alteração após a correção dos registros pendentes.</p>
+            </div>
+            <Link href="/registros?pendentes=1">
+              <Button size="sm" variant="warning">Ver pendências</Button>
+            </Link>
           </div>
         );
       })()}
@@ -229,21 +271,39 @@ export default function ResumoPage() {
       </div>
 
       <div>
-        <Button variant="ghost" size="sm" onClick={() => setDetailsOpen((v) => !v)}>
-          {detailsOpen ? "Ocultar detalhes do período" : "Ver mais detalhes do período"}
-        </Button>
+        <button
+          type="button"
+          aria-expanded={detailsOpen}
+          onClick={() => setDetailsOpen((v) => !v)}
+          className="flex w-full items-center justify-between gap-3 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-left text-sm font-bold text-slate-800 shadow-sm hover:bg-slate-50 cursor-pointer"
+        >
+          <span>{detailsOpen ? "Ocultar detalhes do período" : "Ver mais detalhes do período"}</span>
+          {detailsOpen ? <ChevronUp size={18} className="shrink-0 text-slate-500" /> : <ChevronDown size={18} className="shrink-0 text-slate-500" />}
+        </button>
         {detailsOpen && (
-          <div className="mt-3 space-y-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
-            <p>Horas trabalhadas: <b className="text-slate-900">{formatMinutes(totals.workedTotal)}</b></p>
-            <p>
-              Acordo a compensar:{" "}
-              <b className="text-slate-900">{formatMinutes(detailStats.acordoTotal)}</b>
-              {" "}(feito {formatMinutes(detailStats.acordoDone)} · falta {formatMinutes(detailStats.acordoPending)})
-            </p>
-            <p>Registros pendentes: <b className="text-amber-700">{detailStats.pendingPunches}</b></p>
-            <p className="text-xs text-amber-700">
-              O saldo pode sofrer alteração após a correção dos registros pendentes.
-            </p>
+          <div className="mt-3 grid grid-cols-2 gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600 sm:grid-cols-3 lg:grid-cols-5">
+            <Detail label="Dias trabalhados" value={String(detailStats.workedDays)} />
+            <Detail label="Horas trabalhadas" value={formatMinutes(detailStats.workedMinutes)} />
+            <Detail label="No ponto" value={formatMinutes(detailStats.registrableMinutes)} />
+            <Detail
+              label="Saldo"
+              value={`${detailStats.balanceMinutes >= 0 ? "+" : ""}${formatMinutes(detailStats.balanceMinutes)}`}
+              tone={detailStats.balanceMinutes >= 0 ? "text-emerald-600" : "text-rose-600"}
+            />
+            <Detail label="Excedentes" value={formatMinutes(detailStats.excessMinutes)} />
+            <Detail label="Déficit" value={formatMinutes(detailStats.deficitMinutes)} />
+            <Detail label="Horas compensadas" value={formatMinutes(detailStats.compensatedMinutes)} />
+            <Detail label="Compensações pendentes" value={formatMinutes(detailStats.pendingCompMinutes)} />
+            <Detail label="Férias" value={String(detailStats.vacationDays)} />
+            <Detail label="Saúde" value={String(detailStats.healthDays)} />
+            <Detail label="Dispensados" value={String(detailStats.waivedDays)} />
+            <Detail label="Faltas" value={String(detailStats.faltaDays)} />
+            <Detail label="Faltas previstas" value={String(detailStats.faltaPrevistaDays)} />
+            <Detail
+              label="Acordo a compensar"
+              value={`${formatMinutes(detailStats.acordoTotal)} (feito ${formatMinutes(detailStats.acordoDone)} · falta ${formatMinutes(detailStats.acordoPending)})`}
+            />
+            <Detail label="Registros pendentes" value={String(detailStats.pendingPunches)} tone="text-amber-700" />
           </div>
         )}
       </div>
@@ -364,6 +424,15 @@ export default function ResumoPage() {
           </div>
         )}
       </Card>
+    </div>
+  );
+}
+
+function Detail({ label, value, tone }: { label: string; value: string; tone?: string }) {
+  return (
+    <div className="rounded-lg bg-slate-50 px-2.5 py-1.5 ring-1 ring-inset ring-slate-200">
+      <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">{label}</p>
+      <p className={`font-extrabold tabular-nums ${tone ?? "text-slate-800"}`}>{value}</p>
     </div>
   );
 }

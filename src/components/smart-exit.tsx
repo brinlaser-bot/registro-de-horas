@@ -11,11 +11,16 @@ import {
   TrendingUp,
 } from "lucide-react";
 import type { Compensation, DayResult, WorkSettings } from "@/lib/types";
-import { expectedMinutesOf, formatMinutes, plannedExitTime, toMinutes } from "@/lib/time";
+import { expectedMinutesOf, formatMinutes, isDisplayableClock, plannedExitTime, toMinutes, type EntryType } from "@/lib/time";
 import { kindOf, pendingForTarget } from "@/lib/debt";
 import { Badge, Button, Card } from "@/components/ui";
 
-export type ExitState = "no-punch" | "planned" | "overdue" | "goal-reached" | "finished";
+export type ExitState = "no-punch" | "planned" | "overdue" | "goal-reached" | "finished" | "on-break";
+
+/** Nunca interpolar null/undefined/NaN/vazio nos textos do Assistente. */
+export function clockText(value: unknown): string | null {
+  return isDisplayableClock(value) ? value : null;
+}
 
 export interface SmartExitPlan {
   kind: "normal" | "earlier" | "extra";
@@ -28,6 +33,8 @@ export interface SmartExitPlan {
   earlyMinutes: number;
   extraMinutes: number;
   comps: Compensation[];
+  /** Próxima batida ainda no futuro (previsão). */
+  nextPlanned: { time: string; type: EntryType } | null;
 }
 
 /** FUNÇÃO CENTRAL do Smart Exit: calcula o plano de saída do dia. */
@@ -62,13 +69,23 @@ export function buildExitPlan(
         : base;
 
   // Horário planejado: derivado das batidas REALIZADAS, NUNCA da hora atual
-  // nem de horários futuros do mesmo dia.
+  // nem de horários futuros do mesmo dia — salvo a SAÍDA PREVISTA explícita.
   const factual = day.realizedEntries ?? day.entries;
   const planned = day.plannedEntries ?? [];
-  const plannedExit = plannedExitTime(factual, settings, targetMinutes);
+  const lastFactual = factual[factual.length - 1];
+  const onBreak = !!lastFactual && lastFactual.type === "saida" && planned.length > 0;
+  const explicitPlannedExit = [...planned].filter((e) => e.type === "saida").at(-1)?.time ?? null;
+  const nextPlanned = planned[0] ? { time: planned[0].time, type: planned[0].type } : null;
+
+  // Entre uma saída realizada e a próxima entrada futura NÃO calcular “Trabalhe até”.
+  const plannedExit = onBreak
+    ? clockText(explicitPlannedExit)
+    : plannedExitTime(factual, settings, targetMinutes);
 
   let state: ExitState;
-  if (factual.length === 0 && planned.length === 0) {
+  if (onBreak) {
+    state = "on-break";
+  } else if (factual.length === 0 && planned.length === 0) {
     state = "no-punch";
   } else if (factual.length === 0 && planned.length > 0) {
     state = "planned";
@@ -102,6 +119,7 @@ export function buildExitPlan(
     earlyMinutes,
     extraMinutes: cappedExtra,
     comps: targeted,
+    nextPlanned,
   };
 }
 
@@ -342,6 +360,33 @@ export function SmartExit({
     );
   }
 
+  /* ── Estado: intervalo (saída realizada, próxima entrada ainda prevista) ── */
+  if (plan.state === "on-break") {
+    const next = plan.nextPlanned && clockText(plan.nextPlanned.time)
+      ? plan.nextPlanned
+      : null;
+    const predictedExit = clockText(plan.plannedExit);
+    return shell(
+      <div className={`space-y-2 rounded-xl border border-sky-200 bg-sky-50 ${pad}`}>
+        <p className="text-sm font-extrabold uppercase tracking-wide text-sky-800">Intervalo em andamento</p>
+        {next && (
+          <p className="text-sm text-slate-600">
+            Próximo registro previsto: <b>{next.time} {next.type === "entrada" ? "Entrada" : "Saída"}</b>
+          </p>
+        )}
+        {predictedExit && (
+          <p className="text-sm text-slate-600">
+            Saída prevista: <b className="tabular-nums">{predictedExit}</b>
+          </p>
+        )}
+      </div>,
+      {
+        subtitle: "Assistente de jornada",
+        actions: <Badge tone="sky">Intervalo em andamento</Badge>,
+      },
+    );
+  }
+
   /* ── Estado: sem batidas ─────────────────────────────── */
   if (plan.state === "no-punch") {
     return shell(
@@ -403,8 +448,9 @@ export function SmartExit({
 
   /* §29 Meta já atingida com entrada aberta: a saída sugerida é AGORA — nunca
    * um horário futuro artificial (ex.: 21:00 depois de nova entrada às 20:00. */
+  const exitClock = clockText(plan.plannedExit);
   const metaIsNow =
-    goalReached && plan.plannedExit !== null && toMinutes(plan.plannedExit) <= nowMinutes;
+    goalReached && exitClock !== null && toMinutes(exitClock) <= nowMinutes;
 
   const message = goalReached
     ? plan.kind === "extra"
@@ -415,14 +461,20 @@ export function SmartExit({
         ? "Meta atingida — você já pode registrar a saída."
         : "Meta da jornada atingida — você já pode sair."
     : plan.kind === "earlier"
-      ? `Você tem ${formatMinutes(plan.earlyMinutes)} para compensar hoje. Saída planejada: ${plan.plannedExit}.`
+      ? exitClock
+        ? `Você tem ${formatMinutes(plan.earlyMinutes)} para compensar hoje. Saída prevista: ${exitClock}.`
+        : `Você tem ${formatMinutes(plan.earlyMinutes)} para compensar hoje.`
       : plan.kind === "extra"
-        ? `Trabalhe até ${plan.plannedExit} para abater ${formatMinutes(plan.extraMinutes)} da sua pendência (limite de ${formatMinutes(settings.maxDailyMinutes)}/dia).`
-        : `Para completar sua jornada de ${formatMinutes(plan.targetMinutes)}, a saída planejada é ${plan.plannedExit}.`;
+        ? exitClock
+          ? `Trabalhe até ${exitClock} para abater ${formatMinutes(plan.extraMinutes)} da sua pendência (limite de ${formatMinutes(settings.maxDailyMinutes)}/dia).`
+          : `Há ${formatMinutes(plan.extraMinutes)} de pendência neste dia (limite de ${formatMinutes(settings.maxDailyMinutes)}/dia).`
+        : exitClock
+          ? `Para completar sua jornada de ${formatMinutes(plan.targetMinutes)}, a saída prevista é ${exitClock}.`
+          : `Para completar sua jornada de ${formatMinutes(plan.targetMinutes)}, registre a próxima entrada.`;
 
   return shell(
     <div className={`flex flex-wrap items-center ${embedded ? "gap-3" : "gap-4"}`}>
-        {/* Horário planejado */}
+        {(metaIsNow || exitClock) && (
         <div className={`flex items-center gap-3 rounded-xl border border-slate-100 bg-slate-50/70 ${embedded ? "px-3 py-2" : "px-4 py-3"}`}>
           <div
             className={`flex h-11 w-11 items-center justify-center rounded-xl ${
@@ -437,15 +489,15 @@ export function SmartExit({
           </div>
           <div>
             <p className="text-2xl font-extrabold tabular-nums tracking-tight text-slate-900">
-              {metaIsNow ? "Agora" : plan.plannedExit}
+              {metaIsNow ? "Agora" : exitClock}
             </p>
             <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-              {metaIsNow ? "saída sugerida" : "saída planejada"}
+              {metaIsNow ? "saída sugerida" : "saída prevista"}
             </p>
           </div>
         </div>
+        )}
 
-        {/* Detalhes */}
         <div className="min-w-[200px] flex-1">
           <p
             className={`text-sm font-semibold ${
@@ -477,7 +529,7 @@ export function SmartExit({
           {overdue && !goalReached && (
             <p className="mt-1 flex items-center gap-1 text-xs font-semibold text-amber-600">
               <Clock3 size={12} />
-              Sua saída planejada já passou há {formatMinutes(plan.lateMinutes)}. O ponto continua
+              Sua saída prevista já passou há {formatMinutes(plan.lateMinutes)}. O ponto continua
               aberto.
             </p>
           )}
@@ -517,9 +569,6 @@ export function SmartExit({
           )}
         </div>
 
-        {/* Ações — nunca registrar hora futura nem oferecer botão com jornada encerrada.
-            §30: "Confirmar quitação" SOMENTE com jornada consolidada (sem
-            entrada aberta) — horas ainda correndo não concluem compensação. */}
         <div className="flex flex-col gap-2">
           {goalReached && plan.kind === "extra" && onConfirmComps && deficitComps.length > 0 && !day.open && (
             <Button size="lg" onClick={confirmSettlement} loading={confirming}>

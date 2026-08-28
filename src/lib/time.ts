@@ -317,6 +317,24 @@ export function nowTimeString(): string {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+/** Horário exibível (HH:MM). Rejeita null/undefined/NaN/vazio — nunca interpolar lixo na UI. */
+export function isDisplayableClock(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  const t = value.trim();
+  if (!t || t === "null" || t === "undefined" || t === "NaN") return false;
+  return /^\d{1,2}:\d{2}$/.test(t);
+}
+
+/** Contagem do dia: diferencia fato de previsão. Evita “N batida(s)”. */
+export function punchCountLabel(realized: number, planned: number): string {
+  const r = Math.max(0, realized);
+  const p = Math.max(0, planned);
+  if (r === 0 && p === 0) return "Nenhum registro hoje ainda";
+  if (p === 0) return `${r} realizado${r === 1 ? "" : "s"} hoje`;
+  if (r === 0) return `${p} previsto${p === 1 ? "" : "s"} hoje`;
+  return `${r} realizado${r === 1 ? "" : "s"} · ${p} previsto${p === 1 ? "" : "s"}`;
+}
+
 /* ── Sequência de batidas (validação central) ────────────── */
 
 /**

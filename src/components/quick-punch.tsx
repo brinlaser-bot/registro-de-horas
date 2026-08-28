@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { Ban, Coffee, LogIn, LogOut, Pencil, Timer, Trash2, Wrench, Zap } from "lucide-react";
 import type { DayResult, WorkSettings } from "@/lib/types";
 import type { EntryType, TimeEntryLike } from "@/lib/time";
-import { formatMinutes, nextPunchType, nowTimeString, validatePunchSequence } from "@/lib/time";
+import { formatMinutes, nextPunchType, nowTimeString, punchCountLabel, validatePunchSequence } from "@/lib/time";
 import { predictedBreakWindow } from "@/lib/breaks";
 import { COMPENSAR_EXPLAIN } from "@/lib/compensar";
 import type { FaltaGate } from "@/lib/faltas";
@@ -94,6 +94,7 @@ export function QuickPunch({
    * (fonte central nextPunchType) — nunca da posição no array de lançamento. */
   const next = nextPunchType(today.entries);
   const inconsistent = !today.consistent && today.entries.length > 0;
+  const countLabel = punchCountLabel(today.realizedEntries?.length ?? 0, today.plannedEntries?.length ?? 0);
   const predicted = predictedBreakWindow(today.realizedEntries?.length ? today.realizedEntries : today.entries, settings, jornadaMinutes ?? today.expectedMinutes);
 
   const punch = async (type: EntryType, time: string) => {
@@ -314,7 +315,7 @@ export function QuickPunch({
       {embedded && (
         <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
           <p className="text-xs text-slate-500">
-            {today.entries.length === 0 ? "Nenhuma batida hoje ainda" : `${today.entries.length} batida(s) hoje`}
+            {today.entries.length === 0 ? "Nenhum registro hoje ainda" : countLabel}
             {" · agora são "}{clock}
           </p>
           {headerFields}
@@ -487,7 +488,7 @@ export function QuickPunch({
   return (
     <Card
       title="Registro rápido"
-      subtitle={`${dayLabel ? `${dayLabel} · ` : ""}${today.entries.length === 0 ? "Nenhuma batida hoje ainda" : `${today.entries.length} batida(s) hoje`} · agora são ${clock}`}
+      subtitle={`${dayLabel ? `${dayLabel} · ` : ""}${today.entries.length === 0 ? "Nenhum registro hoje ainda" : countLabel} · agora são ${clock}`}
       actions={headerFields}
     >
       {body}

@@ -5,11 +5,11 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-import { computeDay, isPunchRealized } from "../src/lib/time.ts";
+import { computeDay, isPunchRealized, punchCountLabel } from "../src/lib/time.ts";
 import { stayAndNetMinutes } from "../src/lib/breaks.ts";
 import { canCompleteComp } from "../src/lib/debt.ts";
 import { hourBankSummary } from "../src/lib/hour-bank.ts";
-import { buildExitPlan } from "../src/components/smart-exit.tsx";
+import { buildExitPlan, clockText } from "../src/components/smart-exit.tsx";
 import { suggestedPunchTypeAt } from "../src/lib/punches.ts";
 import { seedCompanyCalendars } from "../src/lib/seed-calendars.ts";
 import { actions } from "../src/lib/store.ts";
@@ -31,6 +31,7 @@ const check = (id: string, fn: () => void) => { fn(); passed++; console.log(`✔
 
 const TODAY = "2026-08-28";
 const clock916 = { date: TODAY, minutes: 9 * 60 + 16 };
+const clock1242 = { date: TODAY, minutes: 12 * 60 + 42 };
 const PAST = "2026-08-21";
 
 check("1. texto simplificado de Registro inconsistente", () => {
@@ -223,6 +224,101 @@ check("21. Registros não duplica esses indicadores", () => {
   const reg = srcOf("src/app/(app)/registros/page.tsx");
   assert.ok(!reg.includes('label="Horas trabalhadas"'));
   assert.ok(!reg.includes('label="Acordo a compensar"'));
+});
+
+const day1242 = () => computeDay([
+  punch(TODAY, "08:00", "entrada"), punch(TODAY, "12:00", "saida"),
+  punch(TODAY, "13:00", "entrada"), punch(TODAY, "17:00", "saida"),
+], S, clock1242.minutes, clock1242);
+
+check("22. 12:42 08E/12S realizados + 13E/17S previstos: Assistente sem null", () => {
+  const extra: Compensation = {
+    id: 9, sourceDate: "2026-08-21", targetDate: TODAY, minutes: 10,
+    status: "pendente", note: null, kind: "deficit", createdAt: 1,
+  };
+  const plan = buildExitPlan(day1242(), S, [extra], clock1242.minutes, TODAY);
+  assert.equal(plan.state, "on-break");
+  assert.equal(clockText(plan.plannedExit), "17:00");
+  assert.notEqual(String(plan.plannedExit), "null");
+  const smart = srcOf("src/components/smart-exit.tsx");
+  assert.ok(!smart.includes("Trabalhe até ${plan.plannedExit}"));
+  assert.ok(smart.includes("clockText"));
+  assert.ok(smart.includes("isDisplayableClock"));
+});
+
+check("23. mesmo cenário: Assistente identifica intervalo entre jornadas", () => {
+  const plan = buildExitPlan(day1242(), S, [], clock1242.minutes, TODAY);
+  assert.equal(plan.state, "on-break");
+  assert.equal(plan.nextPlanned?.time, "13:00");
+  assert.equal(plan.nextPlanned?.type, "entrada");
+  const smart = srcOf("src/components/smart-exit.tsx");
+  assert.ok(smart.includes("Intervalo em andamento"));
+});
+
+check("24. saída prevista 17:00 é exibida", () => {
+  const plan = buildExitPlan(day1242(), S, [], clock1242.minutes, TODAY);
+  assert.equal(plan.plannedExit, "17:00");
+  const smart = srcOf("src/components/smart-exit.tsx");
+  assert.ok(smart.includes("Saída prevista:"));
+});
+
+check("25. contador 2 realizados · 2 previstos", () => {
+  assert.equal(punchCountLabel(2, 2), "2 realizados · 2 previstos");
+  assert.equal(punchCountLabel(2, 0), "2 realizados hoje");
+  assert.equal(punchCountLabel(0, 2), "2 previstos hoje");
+  const qp = srcOf("src/components/quick-punch.tsx");
+  assert.ok(qp.includes("punchCountLabel"));
+  assert.ok(!qp.includes("batida(s) hoje"));
+});
+
+check("26. registro incompleto possui somente um CTA Corrigir registros por alerta", () => {
+  const card = srcOf("src/components/day-card.tsx");
+  const hits = card.match(/Corrigir registros/g) ?? [];
+  assert.equal(hits.length, 2, "um no alerta incompleto e um no inconsistente — nunca na barra inferior");
+  assert.ok(!card.includes("{punchPending && !futureDay && !abonoDay && ("));
+});
+
+check("27. Ver mais detalhes do período expande", () => {
+  const r = srcOf("src/app/(app)/resumo/page.tsx");
+  assert.ok(r.includes("aria-expanded={detailsOpen}"));
+  assert.ok(r.includes("setDetailsOpen((v) => !v)"));
+  assert.ok(r.includes("{detailsOpen && ("));
+});
+
+check("28. painel expandido contém os 15 indicadores", () => {
+  const r = srcOf("src/app/(app)/resumo/page.tsx");
+  for (const label of [
+    "Dias trabalhados", "Horas trabalhadas", "No ponto", "Saldo", "Excedentes",
+    "Déficit", "Horas compensadas", "Compensações pendentes", "Férias", "Saúde",
+    "Dispensados", "Faltas", "Faltas previstas", "Acordo a compensar", "Registros pendentes",
+  ]) {
+    assert.ok(r.includes(`label="${label}"`) || r.includes(`"${label}"`), label);
+  }
+});
+
+check("29. clicar novamente recolhe", () => {
+  const r = srcOf("src/app/(app)/resumo/page.tsx");
+  assert.ok(r.includes("Ocultar detalhes do período"));
+  assert.ok(r.includes("ChevronUp"));
+  assert.ok(r.includes("ChevronDown"));
+});
+
+check("30. mudar o período atualiza os 15 indicadores", () => {
+  const r = srcOf("src/app/(app)/resumo/page.tsx");
+  assert.ok(r.includes("[allDays, totals, entries, compensations, settings, period"));
+  assert.ok(r.includes("getNextPointPeriod(period)"));
+  assert.ok(r.includes("getPreviousPointPeriod(period)"));
+});
+
+check("31. alerta de pendências em /resumo possui Ver pendências", () => {
+  const r = srcOf("src/app/(app)/resumo/page.tsx");
+  assert.ok(r.includes('variant="warning">Ver pendências'));
+  assert.ok(r.includes("O saldo pode sofrer alteração após a correção dos registros pendentes."));
+});
+
+check("32. Ver pendências leva a /registros?pendentes=1", () => {
+  const r = srcOf("src/app/(app)/resumo/page.tsx");
+  assert.ok(r.includes('href="/registros?pendentes=1"'));
 });
 
 actions.replaceAll({ user, entries: [], compensations: [], absences: [], companyCalendars: cals, faltas: [], excessReasons: [] });

@@ -1113,11 +1113,7 @@ export function DayCard({
                 <Plus size={14} /> Registrar intervalo
               </button>
             ))}
-            {punchPending && !futureDay && !abonoDay && (
-              <Button size="sm" variant="secondary" onClick={() => setCorrectOpen(true)}>
-                <Wrench size={13} /> Corrigir registros
-              </Button>
-            )}
+
           </div>
 
           {/* Rodapé explicativo do "No ponto" — em dia de Abono o card é
