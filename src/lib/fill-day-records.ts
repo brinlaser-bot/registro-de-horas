@@ -88,7 +88,7 @@ export function validateFillDayPeriods(periods: FillPeriod[]): { ok: boolean; er
   }
   const times = periods.flatMap((p) => [p.entrada, p.saida]);
   if (new Set(times).size !== times.length) {
-    return { ok: false, error: FILL_OVERLAP_MSG };
+    return { ok: false, error: FILL_DUPLICATE_MSG };
   }
   return { ok: true };
 }

@@ -6,6 +6,12 @@ import { Button, Input, Modal, Select } from "@/components/ui";
 import { useToast } from "@/components/toast";
 import { formatMinutes, FUTURE_DATE_ERROR, isFutureDate, toMinutes, todayString } from "@/lib/time";
 import { stayAndNetMinutes } from "@/lib/breaks";
+import {
+  fillDayUiState,
+  validateFillDaySave,
+  type FillPeriod,
+  type FillTouched,
+} from "@/lib/fill-day-records";
 import { actions } from "@/lib/store";
 import { settingsOf, useAppData } from "@/lib/store";
 import type { EntryType } from "@/lib/types";
@@ -15,11 +21,6 @@ export interface ManualPairData {
   entrada: string;
   saida: string;
   note: string;
-}
-
-interface Period {
-  entrada: string;
-  saida: string;
 }
 
 interface Props {
@@ -40,7 +41,8 @@ export function ManualEntryModal({ open, onClose, initialDate, onSave }: Props) 
   const [date, setDate] = useState(initialDate || today);
   const [note, setNote] = useState("");
   const [mode, setMode] = useState<"periodo" | "intervalo">("periodo");
-  const [periods, setPeriods] = useState<Period[]>([{ entrada: "", saida: "" }]);
+  const [periods, setPeriods] = useState<FillPeriod[]>([{ entrada: "", saida: "" }]);
+  const [touched, setTouched] = useState<FillTouched[]>([{ entrada: false, saida: false }]);
   const [busy, setBusy] = useState(false);
   const inflight = useRef(false);
 
@@ -50,6 +52,7 @@ export function ManualEntryModal({ open, onClose, initialDate, onSave }: Props) 
       setNote("");
       setMode("periodo");
       setPeriods([{ entrada: "", saida: "" }]);
+      setTouched([{ entrada: false, saida: false }]);
       inflight.current = false;
       setBusy(false);
     }
@@ -77,17 +80,30 @@ export function ManualEntryModal({ open, onClose, initialDate, onSave }: Props) 
     return s;
   }, 0);
   const stayNet = stayAndNetMinutes(periods, settings, mode);
+  const ui = fillDayUiState(date, periods, touched);
+  const dateOk = Boolean(date) && !isFutureDate(date, today);
+  const canSave = mode === "periodo" ? dateOk && ui.canSave : true;
+
+  const markTouched = (index: number, field: "entrada" | "saida") => {
+    setTouched((cur) => cur.map((t, j) => (j === index ? { ...t, [field]: true } : t)));
+  };
 
   const submit = async () => {
     if (inflight.current || busy) return;
+    if (mode === "periodo" && !canSave) return;
     if (!date) return toast.show("Informe a data.", "error");
     if (isFutureDate(date, today)) return toast.show(FUTURE_DATE_ERROR, "error");
-    for (const p of periods) {
-      if (!p.entrada || !p.saida) {
-        return toast.show("Informe entrada e saída de cada período.", "error");
-      }
-      if (toMinutes(p.saida) <= toMinutes(p.entrada)) {
-        return toast.show("A hora de saída deve ser depois da entrada.", "error");
+    if (mode === "periodo") {
+      const v = validateFillDaySave(date, periods);
+      if (!v.ok) return;
+    } else {
+      for (const p of periods) {
+        if (!p.entrada || !p.saida) {
+          return toast.show("Informe entrada e saída de cada período.", "error");
+        }
+        if (toMinutes(p.saida) <= toMinutes(p.entrada)) {
+          return toast.show("A hora de saída deve ser depois da entrada.", "error");
+        }
       }
     }
     inflight.current = true;
@@ -118,7 +134,12 @@ export function ManualEntryModal({ open, onClose, initialDate, onSave }: Props) 
       footer={
         <>
           <Button variant="secondary" onClick={onClose}>Cancelar</Button>
-          <Button onClick={submit} loading={busy} disabled={busy}>
+          <Button
+            onClick={submit}
+            loading={busy}
+            disabled={busy || !canSave}
+            aria-disabled={busy || !canSave}
+          >
             <CalendarPlus size={15} /> Adicionar registros
           </Button>
         </>
@@ -143,53 +164,72 @@ export function ManualEntryModal({ open, onClose, initialDate, onSave }: Props) 
           <option value="intervalo">Intervalo / pausa</option>
         </Select>
 
-        {periods.map((p, i) => (
-          <div key={i} className="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
-            <div className="mb-2 flex items-center justify-between">
-              <p className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400">
-                {mode === "intervalo" ? `Intervalo ${i + 1}` : `Período ${i + 1}`}
-              </p>
-              {periods.length > 1 && (
-                <button
-                  type="button"
-                  className="text-slate-400 hover:text-rose-500 cursor-pointer"
-                  onClick={() => setPeriods((cur) => cur.filter((_, j) => j !== i))}
-                  aria-label="Remover período"
-                >
-                  <Trash2 size={14} />
-                </button>
-              )}
+        {periods.map((p, i) => {
+          const errs = mode === "periodo" ? (ui.periodErrors[i] ?? {}) : {};
+          return (
+            <div key={i} className="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
+              <div className="mb-2 flex items-center justify-between">
+                <p className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400">
+                  {mode === "intervalo" ? `Intervalo ${i + 1}` : `Período ${i + 1}`}
+                </p>
+                {periods.length > 1 && (
+                  <button
+                    type="button"
+                    className="text-slate-400 hover:text-rose-500 cursor-pointer"
+                    onClick={() => {
+                      setPeriods((cur) => cur.filter((_, j) => j !== i));
+                      setTouched((cur) => cur.filter((_, j) => j !== i));
+                    }}
+                    aria-label="Remover período"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                )}
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <Input
+                  id={`manual-entrada-${i}`}
+                  label={mode === "intervalo" ? "Saída para intervalo" : "Hora de entrada"}
+                  type="time"
+                  value={p.entrada}
+                  error={errs.entrada}
+                  aria-invalid={!!errs.entrada}
+                  onBlur={() => markTouched(i, "entrada")}
+                  onChange={(e) => {
+                    markTouched(i, "entrada");
+                    setPeriods((cur) => cur.map((x, j) => (j === i ? { ...x, entrada: e.target.value } : x)));
+                  }}
+                />
+                <Input
+                  id={`manual-saida-${i}`}
+                  label={mode === "intervalo" ? "Retorno do intervalo" : "Hora de saída"}
+                  type="time"
+                  value={p.saida}
+                  error={errs.saida}
+                  aria-invalid={!!errs.saida}
+                  onBlur={() => markTouched(i, "saida")}
+                  onChange={(e) => {
+                    markTouched(i, "saida");
+                    setPeriods((cur) => cur.map((x, j) => (j === i ? { ...x, saida: e.target.value } : x)));
+                  }}
+                />
+              </div>
             </div>
-            <div className="grid grid-cols-2 gap-4">
-              <Input
-                label={mode === "intervalo" ? "Saída para intervalo" : "Hora de entrada"}
-                type="time"
-                value={mode === "intervalo" ? p.entrada : p.entrada}
-                onChange={(e) =>
-                  setPeriods((cur) => cur.map((x, j) => (j === i ? { ...x, entrada: e.target.value } : x)))
-                }
-              />
-              <Input
-                label={mode === "intervalo" ? "Retorno do intervalo" : "Hora de saída"}
-                type="time"
-                value={p.saida}
-                onChange={(e) =>
-                  setPeriods((cur) => cur.map((x, j) => (j === i ? { ...x, saida: e.target.value } : x)))
-                }
-              />
-            </div>
-          </div>
-        ))}
+          );
+        })}
 
         <button
           type="button"
-          onClick={() => setPeriods((cur) => [...cur, { entrada: "", saida: "" }])}
+          onClick={() => {
+            setPeriods((cur) => [...cur, { entrada: "", saida: "" }]);
+            setTouched((cur) => [...cur, { entrada: false, saida: false }]);
+          }}
           className="inline-flex items-center gap-1.5 text-xs font-bold text-indigo-600 hover:underline cursor-pointer"
         >
           <Plus size={14} /> {mode === "intervalo" ? "Registrar intervalo" : "Adicionar período"}
         </button>
 
-        {stayNet.stay > 0 && mode === "periodo" && (
+        {canSave && stayNet.stay > 0 && mode === "periodo" && (
           <div className="text-xs text-slate-500">
             <p>Permanência neste período: <b className="text-slate-700">{formatMinutes(stayNet.stay)}</b></p>
             {stayNet.autoBreak > 0 && (
@@ -202,6 +242,12 @@ export function ManualEntryModal({ open, onClose, initialDate, onSave }: Props) 
           <p className="text-xs text-slate-500">
             Duração do intervalo: <b className="text-slate-700">{formatMinutes(duration)}</b>
           </p>
+        )}
+
+        {mode === "periodo" && ui.formError && (
+          <div role="alert" className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2.5 text-xs font-medium text-amber-800">
+            {ui.formError}
+          </div>
         )}
 
         <Input
