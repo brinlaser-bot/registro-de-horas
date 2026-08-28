@@ -20,6 +20,7 @@ import {
 } from "@/lib/periods";
 import { companyDayContext, companyDeficitContribution } from "@/lib/company-calendar";
 import { pendingPunchDates } from "@/lib/pending-punches";
+import { isMissingExpectedRecord } from "@/lib/missing-records";
 import { buildDebtDays } from "@/lib/debt";
 import { Badge, Button, Card, EmptyState, Skeleton, StatCard } from "@/components/ui";
 import { StackedPeriodChart } from "@/components/stacked-period-chart";
@@ -42,6 +43,7 @@ interface DayRow {
   /** Falta do dia: \"efetiva\" vale (saldo/déficit); \"prevista\" mascarada. */
   faltaStatus: "efetiva" | "prevista" | null;
   absence: Absence | undefined;
+  missingExpected: boolean;
 }
 
 export default function ResumoPage() {
@@ -62,6 +64,7 @@ export default function ResumoPage() {
         const faltaStatus = falta ? faltaStatusOf(date, todayStr) : null;
         const realized = isRealizedDate(date, todayStr);
         const idleToday = date === todayStr && ctx.day.empty && faltaStatus !== "efetiva" && !absence && cctx.effectiveExpected > 0;
+        const missingExpected = isMissingExpectedRecord(date, todayStr, cctx, faltas);
         return {
           date,
           workedMinutes: realized ? ctx.day.workedMinutes : 0,
@@ -75,6 +78,8 @@ export default function ResumoPage() {
               : "empty"
             : idleToday
               ? "idle"
+            : missingExpected
+              ? "empty"
             : faltaStatus === "efetiva"
             ? "falta"
             : absence
@@ -99,9 +104,11 @@ export default function ResumoPage() {
            * Visão geral e de Registros: falta efetiva conta (−jornada efetiva),
            * prevista é mascarada em 0, demais dias pelo agregador central. */
           balanceContribution: dayBalanceContribution(cctx, faltas, date, todayStr),
-          deficitContribution: date > todayStr || faltaStatus === "prevista" ? 0 : companyDeficitContribution(cctx),
+          deficitContribution:
+            missingExpected || date > todayStr || faltaStatus === "prevista" ? 0 : companyDeficitContribution(cctx),
           faltaStatus,
           absence,
+          missingExpected,
         };
       })
       .filter((d) => d.entryCount > 0 || d.eventLabel || !isWeekend(d.date));
@@ -174,6 +181,7 @@ export default function ResumoPage() {
       acordoDone: acordo.reduce((s, d) => s + d.concludedMinutes, 0),
       acordoPending: acordo.reduce((s, d) => s + d.remainingMinutes, 0),
       pendingPunches: pendingPunchDates(entries, settings, todayStr, period).length,
+      missingRecords: allDays.filter((d) => d.missingExpected).length,
     };
   }, [allDays, totals, entries, compensations, settings, period, absences, companyCalendars, faltas, todayStr]);
 
@@ -248,6 +256,17 @@ export default function ResumoPage() {
           </div>
         );
       })()}
+      {detailStats.missingRecords > 0 && (
+        <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3">
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-extrabold text-amber-800">Dias sem registro: {detailStats.missingRecords}</p>
+            <p className="mt-0.5 text-xs text-amber-700">Existem dias de expediente sem registro ou justificativa.</p>
+          </div>
+          <Link href="/registros?semRegistro=1">
+            <Button size="sm" variant="warning">Ver dias sem registro</Button>
+          </Link>
+        </div>
+      )}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <StatCard label="Dias com registro" value={totals.trackedDays} sub={`no período`} icon={<BarChart3 size={16} />} />
         <StatCard
@@ -304,6 +323,7 @@ export default function ResumoPage() {
               value={`${formatMinutes(detailStats.acordoTotal)} (feito ${formatMinutes(detailStats.acordoDone)} · falta ${formatMinutes(detailStats.acordoPending)})`}
             />
             <Detail label="Registros pendentes" value={String(detailStats.pendingPunches)} tone="text-amber-700" />
+            <Detail label="Dias sem registro" value={String(detailStats.missingRecords)} tone="text-amber-700" />
           </div>
         )}
       </div>
@@ -367,6 +387,8 @@ export default function ResumoPage() {
                         <Badge tone="indigo">Em andamento</Badge>
                       ) : d.status === "ok" ? (
                         <Badge tone="emerald">Ok</Badge>
+                      ) : d.missingExpected ? (
+                        <Badge tone="amber">Sem registro</Badge>
                       ) : (
                         <span className="text-xs text-slate-300">—</span>
                       )}

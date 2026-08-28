@@ -174,6 +174,12 @@ interface Props {
   workedInAbonoMinutes?: number;
   /** Detalhe visual do ABONO PARCIAL (sem nova regra financeira). */
   abonoParcial?: { abonoStart: string; abonoEnd: string; expectedRegular: number } | null;
+  /** Dia passado com jornada efetiva e zero batidas/justificativa — pendência operacional. */
+  missingExpected?: boolean;
+  /** Dia vazio sem alerta (folga, futuro, hoje não iniciado): card compacto. */
+  compact?: boolean;
+  /** Abre o fluxo existente de registrar falta (card Sem registro). */
+  onRegisterFalta?: () => void;
 }
 
 export function DayCard({
@@ -206,6 +212,9 @@ export function DayCard({
   abonadoHint,
   workedInAbonoMinutes,
   abonoParcial,
+  missingExpected,
+  compact,
+  onRegisterFalta,
 }: Props) {
   // Regra: todos os dias iniciam RECOLHIDOS — o usuário expande apenas o dia desejado.
   const [expanded, setExpanded] = useState(false);
@@ -380,11 +389,21 @@ export function DayCard({
   const breakChip = d.derivedBreak ?? predicted;
 
   return (
-    <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+    <section
+      className={`overflow-hidden rounded-2xl border ${
+        missingExpected
+          ? "border-amber-300 bg-amber-50/40 shadow-sm"
+          : compact
+            ? "border-slate-200/80 bg-white shadow-none"
+            : "border-slate-200 bg-white shadow-sm"
+      }`}
+    >
       {/* Cabeçalho */}
       <button
         onClick={() => setExpanded((v) => !v)}
-        className="flex w-full items-center gap-3 px-5 py-4 text-left cursor-pointer hover:bg-slate-50/70 transition-colors"
+        className={`flex w-full items-center gap-3 text-left cursor-pointer hover:bg-slate-50/70 transition-colors ${
+          compact || missingExpected ? "px-4 py-2.5" : "px-5 py-4"
+        }`}
       >
         <div className="min-w-0 flex-1">
           <p className="text-sm font-extrabold text-slate-900">
@@ -408,9 +427,11 @@ export function DayCard({
                 <span>{falta.status === "prevista" ? "Falta prevista" : "Falta"}</span>
               </Badge>
             ) : futureDay ? (
-              d.empty ? <Badge tone="slate">—</Badge> : <Badge tone="slate">Registro futuro</Badge>
+              d.empty ? <Badge tone="slate">Dia futuro</Badge> : <Badge tone="slate">Registro futuro</Badge>
             ) : isToday && d.empty && !falta ? (
               <Badge tone="slate">Jornada não iniciada</Badge>
+            ) : missingExpected ? (
+              <Badge tone="amber">⚠ Sem registro</Badge>
             ) : incompletePast ? (
               <Badge tone="amber">Registro incompleto</Badge>
             ) : inconsistent ? (
@@ -450,8 +471,12 @@ export function DayCard({
           </div>
         </div>
         <div className="shrink-0 text-right">
-          {punchPending ? (
+          {missingExpected ? (
+            <p className="text-xs font-extrabold uppercase tracking-wide text-amber-700">Sem registro</p>
+          ) : punchPending ? (
             <p className="text-xs font-bold text-amber-700">Pendente</p>
+          ) : compact && d.empty ? (
+            null
           ) : (
           <>
           <p className="text-lg font-extrabold tabular-nums text-slate-900">{formatMinutes(d.workedMinutes)}</p>
@@ -517,6 +542,22 @@ export function DayCard({
             </div>
           )}
 
+          {missingExpected && (
+            <div className="mb-3 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2.5 text-xs font-medium text-amber-800">
+              <p className="font-extrabold uppercase tracking-wide">⚠ Sem registro</p>
+              <p className="mt-0.5">Este dia tinha jornada prevista, mas não possui registros ou justificativa.</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <Button size="sm" onClick={() => { setShowAdd(true); setForm((f) => ({ ...f, time: nowTimeString() })); }}>
+                  <Plus size={13} /> Adicionar batida
+                </Button>
+                {onRegisterFalta && (
+                  <Button size="sm" variant="secondary" onClick={onRegisterFalta}>
+                    <Ban size={13} /> Registrar falta
+                  </Button>
+                )}
+              </div>
+            </div>
+          )}
           {incompletePast && (
             <div className="mb-3 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2.5 text-xs font-medium text-amber-800">
               <p className="font-extrabold uppercase tracking-wide">Registro incompleto</p>
@@ -698,8 +739,8 @@ export function DayCard({
             </div>
           )}
 
-          {/* Métricas — ocultas enquanto o dia não for finalizável */}
-          {!punchPending && (
+          {/* Métricas — ocultas enquanto o dia não for finalizável ou estiver sem registro */}
+          {!punchPending && !missingExpected && (
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <MiniStat
               label={futureDay ? "Registro previsto" : "Trabalhado"}
@@ -1118,7 +1159,7 @@ export function DayCard({
 
           {/* Rodapé explicativo do "No ponto" — em dia de Abono o card é
               SOMENTE INFORMATIVO e não exibe textos explicativos. */}
-          {!abonoDay && !punchPending && (
+          {!abonoDay && !punchPending && !missingExpected && (
             <p className="mt-3 text-[11px] text-slate-400">
               * "No ponto" é o total que pode ser lançado no sistema da empresa (limitado a{" "}
               {formatMinutes(settings.maxDailyMinutes)}/dia). Horas acima de 10h precisam ser realocadas

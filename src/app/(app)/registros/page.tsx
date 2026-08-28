@@ -17,7 +17,6 @@ import {
 import {
   absenceOnDate,
   dayContext,
-  type Absence,
 } from "@/lib/absences";
 import {
   companyDayBalanceView,
@@ -29,7 +28,6 @@ import {
   getNextPointPeriod,
   getPointPeriod,
   getPreviousPointPeriod,
-  listDaysBetween,
   periodLabel,
   sameAnnualCycle,
   type PointPeriod,
@@ -38,14 +36,15 @@ import { acordoViewOf, buildDebtDays, checkSourceOverflow, extraCapacityForDate 
 import { compensarObligationOnDate, isAbonadoDay } from "@/lib/compensar";
 import { dayBalanceContribution, effectiveFaltas, faltaOnDate, faltaStatusOf } from "@/lib/faltas";
 import { dayCreditView, excessReasonOnDate, hasEligibleSpecialExcessInCycle, shouldPromptExcessReason } from "@/lib/hour-bank";
+import { isMissingExpectedRecord, registrosTimelineDates } from "@/lib/missing-records";
 
-import type { CompKind, DayResult, WorkSettings } from "@/lib/types";
+import type { CompKind, WorkSettings } from "@/lib/types";
 import { DayCard } from "@/components/day-card";
 import { ManualEntryModal, type ManualPairData } from "@/components/manual-entry-modal";
 import { FaltaModal } from "@/components/falta-modal";
 import { ExcessReasonModal } from "@/components/excess-reason-modal";
 import { AllocateExcessModal } from "@/components/allocate-excess-modal";
-import { Badge, Button, Card, EmptyState, Skeleton } from "@/components/ui";
+import { Button, Card, EmptyState, Skeleton } from "@/components/ui";
 import { useToast } from "@/components/toast";
 
 interface RangeSummary {
@@ -102,7 +101,9 @@ function RegistrosBody() {
   const [reasonDate, setReasonDate] = useState<string | null>(null);
   const [allocateDate, setAllocateDate] = useState<string | null>(null);
   const [allocateFromDeficit, setAllocateFromDeficit] = useState<{ date: string; kind?: CompKind } | null>(null);
+  const [faltaInitialDate, setFaltaInitialDate] = useState<string | null>(null);
   const wantPending = searchParams.get("pendentes") === "1";
+  const wantMissing = searchParams.get("semRegistro") === "1";
 
   // Faltas que JÁ valem (date <= hoje) — previstas não geram déficit/saldo
   const effectiveFaltaList = useMemo(() => effectiveFaltas(faltas, todayStr), [faltas, todayStr]);
@@ -124,31 +125,24 @@ function RegistrosBody() {
     [entries, compensations, absences, companyCalendars, settings, excessReasons, todayStr],
   );
 
-  // Dias do intervalo: com batidas OU cobertos por ausência
+  // Linha do tempo completa: UM card por data do intervalo, mesmo sem batidas.
   const days = useMemo(() => {
-    const dates = new Set<string>();
-    for (const e of entries) {
-      if (e.date >= range.from && e.date <= range.to) dates.add(e.date);
-    }
-    for (const a of absences) {
-      for (const d of listDaysBetween(a.startDate, a.endDate)) {
-        if (d >= range.from && d <= range.to) dates.add(d);
-      }
-    }
-    for (const e of (companyCalendars ?? []).flatMap((c) => c.entries)) {
-      if (e.date >= range.from && e.date <= range.to) dates.add(e.date);
-    }
-    // Faltas registradas (efetivas E previstas) também ganham card no intervalo
-    for (const f of faltas) {
-      if (f.date >= range.from && f.date <= range.to) dates.add(f.date);
-    }
-    return [...dates]
+    return registrosTimelineDates(range)
       .sort((a, b) => b.localeCompare(a))
       .map((date) => {
         const cctx = companyDayContext(date, entries, absences, companyCalendars, settings, date === todayStr ? nowMinutes : undefined);
         const baseView = companyDayBalanceView(cctx);
         const falta = faltaOnDate(faltas, date);
         const faltaStatus = falta ? faltaStatusOf(date, todayStr) : null;
+        const missingExpected = isMissingExpectedRecord(date, todayStr, cctx, faltas);
+        const empty = cctx.ctx.day.empty;
+        const compact =
+          empty &&
+          !missingExpected &&
+          !falta &&
+          !cctx.ctx.absence &&
+          !cctx.ctx.day.financialPending &&
+          cctx.ctx.day.consistent;
         return {
           date,
           ctx: cctx.ctx,
@@ -158,9 +152,10 @@ function RegistrosBody() {
             : undefined,
           /* View model central: card e resumo consomem SEMPRE a resolução central
            * (calendário/folga/evento) — nunca o saldo bruto de computeDay/dayContext.
-           * Falta PREVISTA: saldo/déficit mascarados em 0 até a data chegar. */
+           * Falta PREVISTA: saldo/déficit mascarados em 0 até a data chegar.
+           * SEM REGISTRO: pendência operacional — não inventa déficit/saldo. */
           balanceView:
-            date > todayStr
+            date > todayStr || missingExpected
               ? { ...baseView, adjustedBalance: 0, adjustedDeficit: 0 }
               : faltaStatus === "prevista"
               ? { ...baseView, adjustedBalance: 0, adjustedDeficit: 0 }
@@ -177,8 +172,11 @@ function RegistrosBody() {
           // Contribuição CENTRAL (dayBalanceContribution) — MESMA soma da
           // Visão geral e do Resumo do período (falta efetiva conta; prevista 0).
           balanceContribution: dayBalanceContribution(cctx, faltas, date, todayStr),
-          deficitContribution: date > todayStr || faltaStatus === "prevista" ? 0 : companyDeficitContribution(cctx),
+          deficitContribution:
+            missingExpected || date > todayStr || faltaStatus === "prevista" ? 0 : companyDeficitContribution(cctx),
           absence: absenceOnDate(absences, date),
+          missingExpected,
+          compact,
         };
       });
   }, [entries, absences, companyCalendars, faltas, settings, range, todayStr, nowMinutes]);
@@ -250,11 +248,18 @@ function RegistrosBody() {
   }, [days, entries, compensations, absences, companyCalendars, faltas, effectiveFaltaList, settings, range, todayStr]);
 
   const pendingCount = days.filter((d) => d.displayDay.financialPending || !d.displayDay.consistent).length;
-  const pendingOnly = wantPending && pendingCount > 0;
+  const missingCount = days.filter((d) => d.missingExpected).length;
+  const pendingOnly = wantPending && !wantMissing && pendingCount > 0;
+  const missingOnly = wantMissing && !wantPending && missingCount > 0;
 
   useEffect(() => {
+    if (wantPending && wantMissing) {
+      router.replace("/registros?semRegistro=1");
+      return;
+    }
     if (wantPending && pendingCount === 0) router.replace("/registros");
-  }, [wantPending, pendingCount, router]);
+    if (wantMissing && missingCount === 0) router.replace("/registros");
+  }, [wantPending, wantMissing, pendingCount, missingCount, router]);
 
   /* ── Handlers (preservam comportamento validado) ── */
 
@@ -472,6 +477,7 @@ function RegistrosBody() {
     const from = queryDraft.from;
     const to = queryDraft.to;
     if (wantPending) router.replace("/registros");
+    if (wantMissing) router.replace("/registros");
     if (!from && !to) {
       setQuery(null);
       return;
@@ -541,7 +547,7 @@ function RegistrosBody() {
           <Button size="sm" onClick={() => setManualOpen(true)}>
             Lançamento manual
           </Button>
-          <Button variant="secondary" size="sm" onClick={() => setFaltaOpen(true)}>
+          <Button variant="secondary" size="sm" onClick={() => { setFaltaInitialDate(null); setFaltaOpen(true); }}>
             <Ban size={14} /> Registrar falta
           </Button>
         </div>
@@ -589,6 +595,7 @@ function RegistrosBody() {
             <span>Saldo <b className={saldo >= 0 ? "text-emerald-600" : "text-rose-600"}>{saldo >= 0 ? "+" : ""}{formatMinutes(saldo)}</b></span>
             <span>Dias com registro <b className="text-slate-900">{tracked}</b></span>
             <span>Pendentes <b className="text-amber-700">{pendingCount}</b></span>
+            <span>Sem registro <b className="text-amber-700">{missingCount}</b></span>
           </div>
         );
       })()}
@@ -619,6 +626,32 @@ function RegistrosBody() {
         </div>
       )}
 
+      {missingCount > 0 && (
+        <div className="flex flex-wrap items-center gap-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-2.5">
+          {missingOnly ? (
+            <>
+              <p className="min-w-0 flex-1 text-xs font-bold text-amber-800">
+                ⚠ Dias sem registro: {missingCount} · filtro aplicado
+                <span className="mt-0.5 block font-medium">Exibindo somente os dias de expediente sem registro ou justificativa.</span>
+              </p>
+              <Button size="sm" variant="warning" onClick={() => router.replace("/registros")}>
+                Voltar aos registros do período
+              </Button>
+            </>
+          ) : (
+            <>
+              <p className="min-w-0 flex-1 text-xs font-bold text-amber-800">
+                ⚠ Dias sem registro: {missingCount}
+                <span className="mt-0.5 block font-medium">Existem dias de expediente já encerrados sem registro ou justificativa.</span>
+              </p>
+              <Button size="sm" variant="warning" onClick={() => router.replace("/registros?semRegistro=1")}>
+                Ver dias sem registro
+              </Button>
+            </>
+          )}
+        </div>
+      )}
+
       {/* Dias — todos recolhidos por padrão */}
       {days.length === 0 ? (
         <EmptyState
@@ -627,11 +660,13 @@ function RegistrosBody() {
           description="Use o lançamento manual para incluir entradas e saídas de dias anteriores."
         />
       ) : (
-        <div className="space-y-4">
+        <div className={missingOnly || pendingOnly ? "space-y-4" : "space-y-2"}>
           {(pendingOnly
             ? days.filter((d) => d.displayDay.financialPending || !d.displayDay.consistent)
+            : missingOnly
+            ? days.filter((d) => d.missingExpected)
             : days
-          ).map(({ date, balanceView, displayDay, absence, calendarLabel, falta, workedInAbonoMinutes, abonoParcial }) => (
+          ).map(({ date, balanceView, displayDay, absence, calendarLabel, falta, workedInAbonoMinutes, abonoParcial, missingExpected, compact }) => (
             <DayCard
               key={date}
               result={displayDay}
@@ -643,6 +678,16 @@ function RegistrosBody() {
               absence={absence}
               calendarLabel={calendarLabel}
               falta={falta}
+              missingExpected={missingExpected}
+              compact={compact}
+              onRegisterFalta={
+                missingExpected
+                  ? () => {
+                      setFaltaInitialDate(date);
+                      setFaltaOpen(true);
+                    }
+                  : undefined
+              }
               effectiveExpected={balanceView.effectiveExpected}
               balanceView={balanceView}
               shortcuts={shortcutsByDate.get(date)}
@@ -755,7 +800,11 @@ function RegistrosBody() {
       )}
       <FaltaModal
         open={faltaOpen}
-        onClose={() => setFaltaOpen(false)}
+        onClose={() => {
+          setFaltaOpen(false);
+          setFaltaInitialDate(null);
+        }}
+        initialDate={faltaInitialDate ?? todayStr}
         entries={entries}
         absences={absences}
         companyCalendars={companyCalendars}

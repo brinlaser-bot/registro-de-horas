@@ -18,6 +18,8 @@ interface Props {
   settings: WorkSettings;
   faltas: Falta[];
   todayStr: string;
+  /** Data pré-preenchida (ex.: card Sem registro). */
+  initialDate?: string;
   onSave: (date: string) => Promise<void>;
 }
 
@@ -35,14 +37,15 @@ export function FaltaModal({
   settings,
   faltas,
   todayStr,
+  initialDate,
   onSave,
 }: Props) {
-  const [date, setDate] = useState(todayStr);
+  const [date, setDate] = useState(initialDate ?? todayStr);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    if (open) setDate(todayStr);
-  }, [open, todayStr]);
+    if (open) setDate(initialDate ?? todayStr);
+  }, [open, todayStr, initialDate]);
 
   const gate = canRegisterFalta(date, entries, absences, companyCalendars, settings, faltas);
   const jornada = gate.jornadaMinutes ?? 0;
