@@ -375,7 +375,7 @@ export function DayCard({
   const showDeficitFollow =
     !punchPending && deficitOriginal > 0 && !d.open && (!d.empty || !!falta) && !showSplit;
   const predicted = !punchPending && d.open
-    ? predictedBreakWindow(d.entries, settings, regularExpected)
+    ? predictedBreakWindow(d.realizedEntries?.length ? d.realizedEntries : d.entries, settings, regularExpected)
     : null;
   const breakChip = d.derivedBreak ?? predicted;
 
@@ -520,7 +520,7 @@ export function DayCard({
           {incompletePast && (
             <div className="mb-3 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2.5 text-xs font-medium text-amber-800">
               <p className="font-extrabold uppercase tracking-wide">Registro incompleto</p>
-              <p className="mt-0.5">Há uma entrada sem saída correspondente. Corrija os registros para que este dia possa ser calculado.</p>
+              <p className="mt-0.5">Há uma entrada sem a saída correspondente. Corrija as batidas para finalizar o registro.</p>
               <Button size="sm" className="mt-2" onClick={() => setCorrectOpen(true)}>
                 <Wrench size={13} /> Corrigir registros
               </Button>
@@ -529,7 +529,7 @@ export function DayCard({
           {inconsistent && (
             <div className="mb-3 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2.5 text-xs font-medium text-amber-800">
               <p className="font-extrabold uppercase tracking-wide">Registro inconsistente</p>
-              <p className="mt-0.5">A sequência de registros deste dia não é válida. Corrija as batidas para que o dia possa ser calculado e registrado.</p>
+              <p className="mt-0.5">A sequência de registros deste dia não está correta. Corrija as batidas para finalizar o registro.</p>
               <Button size="sm" className="mt-2" onClick={() => setCorrectOpen(true)}>
                 <Wrench size={13} /> Corrigir registros
               </Button>
@@ -972,14 +972,23 @@ export function DayCard({
           {pendingComp && (
             <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2.5">
               <CheckCircle2 size={16} className="text-indigo-500 shrink-0" />
-              <p className="flex-1 text-xs font-medium text-indigo-700">
-                Compensação programada para hoje: <b>−{formatMinutes(pendingComp.minutes)}</b>{" "}
-                (de {formatDateShortBR(pendingComp.sourceDate)})
-                {pendingComp.note ? ` · ${pendingComp.note}` : ""}
-              </p>
-              <Button variant="secondary" size="sm" onClick={() => finishComp(pendingComp.id)}>
-                <CheckCircle2 size={13} /> Concluir compensação
-              </Button>
+              {d.canFinalizeFinancialDay && !punchPending ? (
+                <>
+                  <p className="flex-1 text-xs font-medium text-indigo-700">
+                    Compensação programada para hoje: <b>−{formatMinutes(pendingComp.minutes)}</b>{" "}
+                    (de {formatDateShortBR(pendingComp.sourceDate)})
+                    {pendingComp.note ? ` · ${pendingComp.note}` : ""}
+                  </p>
+                  <Button variant="secondary" size="sm" onClick={() => finishComp(pendingComp.id)}>
+                    <CheckCircle2 size={13} /> Concluir compensação
+                  </Button>
+                </>
+              ) : (
+                <p className="flex-1 text-xs font-medium text-indigo-700">
+                  Compensação prevista: <b>{formatMinutes(pendingComp.minutes)}</b>
+                  {" · "}Corrija os registros deste dia para verificar e concluir a compensação.
+                </p>
+              )}
             </div>
           )}
 
@@ -1044,6 +1053,9 @@ export function DayCard({
                   <span className={`h-2 w-2 shrink-0 rounded-full ${e.type === "entrada" ? "bg-emerald-500" : "bg-indigo-500"}`} />
                   <span className="shrink-0 text-sm font-extrabold tabular-nums text-slate-900">{e.time}</span>
                   <span className="shrink-0 whitespace-nowrap text-xs font-semibold text-slate-600">{e.type === "entrada" ? "Entrada" : "Saída"}</span>
+                  {(d.plannedEntries ?? []).some((p) => p.id === e.id) && (
+                    <Badge tone="sky" className="!px-1.5 !py-0 text-[9px]">Prevista</Badge>
+                  )}
                   <div className="ml-auto flex shrink-0 items-center opacity-100 sm:opacity-0 sm:transition-opacity sm:group-hover:opacity-100">
                     <button onClick={() => startEdit(e)} className="rounded-md p-1 text-slate-400 hover:bg-white hover:text-slate-700 cursor-pointer sm:p-1.5" aria-label="Editar">
                       <Pencil size={13} />
@@ -1062,15 +1074,6 @@ export function DayCard({
             {!futureDay && !abonoDay && (showAdd ? (
               <div className="flex w-full min-w-0 flex-wrap items-end gap-2 rounded-xl border border-dashed border-slate-300 bg-white p-3">
                 <Input label="Horário" type="time" className="w-32" value={form.time} onChange={(ev) => setForm({ ...form, time: ev.target.value, type: suggestedPunchTypeAt(d.entries, ev.target.value) })} />
-                <Select
-                  label="Tipo (pela posição)"
-                  className="w-36"
-                  value={suggestedPunchTypeAt(d.entries, form.time)}
-                  onChange={(ev) => setForm({ ...form, type: ev.target.value as EntryType })}
-                >
-                  <option value="entrada">Entrada</option>
-                  <option value="saida">Saída</option>
-                </Select>
                 <Input label="Observação (opcional)" className="min-w-[160px] flex-1" value={form.note} onChange={(ev) => setForm({ ...form, note: ev.target.value })} />
                 <Button size="sm" loading={busy} onClick={() => add()}>
                   <Plus size={13} /> Adicionar

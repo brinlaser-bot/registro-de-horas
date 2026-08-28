@@ -1,5 +1,5 @@
 // Matemática de dívida de horas: abatimento fracionado + sugestões inteligentes.
-import { computeDay, expectedMinutesOf, formatDateBR, formatMinutes, isRealizedDate } from "./time";
+import { computeDay, expectedMinutesOf, formatDateBR, formatMinutes, isRealizedDate, nowMinutesLocal, todayString } from "./time";
 import { type Absence } from "./absences";
 import { calendarCycleOf, companyDayContext, type CompanyCalendars } from "./company-calendar";
 import { compensarObligationOnDate } from "./compensar";
@@ -524,8 +524,6 @@ export function canCompleteComp(
   opts?: CentralDayOpts,
 ): CompletionCheck {
   const kind = kindOf(comp);
-  if (kind === "excedente") return { ok: true };
-
   if (today < comp.targetDate) {
     return {
       ok: false,
@@ -534,20 +532,23 @@ export function canCompleteComp(
     };
   }
 
-  // §30 CONFIRMAR QUITAÇÃO somente com jornada CONSOLIDADA: com entrada ainda
-  // aberta no dia de destino, a capacidade está provisória — horas ainda
-  // correndo não podem concluir compensação (mostrar progresso, não quitar).
   const targetDay = computeDay(
     entries.filter((e) => e.date === comp.targetDate),
     settings,
+    undefined,
+    { date: today, minutes: today === todayString() ? nowMinutesLocal() : 23 * 60 + 59 },
   );
-  if (targetDay.open) {
+  if (targetDay.entries.length > 0 && (!targetDay.canFinalizeFinancialDay || targetDay.open || targetDay.financialPending)) {
+    const needsCorrection = !targetDay.consistent || targetDay.financialPending;
     return {
       ok: false,
       reason: "day-open",
-      error: "A jornada do dia ainda está em andamento — registre a saída para confirmar a quitação.",
+      error: needsCorrection
+        ? "Corrija os registros deste dia para verificar e concluir a compensação."
+        : "A jornada do dia ainda está em andamento — registre a saída para confirmar a quitação.",
     };
   }
+  if (kind === "excedente") return { ok: true };
 
   const actualExtra = actualExtraForDate(comp.targetDate, entries, settings, opts);
   const committed = sumMinutes(

@@ -1,8 +1,8 @@
 "use client";
 
 import { Suspense, useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "next/navigation";
-import { Ban, CalendarClock, ChevronLeft, ChevronRight, Clock3, Search, X } from "lucide-react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Ban, ChevronLeft, ChevronRight, Clock3, Search, X } from "lucide-react";
 import { actions, getAppData, settingsOf, useAppData, useIsClient } from "@/lib/store";
 import {
   computeDay,
@@ -85,6 +85,7 @@ export default function RegistrosPage() {
 function RegistrosBody() {
   const toast = useToast();
   const mounted = useIsClient();
+  const router = useRouter();
   const searchParams = useSearchParams();
   const { user, entries, compensations, absences, companyCalendars, faltas, excessReasons } = useAppData();
   const todayStr = todayString();
@@ -101,7 +102,7 @@ function RegistrosBody() {
   const [reasonDate, setReasonDate] = useState<string | null>(null);
   const [allocateDate, setAllocateDate] = useState<string | null>(null);
   const [allocateFromDeficit, setAllocateFromDeficit] = useState<{ date: string; kind?: CompKind } | null>(null);
-  const [pendingOnly, setPendingOnly] = useState(() => searchParams.get("pendentes") === "1");
+  const wantPending = searchParams.get("pendentes") === "1";
 
   // Faltas que JÁ valem (date <= hoje) — previstas não geram déficit/saldo
   const effectiveFaltaList = useMemo(() => effectiveFaltas(faltas, todayStr), [faltas, todayStr]);
@@ -247,6 +248,13 @@ function RegistrosBody() {
 
     return [...byCycle.values()].sort((a, b) => a.cycle.localeCompare(b.cycle));
   }, [days, entries, compensations, absences, companyCalendars, faltas, effectiveFaltaList, settings, range, todayStr]);
+
+  const pendingCount = days.filter((d) => d.displayDay.financialPending || !d.displayDay.consistent).length;
+  const pendingOnly = wantPending && pendingCount > 0;
+
+  useEffect(() => {
+    if (wantPending && pendingCount === 0) router.replace("/registros");
+  }, [wantPending, pendingCount, router]);
 
   /* ── Handlers (preservam comportamento validado) ── */
 
@@ -463,6 +471,7 @@ function RegistrosBody() {
   const runQuery = () => {
     const from = queryDraft.from;
     const to = queryDraft.to;
+    if (wantPending) router.replace("/registros");
     if (!from && !to) {
       setQuery(null);
       return;
@@ -565,65 +574,49 @@ function RegistrosBody() {
           </p>
         </div>
       </div>
-      {pendingOnly && (
-        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-amber-300 bg-amber-50 px-4 py-2.5">
-          <p className="text-xs font-bold text-amber-800">Filtro: registros pendentes</p>
-          <Button size="sm" variant="ghost" onClick={() => setPendingOnly(false)}>Ver todos os registros</Button>
-        </div>
-      )}
-      {!pendingOnly && days.some((d) => d.displayDay.financialPending) && (
-        <Button size="sm" variant="secondary" onClick={() => setPendingOnly(true)}>
-          Ver pendências ({days.filter((d) => d.displayDay.financialPending).length})
-        </Button>
-      )}
-
-      {/* Resumo do intervalo — agrupado por ciclo anual */}
-      {summaries.length > 0 && (
-        <Card
-          title={query ? "Resumo do intervalo consultado" : "Resumo do período"}
-          subtitle={
-            summaries.length > 1
-              ? "Intervalo atravessa ciclos anuais — as pendências NÃO são transferíveis entre ciclos."
-              : undefined
-          }
-        >
-          <div className="space-y-4">
-            {summaries.map((s) => (
-              <div key={s.cycle} className="rounded-xl border border-slate-200 bg-slate-50/60 p-3">
-                {summaries.length > 1 && (
-                  <p className="mb-2 text-xs font-extrabold uppercase tracking-wide text-slate-500">
-                    Ciclo anual {s.cycle}
-                  </p>
-                )}
-                <div className="grid grid-cols-2 gap-2 text-xs text-slate-600 sm:grid-cols-3 lg:grid-cols-4">
-                  <Sum label="Dias trabalhados" value={String(s.workedDays)} />
-                  <Sum label="Horas trabalhadas" value={formatMinutes(s.workedMinutes)} />
-                  <Sum label="No ponto" value={formatMinutes(s.registrableMinutes)} />
-                  <Sum
-                    label="Saldo"
-                    value={`${s.balanceMinutes >= 0 ? "+" : ""}${formatMinutes(s.balanceMinutes)}`}
-                    tone={s.balanceMinutes >= 0 ? "text-emerald-600" : "text-rose-600"}
-                  />
-                  <Sum label="Excedentes" value={formatMinutes(s.excessMinutes)} />
-                  <Sum label="Déficit" value={formatMinutes(s.deficitMinutes)} />
-                  <Sum label="Horas compensadas" value={formatMinutes(s.compensatedMinutes)} />
-                  <Sum label="Compensações pendentes" value={formatMinutes(s.pendingCompMinutes)} />
-                  <Sum label="Férias (dias)" value={String(s.vacationDays)} />
-                  <Sum label="Saúde (dias)" value={String(s.healthDays)} />
-                  <Sum label="Dispensados (dias)" value={String(s.waivedDays)} />
-                  <Sum label="Faltas (dias)" value={String(s.faltaDays)} />
-                  {s.faltaPrevistaDays > 0 && (
-                    <Sum label="Faltas previstas" value={String(s.faltaPrevistaDays)} />
-                  )}
-                  <Sum
-                    label="Acordo a compensar"
-                    value={`${formatMinutes(s.acordoTotal)} (feito ${formatMinutes(s.acordoDone)} · falta ${formatMinutes(s.acordoPending)})`}
-                  />
-                </div>
-              </div>
-            ))}
+      {(() => {
+        const saldo = summaries.reduce((s, x) => s + x.balanceMinutes, 0);
+        const tracked = summaries.reduce((s, x) => s + x.workedDays, 0);
+        return (
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-semibold text-slate-600">
+            <span className="font-extrabold text-slate-800">
+              {query
+                ? query.from === query.to
+                  ? `Consulta ${formatDateShortBR(query.from)}`
+                  : `Consulta ${formatDateShortBR(query.from)} → ${formatDateShortBR(query.to)}`
+                : `Período ${periodLabel(period)}`}
+            </span>
+            <span>Saldo <b className={saldo >= 0 ? "text-emerald-600" : "text-rose-600"}>{saldo >= 0 ? "+" : ""}{formatMinutes(saldo)}</b></span>
+            <span>Dias com registro <b className="text-slate-900">{tracked}</b></span>
+            <span>Pendentes <b className="text-amber-700">{pendingCount}</b></span>
           </div>
-        </Card>
+        );
+      })()}
+
+      {pendingCount > 0 && (
+        <div className="sticky top-16 z-20 flex flex-wrap items-center gap-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-2.5 shadow-sm">
+          {pendingOnly ? (
+            <>
+              <p className="min-w-0 flex-1 text-xs font-bold text-amber-800">
+                ⚠ Registros pendentes: {pendingCount} · filtro aplicado
+                <span className="mt-0.5 block font-medium">Exibindo somente os registros que precisam de correção.</span>
+              </p>
+              <Button size="sm" variant="warning" onClick={() => router.replace("/registros")}>
+                Voltar aos registros do período
+              </Button>
+            </>
+          ) : (
+            <>
+              <p className="min-w-0 flex-1 text-xs font-bold text-amber-800">
+                ⚠ Registros pendentes: {pendingCount}
+                <span className="mt-0.5 block font-medium">Existem dias que precisam de correção antes do saldo ser definitivo.</span>
+              </p>
+              <Button size="sm" variant="warning" onClick={() => router.replace("/registros?pendentes=1")}>
+                Ver pendências
+              </Button>
+            </>
+          )}
+        </div>
       )}
 
       {/* Dias — todos recolhidos por padrão */}
@@ -636,7 +629,7 @@ function RegistrosBody() {
       ) : (
         <div className="space-y-4">
           {(pendingOnly
-            ? days.filter((d) => d.displayDay.financialPending)
+            ? days.filter((d) => d.displayDay.financialPending || !d.displayDay.consistent)
             : days
           ).map(({ date, balanceView, displayDay, absence, calendarLabel, falta, workedInAbonoMinutes, abonoParcial }) => (
             <DayCard
@@ -771,15 +764,6 @@ function RegistrosBody() {
         todayStr={todayStr}
         onSave={registerFalta}
       />
-    </div>
-  );
-}
-
-function Sum({ label, value, tone }: { label: string; value: string; tone?: string }) {
-  return (
-    <div className="rounded-lg bg-white px-2.5 py-1.5 ring-1 ring-inset ring-slate-200">
-      <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">{label}</p>
-      <p className={`font-extrabold tabular-nums ${tone ?? "text-slate-800"}`}>{value}</p>
     </div>
   );
 }

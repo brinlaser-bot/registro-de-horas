@@ -511,7 +511,7 @@ export default function DashboardPage() {
               <p className="text-sm font-extrabold text-amber-800">⚠ Registros pendentes: {nPending}</p>
               <p className="mt-0.5 text-xs text-amber-700">Existem dias que precisam de correção antes do saldo ser definitivo.</p>
               <Link href="/registros?pendentes=1">
-                <Button size="sm" className="mt-2" variant="secondary">Ver pendências</Button>
+                <Button size="sm" className="mt-2" variant="warning">Ver pendências</Button>
               </Link>
             </div>
           );
@@ -686,9 +686,7 @@ export default function DashboardPage() {
                   </Badge>
                   {(() => {
                     const isExtra = usesHourExtra(kindOf(c));
-                    const check = isExtra
-                      ? canCompleteComp(c, entries, compensations, settings, todayStr, { companyCalendars })
-                      : { ok: true };
+                    const check = canCompleteComp(c, entries, compensations, settings, todayStr, { companyCalendars });
                     return (
                       <Button
                         size="sm"

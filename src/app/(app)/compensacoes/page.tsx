@@ -383,7 +383,7 @@ export default function CompensacoesPage() {
     const k = kindOf(c);
     const isExtra = usesHourExtra(k);
     const check =
-      c.status === "pendente" && isExtra
+      c.status === "pendente"
         ? canCompleteComp(c, entries, compensations, settings, todayStr, { companyCalendars })
         : { ok: true as const };
     return (
@@ -477,7 +477,7 @@ export default function CompensacoesPage() {
                     <Clock3 size={13} /> Registrar parcial ({formatMinutes(future.realizedMinutes)})
                   </Button>
                 )}
-                {isExtra && !check.ok && (
+                {!check.ok && (
                   <span className="mr-1 max-w-[240px] text-[11px] font-semibold text-amber-600">
                     {check.error}
                   </span>

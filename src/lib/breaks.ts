@@ -22,6 +22,30 @@ export function lunchDurationMinutes(settings: WorkSettings): number {
   return Math.max(0, toMinutes(settings.lunchEnd) - toMinutes(settings.lunchStart));
 }
 
+/** Permanência bruta vs trabalho líquido estimado no lançamento manual. */
+export function stayAndNetMinutes(
+  periods: Array<{ entrada: string; saida: string }>,
+  settings: WorkSettings,
+  mode: "periodo" | "intervalo",
+): { stay: number; autoBreak: number; net: number } {
+  const stay = periods.reduce((s, p) => {
+    if (!p.entrada || !p.saida) return s;
+    const d = toMinutes(p.saida) - toMinutes(p.entrada);
+    return d > 0 ? s + d : s;
+  }, 0);
+  if (mode === "intervalo" || stay <= 0) return { stay, autoBreak: 0, net: stay };
+  const filled = periods.filter((p) => p.entrada && p.saida && toMinutes(p.saida) > toMinutes(p.entrada));
+  if (filled.length !== 1) return { stay, autoBreak: 0, net: stay };
+  const brk = lunchDurationMinutes(settings);
+  if (!settings.autoDeductLunch || brk <= 0) return { stay, autoBreak: 0, net: stay };
+  const first = toMinutes(filled[0].entrada);
+  const last = toMinutes(filled[0].saida);
+  const ls = toMinutes(settings.lunchStart);
+  const le = toMinutes(settings.lunchEnd);
+  if (first <= ls && last >= le) return { stay, autoBreak: brk, net: Math.max(0, stay - brk) };
+  return { stay, autoBreak: 0, net: stay };
+}
+
 /** Marca visual do intervalo automático (NÃO é punch real). */
 export function derivedAutomaticBreak(
   analysis: PunchAnalysis,

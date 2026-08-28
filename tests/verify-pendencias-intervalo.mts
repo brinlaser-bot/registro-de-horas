@@ -75,8 +75,9 @@ check("B. passado 08E: incompleto, sem −8h, Banco inalterado", () => {
 
 check("C. hoje inconsistente: não é jornada encerrada; sem −4h", () => {
   const TODAY = "2026-08-28";
+  const clock = { date: TODAY, minutes: 18 * 60 };
   const entries = [punch(TODAY, "08:00", "entrada"), punch(TODAY, "13:00", "entrada"), punch(TODAY, "17:00", "saida")];
-  const day = computeDay(entries, S);
+  const day = computeDay(entries, S, clock.minutes, clock);
   assert.equal(day.consistent, false);
   assert.equal(day.open, false);
   assert.equal(day.workedMinutes, 0);
@@ -205,7 +206,7 @@ check("O. Ver pendências aponta /registros?pendentes=1", () => {
   assert.ok(home.includes("/registros?pendentes=1"));
   const reg = srcOf("src/app/(app)/registros/page.tsx");
   assert.ok(reg.includes("pendingOnly"));
-  assert.ok(reg.includes("Ver todos os registros"));
+  assert.ok(reg.includes("Voltar aos registros do período"));
 });
 
 check("P. busca só DE: query from=to", () => {

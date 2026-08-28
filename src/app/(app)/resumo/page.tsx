@@ -8,7 +8,7 @@ import {
   absenceLabel,
   absenceOnDate,
 } from "@/lib/absences";
-import { dayBalanceContribution, faltaOnDate, faltaStatusOf } from "@/lib/faltas";
+import { dayBalanceContribution, effectiveFaltas, faltaOnDate, faltaStatusOf } from "@/lib/faltas";
 import {
   getNextPointPeriod,
   getPointPeriod,
@@ -19,6 +19,7 @@ import {
 } from "@/lib/periods";
 import { companyDayContext } from "@/lib/company-calendar";
 import { pendingPunchDates } from "@/lib/pending-punches";
+import { buildDebtDays } from "@/lib/debt";
 import { Badge, Button, Card, EmptyState, Skeleton, StatCard } from "@/components/ui";
 import { StackedPeriodChart } from "@/components/stacked-period-chart";
 import type { Absence } from "@/lib/absences";
@@ -46,6 +47,7 @@ export default function ResumoPage() {
   const settings = settingsOf(user);
   const todayStr = todayString();
   const [period, setPeriod] = useState<PointPeriod>(() => getPointPeriod(new Date().toISOString().slice(0, 10)));
+  const [detailsOpen, setDetailsOpen] = useState(false);
 
   const allDays: DayRow[] = useMemo(() => {
     return listDaysBetween(period.from, period.to)
@@ -118,6 +120,26 @@ export default function ResumoPage() {
     [allDays, todayStr],
   );
 
+  const detailStats = useMemo(() => {
+    const debts = buildDebtDays(
+      entries,
+      compensations,
+      settings,
+      period,
+      absences,
+      companyCalendars,
+      effectiveFaltas(faltas, todayStr),
+      todayStr,
+    );
+    const acordo = debts.filter((d) => d.kind === "acordo");
+    return {
+      acordoTotal: acordo.reduce((s, d) => s + d.debtMinutes, 0),
+      acordoDone: acordo.reduce((s, d) => s + d.concludedMinutes, 0),
+      acordoPending: acordo.reduce((s, d) => s + d.remainingMinutes, 0),
+      pendingPunches: pendingPunchDates(entries, settings, todayStr, period).length,
+    };
+  }, [entries, compensations, settings, period, absences, companyCalendars, faltas, todayStr]);
+
   const exportCsv = () => {
     const rows = [
       ["data", "dia_semana", "evento", "batidas", "trabalhado_min", "jornada_efetiva_min", "saldo_min", "excedente_min", "no_ponto_min"],
@@ -180,7 +202,7 @@ export default function ResumoPage() {
         return (
           <div className="rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3">
             <p className="text-sm font-extrabold text-amber-800">Registros pendentes: {n}</p>
-            <p className="mt-0.5 text-xs text-amber-700">Período com registros pendentes. O saldo pode sofrer alteração após a correção.</p>
+            <p className="mt-0.5 text-xs text-amber-700">O saldo pode sofrer alteração após a correção dos registros pendentes.</p>
           </div>
         );
       })()}
@@ -204,6 +226,26 @@ export default function ResumoPage() {
           sub={`limite de ${formatMinutes(settings.maxDailyMinutes)}/dia`}
           tone={totals.excessTotal > 0 ? "amber" : "slate"}
         />
+      </div>
+
+      <div>
+        <Button variant="ghost" size="sm" onClick={() => setDetailsOpen((v) => !v)}>
+          {detailsOpen ? "Ocultar detalhes do período" : "Ver mais detalhes do período"}
+        </Button>
+        {detailsOpen && (
+          <div className="mt-3 space-y-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
+            <p>Horas trabalhadas: <b className="text-slate-900">{formatMinutes(totals.workedTotal)}</b></p>
+            <p>
+              Acordo a compensar:{" "}
+              <b className="text-slate-900">{formatMinutes(detailStats.acordoTotal)}</b>
+              {" "}(feito {formatMinutes(detailStats.acordoDone)} · falta {formatMinutes(detailStats.acordoPending)})
+            </p>
+            <p>Registros pendentes: <b className="text-amber-700">{detailStats.pendingPunches}</b></p>
+            <p className="text-xs text-amber-700">
+              O saldo pode sofrer alteração após a correção dos registros pendentes.
+            </p>
+          </div>
+        )}
       </div>
 
       <Card

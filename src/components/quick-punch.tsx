@@ -94,7 +94,7 @@ export function QuickPunch({
    * (fonte central nextPunchType) — nunca da posição no array de lançamento. */
   const next = nextPunchType(today.entries);
   const inconsistent = !today.consistent && today.entries.length > 0;
-  const predicted = predictedBreakWindow(today.entries, settings, jornadaMinutes ?? today.expectedMinutes);
+  const predicted = predictedBreakWindow(today.realizedEntries?.length ? today.realizedEntries : today.entries, settings, jornadaMinutes ?? today.expectedMinutes);
 
   const punch = async (type: EntryType, time: string) => {
     if (busy) return;
@@ -264,7 +264,7 @@ export function QuickPunch({
         <div className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2.5 text-xs font-medium text-amber-800">
           <p className="font-extrabold uppercase tracking-wide">Registro inconsistente</p>
           <p className="mt-0.5">
-            A batida rápida registra a próxima batida do dia. Para inserir um horário no meio da sequência, use Corrigir registros.
+            A sequência de registros deste dia não está correta. Corrija as batidas para finalizar o registro.
           </p>
           <Button size="sm" className="mt-2" onClick={() => setCorrectOpen(true)}>
             <Wrench size={13} /> Corrigir registros
@@ -412,6 +412,9 @@ export function QuickPunch({
                     className={`h-2 w-2 rounded-full ${e.type === "entrada" ? "bg-emerald-500" : "bg-indigo-500"}`}
                   />
                   {e.time} · {e.type === "entrada" ? "entrada" : "saída"}
+                  {(today.plannedEntries ?? []).some((p) => p.id === e.id) && (
+                    <span className="rounded bg-sky-50 px-1 text-[9px] font-extrabold uppercase text-sky-700">Prevista</span>
+                  )}
                   {e.note && <span className="text-slate-400">· {e.note}</span>}
                   {e.edited && <span className="text-slate-400">· editado</span>}
                   <button

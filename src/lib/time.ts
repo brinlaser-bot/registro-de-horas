@@ -68,6 +68,10 @@ export interface DayResult {
   canFinalizeFinancialDay: boolean;
   /** Intervalo automático DERIVADO (não é batida persistida). */
   derivedBreak?: DerivedBreak | null;
+  /** Batidas cujo horário já chegou (fato). */
+  realizedEntries: TimeEntryLike[];
+  /** Batidas do mesmo dia ainda no futuro (previsão — não é fato). */
+  plannedEntries: TimeEntryLike[];
 }
 
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -129,6 +133,32 @@ export function isFutureDate(date: string, today: string = todayString()): boole
  */
 export function isRealizedDate(date: string, today: string = todayString()): boolean {
   return date <= today;
+}
+
+export function nowMinutesLocal(): number {
+  const d = new Date();
+  return d.getHours() * 60 + d.getMinutes();
+}
+
+/** Relógio local injetável (testes e UI em tempo real). */
+export interface DayClock {
+  date: string;
+  minutes: number;
+}
+
+export function resolveDayClock(nowMinutes?: number, clock?: DayClock): DayClock {
+  if (clock) return clock;
+  return { date: todayString(), minutes: nowMinutes ?? nowMinutesLocal() };
+}
+
+/**
+ * Recorte de horário do PRÓPRIO DIA: uma batida de HOJE só é fato quando o
+ * horário já chegou. Datas diferentes de `clock.date` ficam a cargo de
+ * isRealizedDate nos agregadores (Banco/resumo) — não contaminam o emparelhamento.
+ */
+export function isPunchRealized(date: string, time: string, clock: DayClock): boolean {
+  if (date !== clock.date) return true;
+  return toMinutes(time) <= clock.minutes;
 }
 
 /** "YYYY-MM-DD" -> Date (meio-dia local, evita off-by-one de UTC) */
@@ -201,29 +231,40 @@ export function computeDay(
   entries: TimeEntryLike[],
   settings: WorkSettings,
   nowMinutes?: number,
+  clock?: DayClock,
 ): DayResult {
   const expected = expectedMinutesOf(settings);
-  const analysis = analyzePunches(entries);
-  const sorted = analysis.sorted;
+  const clk = resolveDayClock(nowMinutes, clock);
+  const date = entries[0]?.date ?? "";
+  const full = analyzePunches(entries);
+  const sorted = full.sorted;
+  const realizedEntries = sorted.filter((e) => isPunchRealized(e.date || date, e.time, clk));
+  const plannedEntries = sorted.filter((e) => !isPunchRealized(e.date || date, e.time, clk));
+  const analysis = analyzePunches(realizedEntries);
   const segments = segmentsOf(analysis.pairs);
   let worked = analysis.workedMinutesConfirmed;
-  const consistent = analysis.isConsistent;
-  const open = consistent && !analysis.isComplete && entries.length > 0;
+  const realizedConsistent = analysis.isConsistent;
+  const consistent = full.isConsistent;
+  const realizedComplete = analysis.isComplete && realizedEntries.length > 0;
+  const awaitingPlan = plannedEntries.length > 0 && realizedConsistent && realizedEntries.length > 0;
+  const open =
+    (realizedConsistent && !analysis.isComplete && realizedEntries.length > 0) || awaitingPlan;
 
-  if (open && nowMinutes !== undefined) {
-    const last = sorted[sorted.length - 1];
-    if (last?.type === "entrada" && nowMinutes > toMinutes(last.time)) {
-      worked += nowMinutes - toMinutes(last.time);
+  if (open && analysis.sorted.length > 0) {
+    const last = analysis.sorted[analysis.sorted.length - 1];
+    // Horas "em andamento" só no calendário de HOJE — dia passado incompleto não inventa permanência.
+    if (last?.type === "entrada" && clk.minutes > toMinutes(last.time) && (date === "" || date === clk.date)) {
+      worked += clk.minutes - toMinutes(last.time);
     }
   }
 
   const lunchDeductedMinutes = lunchDeductionOf(analysis, settings);
   if (lunchDeductedMinutes > 0) worked = Math.max(0, worked - lunchDeductedMinutes);
 
-  const date = entries[0]?.date ?? "";
-  const incompletePast = open && date !== "" && date < todayString();
-  const financialPending = !consistent || incompletePast;
-  const canFinalizeFinancialDay = analysis.canFinalizeFinancialDay && !incompletePast;
+  const incompletePast = realizedConsistent && !realizedComplete && date !== "" && date < clk.date;
+  const financialPending = !realizedConsistent || incompletePast;
+  const canFinalizeFinancialDay =
+    realizedComplete && realizedConsistent && plannedEntries.length === 0 && consistent && !incompletePast;
   const finalized = canFinalizeFinancialDay;
 
   const balance = worked - expected;
@@ -231,8 +272,8 @@ export function computeDay(
   const registrable = finalized ? Math.max(0, Math.min(worked, settings.maxDailyMinutes)) : 0;
 
   let derivedBreak: DerivedBreak | null = null;
-  if (finalized && lunchDeductedMinutes > 0 && analysis.pairs.length === 1 && sorted[0]) {
-    const startMin = toMinutes(sorted[0].time) + 4 * 60;
+  if (finalized && lunchDeductedMinutes > 0 && analysis.pairs.length === 1 && analysis.sorted[0]) {
+    const startMin = toMinutes(analysis.sorted[0].time) + 4 * 60;
     derivedBreak = {
       start: fromMinutes(startMin),
       end: fromMinutes(startMin + lunchDeductedMinutes),
@@ -243,21 +284,21 @@ export function computeDay(
 
   let status: DayStatus = "ok";
   if (entries.length === 0) status = "empty";
-  else if (financialPending || open) status = "in-progress";
+  else if (financialPending || open || plannedEntries.length > 0) status = "in-progress";
   else if (excess > 0) status = "excess";
   else if (balance < 0) status = "deficit";
 
   return {
     date,
     entries: sorted,
-    // Inconsistente: NÃO usar pares confirmados como trabalhado financeiro.
-    workedMinutes: consistent ? worked : 0,
+    // Inconsistente no prefixo realizado: NÃO usar pares confirmados como saldo.
+    workedMinutes: realizedConsistent ? worked : 0,
     expectedMinutes: expected,
     balanceMinutes: finalized ? balance : 0,
     excessMinutes: excess,
     registrableMinutes: registrable,
-    lunchDeductedMinutes: consistent ? lunchDeductedMinutes : 0,
-    segments: consistent ? segments : [],
+    lunchDeductedMinutes: realizedConsistent ? lunchDeductedMinutes : 0,
+    segments: realizedConsistent ? segments : [],
     open,
     empty: entries.length === 0,
     status,
@@ -266,6 +307,8 @@ export function computeDay(
     financialPending,
     canFinalizeFinancialDay,
     derivedBreak,
+    realizedEntries,
+    plannedEntries,
   };
 }
 
@@ -340,11 +383,6 @@ export function validatePunchSequence(entries: TimeEntryLike[]): { ok: boolean; 
  */
 export function insertPunchError(dayEntries: TimeEntryLike[], added: TimeEntryLike | TimeEntryLike[]): string | null {
   return punchMutationError(dayEntries, added);
-}
-
-export function nowMinutesLocal(): number {
-  const d = new Date();
-  return d.getHours() * 60 + d.getMinutes();
 }
 
 export function listDaysInMonth(month: string): string[] {

@@ -61,18 +61,25 @@ export function buildExitPlan(
         ? Math.min(settings.maxDailyMinutes, base + cappedExtra)
         : base;
 
-  // Horário planejado: derivado das batidas, NUNCA da hora atual
-  const plannedExit = plannedExitTime(day.entries, settings, targetMinutes);
+  // Horário planejado: derivado das batidas REALIZADAS, NUNCA da hora atual
+  // nem de horários futuros do mesmo dia.
+  const factual = day.realizedEntries ?? day.entries;
+  const planned = day.plannedEntries ?? [];
+  const plannedExit = plannedExitTime(factual, settings, targetMinutes);
 
   let state: ExitState;
-  if (day.entries.length === 0) {
+  if (factual.length === 0 && planned.length === 0) {
     state = "no-punch";
-  } else if (plannedExit === null) {
-    state = "finished"; // última batida é saída → jornada encerrada
+  } else if (factual.length === 0 && planned.length > 0) {
+    state = "planned";
+  } else if (plannedExit === null && planned.length === 0) {
+    state = "finished"; // última batida REALIZADA é saída e nada falta
+  } else if (plannedExit === null && planned.length > 0) {
+    state = "planned";
   } else if (kind === "extra" && day.workedMinutes >= targetMinutes) {
     // Meta de compensação por hora extra atingida (confirmação manual)
     state = "goal-reached";
-  } else if (nowMinutes > toMinutes(plannedExit)) {
+  } else if (plannedExit !== null && nowMinutes > toMinutes(plannedExit)) {
     // Saída planejada venceu e o ponto continua aberto
     state = "overdue";
   } else if (day.workedMinutes >= targetMinutes) {
@@ -453,6 +460,11 @@ export function SmartExit({
           >
             {message}
           </p>
+          {(day.plannedEntries?.length ?? 0) > 0 && (
+            <p className="mt-1 text-xs text-slate-500">
+              Próximo registro previsto: <b>{day.plannedEntries![0].time} {day.plannedEntries![0].type === "entrada" ? "Entrada" : "Saída"}</b>
+            </p>
+          )}
 
           {goalReached && plan.kind === "extra" && (
             <p className="mt-1 text-xs text-slate-500">

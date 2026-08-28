@@ -5,7 +5,9 @@ import { CalendarPlus, Plus, Trash2 } from "lucide-react";
 import { Button, Input, Modal, Select } from "@/components/ui";
 import { useToast } from "@/components/toast";
 import { formatMinutes, FUTURE_DATE_ERROR, isFutureDate, toMinutes, todayString } from "@/lib/time";
+import { stayAndNetMinutes } from "@/lib/breaks";
 import { actions } from "@/lib/store";
+import { settingsOf, useAppData } from "@/lib/store";
 import type { EntryType } from "@/lib/types";
 
 export interface ManualPairData {
@@ -32,6 +34,8 @@ interface Props {
 /** Modal para lançar um dia completo (vários períodos) ou um intervalo. */
 export function ManualEntryModal({ open, onClose, initialDate, onSave }: Props) {
   const toast = useToast();
+  const { user } = useAppData();
+  const settings = settingsOf(user);
   const today = todayString();
   const [date, setDate] = useState(initialDate || today);
   const [note, setNote] = useState("");
@@ -72,6 +76,7 @@ export function ManualEntryModal({ open, onClose, initialDate, onSave }: Props) 
     }
     return s;
   }, 0);
+  const stayNet = stayAndNetMinutes(periods, settings, mode);
 
   const submit = async () => {
     if (inflight.current || busy) return;
@@ -184,10 +189,18 @@ export function ManualEntryModal({ open, onClose, initialDate, onSave }: Props) 
           <Plus size={14} /> {mode === "intervalo" ? "Registrar intervalo" : "Adicionar período"}
         </button>
 
-        {duration > 0 && (
+        {stayNet.stay > 0 && mode === "periodo" && (
+          <div className="text-xs text-slate-500">
+            <p>Permanência neste período: <b className="text-slate-700">{formatMinutes(stayNet.stay)}</b></p>
+            {stayNet.autoBreak > 0 && (
+              <p>Intervalo automático previsto: {formatMinutes(stayNet.autoBreak)}</p>
+            )}
+            <p>Trabalho líquido estimado: <b className="text-slate-700">{formatMinutes(stayNet.net)}</b></p>
+          </div>
+        )}
+        {duration > 0 && mode === "intervalo" && (
           <p className="text-xs text-slate-500">
-            Total trabalhado: <b className="text-slate-700">{formatMinutes(duration)}</b>
-            {mode === "periodo" && ". O almoço automático só entra se não houver intervalo explícito na faixa de almoço."}
+            Duração do intervalo: <b className="text-slate-700">{formatMinutes(duration)}</b>
           </p>
         )}
 
