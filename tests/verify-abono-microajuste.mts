@@ -88,7 +88,7 @@ check("3. Card do dia com Abono NÃO oferece \"Adicionar registro manual\" (guar
   const guardas = card.split("!futureDay && !abonoDay && (").length - 1;
   assert.ok(guardas >= 1, "formulário de registro manual protegido pela guarda !abonoDay");
   // Os controles de batida só existem dentro dos blocos protegidos
-  assert.ok(card.includes("Adicionar registro manual"), "controle existe para dias normais");
+  assert.ok(card.includes("Adicionar batida"), "controle existe para dias normais");
   assert.ok(!card.includes("Entrada agora") && !card.includes("Saída agora"), "atalhos de ponto removidos dos cards");
   // Smart Exit não se aplica (sem batidas o dia nunca fica \"open\"); e nada gera batida noutro ponto do card
   reset();

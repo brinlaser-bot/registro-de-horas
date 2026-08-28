@@ -194,6 +194,18 @@ export function SmartExit({
   const baseExpected = effectiveExpected ?? day.expectedMinutes ?? expectedMinutesOf(settings);
   const offDuty = baseExpected <= 0;
 
+  if (!day.consistent && day.entries.length > 0) {
+    return shell(
+      <div className={`flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 ${pad}`}>
+        <Ban size={18} className="mt-0.5 shrink-0 text-amber-600" />
+        <p className="text-sm text-amber-800">
+          Registro inconsistente — o assistente fica pausado até a sequência ser corrigida.
+        </p>
+      </div>,
+      { subtitle: "Assistente de jornada", actions: <Badge tone="amber">Registro inconsistente</Badge> },
+    );
+  }
+
   /* ── Falta registrada: sem previsão de saída ─────────── */
   if (faltaRegistrada) {
     return shell(

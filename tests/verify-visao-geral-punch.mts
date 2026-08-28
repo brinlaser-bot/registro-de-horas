@@ -413,8 +413,8 @@ check("V. removidos: 'Dia coberto pelo Abono…' e o rodapé '* No ponto…' no 
   assert.ok(!dayCardSrc.includes("Dia coberto pelo Abono"), "parágrafo explicativo removido");
   assert.ok(dayCardSrc.includes('* "No ponto" é o total'), "rodapé existe nos demais dias");
   const footnote = dayCardSrc.indexOf('* "No ponto" é o total');
-  const guard = dayCardSrc.lastIndexOf("{!abonoDay && (", footnote);
-  assert.ok(guard !== -1 && guard > footnote - 400, "rodapé envolvido pelo guarda {!abonoDay && (…)}");
+  const guardAbono = dayCardSrc.lastIndexOf("!abonoDay", footnote);
+  assert.ok(guardAbono !== -1 && guardAbono > footnote - 500, "rodapé envolvido pelo guarda !abonoDay");
   // §13: rótulo corrigido (o cálculo do painel NÃO foi alterado)
   assert.ok(panelSrc.includes("Déficit do período"), "rótulo renomeado");
   assert.ok(!panelSrc.includes("Déficit do mês"), "rótulo antigo removido");

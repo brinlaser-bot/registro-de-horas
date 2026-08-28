@@ -347,7 +347,12 @@ check("Q. saudação de falta e card HOJE idle = jornada não iniciada (sem −8
 check("R. Abono microajuste permanece: !abonoDay e sem 'Dia coberto pelo Abono'", () => {
   assert.ok(dayCardSrc.includes('const abonoDay = absence?.kind === "abono"'));
   assert.ok(!dayCardSrc.includes("Dia coberto pelo Abono"));
-  assert.ok(dayCardSrc.includes("{!abonoDay && ("));
+  assert.ok(
+    dayCardSrc.includes("{!abonoDay && (") ||
+      dayCardSrc.includes("{!abonoDay && !punchPending && (") ||
+      dayCardSrc.includes("!futureDay && !abonoDay && ("),
+    "guarda !abonoDay permanece no card",
+  );
 });
 
 /* ── S. Acordo dispensado integral: 0 déficit / 0 saldo ─────── */

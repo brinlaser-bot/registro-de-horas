@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { Ban, CalendarClock, ChevronLeft, ChevronRight, Clock3, Search, X } from "lucide-react";
 import { actions, getAppData, settingsOf, useAppData, useIsClient } from "@/lib/store";
 import {
@@ -37,6 +38,7 @@ import { acordoViewOf, buildDebtDays, checkSourceOverflow, extraCapacityForDate 
 import { compensarObligationOnDate, isAbonadoDay } from "@/lib/compensar";
 import { dayBalanceContribution, effectiveFaltas, faltaOnDate, faltaStatusOf } from "@/lib/faltas";
 import { dayCreditView, excessReasonOnDate, hasEligibleSpecialExcessInCycle, shouldPromptExcessReason } from "@/lib/hour-bank";
+
 import type { CompKind, DayResult, WorkSettings } from "@/lib/types";
 import { DayCard } from "@/components/day-card";
 import { ManualEntryModal, type ManualPairData } from "@/components/manual-entry-modal";
@@ -67,8 +69,23 @@ interface RangeSummary {
 }
 
 export default function RegistrosPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="space-y-4">
+          {[...Array(5)].map((_, i) => <Skeleton key={i} className="h-24" />)}
+        </div>
+      }
+    >
+      <RegistrosBody />
+    </Suspense>
+  );
+}
+
+function RegistrosBody() {
   const toast = useToast();
   const mounted = useIsClient();
+  const searchParams = useSearchParams();
   const { user, entries, compensations, absences, companyCalendars, faltas, excessReasons } = useAppData();
   const todayStr = todayString();
 
@@ -84,6 +101,7 @@ export default function RegistrosPage() {
   const [reasonDate, setReasonDate] = useState<string | null>(null);
   const [allocateDate, setAllocateDate] = useState<string | null>(null);
   const [allocateFromDeficit, setAllocateFromDeficit] = useState<{ date: string; kind?: CompKind } | null>(null);
+  const [pendingOnly, setPendingOnly] = useState(() => searchParams.get("pendentes") === "1");
 
   // Faltas que JÁ valem (date <= hoje) — previstas não geram déficit/saldo
   const effectiveFaltaList = useMemo(() => effectiveFaltas(faltas, todayStr), [faltas, todayStr]);
@@ -148,6 +166,13 @@ export default function RegistrosPage() {
               : baseView,
           displayDay: cctx.displayDay,
           workedInAbonoMinutes: cctx.workedInAbonoMinutes,
+          abonoParcial: cctx.calendarEntry?.tratamento === "ABONADO_PARCIAL"
+            ? {
+                abonoStart: cctx.calendarEntry.abonoStart ?? "08:00",
+                abonoEnd: cctx.calendarEntry.abonoEnd ?? "12:00",
+                expectedRegular: cctx.effectiveExpected,
+              }
+            : null,
           // Contribuição CENTRAL (dayBalanceContribution) — MESMA soma da
           // Visão geral e do Resumo do período (falta efetiva conta; prevista 0).
           balanceContribution: dayBalanceContribution(cctx, faltas, date, todayStr),
@@ -436,15 +461,25 @@ export default function RegistrosPage() {
   };
 
   const runQuery = () => {
-    if (!queryDraft.from || !queryDraft.to) {
-      toast.show("Informe as datas inicial e final.", "error");
+    const from = queryDraft.from;
+    const to = queryDraft.to;
+    if (!from && !to) {
+      setQuery(null);
       return;
     }
-    if (queryDraft.to < queryDraft.from) {
+    if (from && to && to < from) {
       toast.show("A data final não pode ser anterior à inicial.", "error");
       return;
     }
-    setQuery({ from: queryDraft.from, to: queryDraft.to });
+    if (from && !to) {
+      setQuery({ from, to: from });
+      return;
+    }
+    if (!from && to) {
+      setQuery({ from: to, to });
+      return;
+    }
+    setQuery({ from, to });
   };
 
   if (!mounted) {
@@ -525,8 +560,22 @@ export default function RegistrosPage() {
           <Button variant="secondary" size="sm" onClick={runQuery}>
             <Search size={14} /> Consultar
           </Button>
+          <p className="basis-full text-[11px] text-slate-400">
+            Informe uma data para busca específica ou duas datas para consultar um período.
+          </p>
         </div>
       </div>
+      {pendingOnly && (
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-amber-300 bg-amber-50 px-4 py-2.5">
+          <p className="text-xs font-bold text-amber-800">Filtro: registros pendentes</p>
+          <Button size="sm" variant="ghost" onClick={() => setPendingOnly(false)}>Ver todos os registros</Button>
+        </div>
+      )}
+      {!pendingOnly && days.some((d) => d.displayDay.financialPending) && (
+        <Button size="sm" variant="secondary" onClick={() => setPendingOnly(true)}>
+          Ver pendências ({days.filter((d) => d.displayDay.financialPending).length})
+        </Button>
+      )}
 
       {/* Resumo do intervalo — agrupado por ciclo anual */}
       {summaries.length > 0 && (
@@ -586,7 +635,10 @@ export default function RegistrosPage() {
         />
       ) : (
         <div className="space-y-4">
-          {days.map(({ date, balanceView, displayDay, absence, calendarLabel, falta, workedInAbonoMinutes }) => (
+          {(pendingOnly
+            ? days.filter((d) => d.displayDay.financialPending)
+            : days
+          ).map(({ date, balanceView, displayDay, absence, calendarLabel, falta, workedInAbonoMinutes, abonoParcial }) => (
             <DayCard
               key={date}
               result={displayDay}
@@ -637,6 +689,7 @@ export default function RegistrosPage() {
                 return a.abonado ? { label: a.label ?? "Dia abonado" } : null;
               })()}
               workedInAbonoMinutes={workedInAbonoMinutes}
+              abonoParcial={abonoParcial}
             />
           ))}
         </div>

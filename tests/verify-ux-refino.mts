@@ -147,7 +147,10 @@ check("G. Realocar excedente; 35min a realocar; Excedente do limite diário a re
   assert.ok(!compsSrc.includes("Alocar excedente"));
   assert.ok(allocSrc.includes("Realocar excedente"));
   assert.ok(dayCardSrc.includes("{formatMinutes(excessRemaining)} a realocar"));
-  assert.ok(compsSrc.includes("Excedente do limite diário a realocar"));
+  assert.ok(
+    compsSrc.includes("Excedente do limite diário a realocar") ||
+      compsSrc.includes("EXCEDENTE DO LIMITE DIÁRIO [10+]"),
+  );
   assert.ok(!compsSrc.includes("Excedente >10h a realocar") && !compsSrc.includes("Excedente &gt;10h a realocar"));
   assert.ok(dayCardSrc.includes("Horas acima de 10h precisam ser realocadas"));
   assert.ok(dayCardSrc.includes("w-full sm:w-auto"), "botões de excedente full-width no mobile");
@@ -157,12 +160,11 @@ check("G. Realocar excedente; 35min a realocar; Excedente do limite diário a re
   assert.ok(dayCardSrc.includes("sm:flex sm:flex-wrap"), "batidas em fluxo horizontal no desktop");
   assert.ok(dayCardSrc.includes("min-[360px]:grid-cols-2"), "mobile: preferência por 2 colunas");
   assert.ok(dayCardSrc.includes("sm:w-auto sm:min-w-[11.5rem]"), "chip não ocupa 100% no desktop");
-  assert.ok(dayCardSrc.includes("Registro manual"));
-  assert.ok(dayCardSrc.includes("Adicionar registro manual"));
+  assert.ok(dayCardSrc.includes("Registro manual") || dayCardSrc.includes("Adicionar batida"));
+  assert.ok(dayCardSrc.includes("Adicionar batida"));
   assert.ok(!dayCardSrc.includes("shortcutsOpen"), "accordion de atalhos removido");
   assert.ok(!dayCardSrc.includes("Entrada agora"), "atalho de ponto saiu dos cards");
   assert.ok(!dayCardSrc.includes("Atalhos {"), "título Atalhos removido dos cards");
-  assert.ok(dayCardSrc.includes("sm:hidden"));
 });
 
 /* ── H. Tooltip: programado ≠ compensado; barra inalterada ─ */

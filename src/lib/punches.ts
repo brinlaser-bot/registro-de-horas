@@ -190,6 +190,17 @@ export function nextExpectedPunchType(entries: TimeEntryLike[]): EntryType {
   return analyzePunches(entries).nextExpectedType ?? "entrada";
 }
 
+/**
+ * Tipo coerente para inserir um horário na linha do tempo (NÃO é append).
+ * Olha a última batida ESTRITAMENTE anterior ao horário.
+ * Ex.: 08E 13E 17S + 12:00 → Saída (depois da 08E).
+ */
+export function suggestedPunchTypeAt(entries: TimeEntryLike[], time: string): EntryType {
+  const before = sortedPunchEntries(entries).filter((e) => e.time < time);
+  if (before.length === 0) return "entrada";
+  return before[before.length - 1].type === "entrada" ? "saida" : "entrada";
+}
+
 export function sequenceErrorMessage(analysis: PunchAnalysis): string | undefined {
   if (analysis.isConsistent) return undefined;
   const overlap = analysis.issues.find((i) => i.kind === "overlap");

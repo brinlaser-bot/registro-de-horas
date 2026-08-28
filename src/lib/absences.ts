@@ -143,11 +143,12 @@ export function dayContext(
   const expected = day.expectedMinutes || expectedMinutesOf(settings);
 
   if (!absence) {
+    const freeze = day.financialPending;
     return {
       day,
       effectiveExpected: expected,
-      adjustedBalance: day.workedMinutes - expected,
-      adjustedDeficit: day.open ? 0 : Math.max(0, expected - day.workedMinutes),
+      adjustedBalance: freeze ? 0 : day.workedMinutes - expected,
+      adjustedDeficit: freeze || day.open ? 0 : Math.max(0, expected - day.workedMinutes),
       acordoMinutes: 0,
       justifiedMinutes: 0,
       isVacation: false,
@@ -165,14 +166,13 @@ export function dayContext(
     // que ultrapassar o original vira crédito regular. Não é déficit comum.
     const acordoOriginal = justified;
     const surplus = Math.max(0, day.workedMinutes - acordoOriginal);
+    const freeze = day.financialPending;
     return {
       day,
       absence,
       effectiveExpected: regularExpected,
-      // Parcial: a jornada regular restante continua gerando saldo/déficit;
-      // o surplus (trabalho além do original do acordo) é crédito extra.
-      adjustedBalance: surplus + (regularWorked - regularExpected),
-      adjustedDeficit: day.open ? 0 : Math.max(0, regularExpected - regularWorked),
+      adjustedBalance: freeze ? 0 : surplus + (regularWorked - regularExpected),
+      adjustedDeficit: freeze || day.open ? 0 : Math.max(0, regularExpected - regularWorked),
       acordoMinutes: acordoOriginal,
       justifiedMinutes: justified,
       isVacation: false,
@@ -182,12 +182,13 @@ export function dayContext(
   // Férias / saúde / acordado-dispensado / outro: horas justificadas são neutras
   // para o saldo regular. Batidas existentes continuam históricas (worked/no ponto),
   // mas trabalho dentro do período justificado não vira crédito automático.
+  const freeze = day.financialPending;
   return {
     day,
     absence,
     effectiveExpected: regularExpected,
-    adjustedBalance: regularWorked - regularExpected,
-    adjustedDeficit: day.open ? 0 : Math.max(0, regularExpected - regularWorked),
+    adjustedBalance: freeze ? 0 : regularWorked - regularExpected,
+    adjustedDeficit: freeze || day.open ? 0 : Math.max(0, regularExpected - regularWorked),
     acordoMinutes: 0,
     justifiedMinutes: justified,
     isVacation: absence.kind === "ferias" && justified >= expected,
@@ -221,7 +222,7 @@ export function getDayBalanceView(
  */
 export function regularBalanceContribution(view: DayBalanceView): number {
   const hasRelevantData = view.day.entries.length > 0 || view.absence !== undefined;
-  if (!hasRelevantData || view.day.open) return 0;
+  if (!hasRelevantData || view.day.open || view.day.financialPending) return 0;
   return view.adjustedBalance;
 }
 

@@ -18,6 +18,7 @@ import {
   type PointPeriod,
 } from "@/lib/periods";
 import { companyDayContext } from "@/lib/company-calendar";
+import { pendingPunchDates } from "@/lib/pending-punches";
 import { Badge, Button, Card, EmptyState, Skeleton, StatCard } from "@/components/ui";
 import { StackedPeriodChart } from "@/components/stacked-period-chart";
 import type { Absence } from "@/lib/absences";
@@ -173,6 +174,16 @@ export default function ResumoPage() {
         </Button>
       </div>
 
+      {(() => {
+        const n = pendingPunchDates(entries, settings, todayStr, period).length;
+        if (n <= 0) return null;
+        return (
+          <div className="rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3">
+            <p className="text-sm font-extrabold text-amber-800">Registros pendentes: {n}</p>
+            <p className="mt-0.5 text-xs text-amber-700">Período com registros pendentes. O saldo pode sofrer alteração após a correção.</p>
+          </div>
+        );
+      })()}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <StatCard label="Dias com registro" value={totals.trackedDays} sub={`no período`} icon={<BarChart3 size={16} />} />
         <StatCard

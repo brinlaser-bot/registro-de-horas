@@ -1,13 +1,15 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Ban, Coffee, LogIn, LogOut, Pencil, Timer, Trash2, Zap } from "lucide-react";
+import { Ban, Coffee, LogIn, LogOut, Pencil, Timer, Trash2, Wrench, Zap } from "lucide-react";
 import type { DayResult, WorkSettings } from "@/lib/types";
 import type { EntryType, TimeEntryLike } from "@/lib/time";
 import { formatMinutes, nextPunchType, nowTimeString, validatePunchSequence } from "@/lib/time";
+import { predictedBreakWindow } from "@/lib/breaks";
 import { COMPENSAR_EXPLAIN } from "@/lib/compensar";
 import type { FaltaGate } from "@/lib/faltas";
 import { Badge, Button, Card, Input, Modal } from "@/components/ui";
+import { CorrectPunchesModal } from "@/components/correct-punches-modal";
 import { useToast } from "@/components/toast";
 
 interface Props {
@@ -81,6 +83,7 @@ export function QuickPunch({
   const [editing, setEditing] = useState<TimeEntryLike | null>(null);
   const [editForm, setEditForm] = useState({ time: "", note: "" });
   const [saving, setSaving] = useState(false);
+  const [correctOpen, setCorrectOpen] = useState(false);
 
   useEffect(() => {
     const t = window.setInterval(() => setClock(nowTimeString()), 30_000);
@@ -90,6 +93,8 @@ export function QuickPunch({
   /* §5/§7: a próxima ação vem SEMPRE da última batida CRONOLÓGICA do dia
    * (fonte central nextPunchType) — nunca da posição no array de lançamento. */
   const next = nextPunchType(today.entries);
+  const inconsistent = !today.consistent && today.entries.length > 0;
+  const predicted = predictedBreakWindow(today.entries, settings, jornadaMinutes ?? today.expectedMinutes);
 
   const punch = async (type: EntryType, time: string) => {
     if (busy) return;
@@ -253,6 +258,31 @@ export function QuickPunch({
     );
   }
 
+  if (inconsistent) {
+    const banner = (
+      <div className="space-y-3">
+        <div className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2.5 text-xs font-medium text-amber-800">
+          <p className="font-extrabold uppercase tracking-wide">Registro inconsistente</p>
+          <p className="mt-0.5">
+            A batida rápida registra a próxima batida do dia. Para inserir um horário no meio da sequência, use Corrigir registros.
+          </p>
+          <Button size="sm" className="mt-2" onClick={() => setCorrectOpen(true)}>
+            <Wrench size={13} /> Corrigir registros
+          </Button>
+        </div>
+        {correctOpen && (
+          <CorrectPunchesModal open onClose={() => setCorrectOpen(false)} date={todayStr} entries={today.entries} />
+        )}
+      </div>
+    );
+    if (embedded) return banner;
+    return (
+      <Card title="Registro rápido" subtitle={`${dayLabel ? `${dayLabel} · ` : ""}Registro inconsistente`}>
+        {banner}
+      </Card>
+    );
+  }
+
   const body = (
     <>
       {workedInAbonoMinutes != null && workedInAbonoMinutes > 0 && (
@@ -289,6 +319,11 @@ export function QuickPunch({
           </p>
           {headerFields}
         </div>
+      )}
+      {predicted && (
+        <p className="mb-2 text-xs font-medium text-amber-700">
+          Intervalo previsto: {predicted.start}–{predicted.end} (ainda não é uma batida)
+        </p>
       )}
       <div className={`grid ${embedded ? "gap-2.5" : "gap-4"} sm:grid-cols-[auto_1fr]`}>
         {/* Resumo do dia */}
@@ -405,6 +440,9 @@ export function QuickPunch({
       )}
 
       {/* §8 Modal de edição — tipo FIXO (no título); edita Horário + Observação. */}
+      {correctOpen && (
+        <CorrectPunchesModal open onClose={() => setCorrectOpen(false)} date={todayStr} entries={today.entries} />
+      )}
       <Modal
         open={editing !== null}
         onClose={() => setEditing(null)}

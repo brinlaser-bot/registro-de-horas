@@ -574,7 +574,7 @@ export default function CompensacoesPage() {
             <>
               {(pendenteStats.count > 0 || unplannedDeficitTotal > 0) && <span>·</span>}
               <span className="text-rose-600">
-                Excedente do limite diário a realocar: {formatMinutes(bank.excessSpecialFreeTotal)}
+                EXCEDENTE DO LIMITE DIÁRIO [10+]: {formatMinutes(bank.excessSpecialFreeTotal)}
                 {bank.excessWithoutReason > 0 && ` (⚠ ${formatMinutes(bank.excessWithoutReason)} sem motivo)`}
               </span>
             </>

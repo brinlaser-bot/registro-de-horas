@@ -169,7 +169,7 @@ export function HourBankCard({
 
         <Row
           icon={<TriangleAlert size={17} />}
-          label="Excedente do limite diário a realocar"
+          label="EXCEDENTE DO LIMITE DIÁRIO [10+]"
           value={formatMinutes(bank.excessSpecialFreeTotal)}
           tone="bg-rose-100 text-rose-600"
           title="Reserva especial: precisa de motivo registrado antes da realocação"

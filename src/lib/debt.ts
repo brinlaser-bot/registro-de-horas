@@ -151,7 +151,7 @@ export function buildDebtDays(
     // Dia com ponto aberto: déficit só é definitivo após a saída final.
     // O déficit comum vem SEMPRE da RESOLUÇÃO CENTRAL (folga/abonado/recesso/
     // compensar com jornada 0 e fins de semana não geram déficit comum).
-    const deficit = day.open
+    const deficit = day.open || day.financialPending
       ? 0
       : Math.max(0, cctx.adjustedDeficit - coveredByEarlyExit);
 
@@ -175,7 +175,7 @@ export function buildDebtDays(
     };
 
     // Cutoff temporal central: batidas futuras não geram déficit/excedente.
-    if (today === undefined || isRealizedDate(date, today)) {
+    if ((today === undefined || isRealizedDate(date, today)) && !day.financialPending) {
       push("excedente", excess);
       push("deficit", deficit);
     }
@@ -257,8 +257,8 @@ export function suggestTargets(
     if (!sameAnnualCycle(date, excludeDate)) continue;
     const day = computeDay(list, settings);
     if (day.empty || day.workedMinutes === 0) continue;
-    // Dia em andamento não é candidato: o saldo ainda não está fechado
-    if (day.open) continue;
+    // Dia em andamento ou pendente não é candidato: o saldo ainda não está fechado
+    if (day.open || day.financialPending) continue;
 
     // Capacidade livre = déficit do dia pela RESOLUÇÃO CENTRAL menos o que já
     // está comprometido. Folga/abonado/fim de semana têm déficit 0 e nunca
@@ -389,6 +389,16 @@ export function extraCapacityForDate(
     entries.filter((e) => e.date === date),
     settings,
   );
+  if (day.financialPending) {
+    return {
+      baseMinutes,
+      effectiveBaseMinutes: effectiveBase,
+      limitMinutes,
+      alreadyAllocated,
+      realExtra: null,
+      available: 0,
+    };
+  }
   const finished = !day.empty && !day.open;
   const realExtra = finished
     ? actualExtraForDate(date, entries, settings, { companyCalendars: opts?.companyCalendars })
@@ -430,7 +440,9 @@ export function originalHourExtraDebt(
     const coveredByEarly = sumMinutes(
       comps.filter((c) => c.targetDate === date && kindOf(c) === "excedente" && isActive(c)),
     );
-    return cctx.ctx.day.open ? 0 : Math.max(0, cctx.adjustedDeficit - coveredByEarly);
+    return cctx.ctx.day.open || cctx.ctx.day.financialPending
+      ? 0
+      : Math.max(0, cctx.adjustedDeficit - coveredByEarly);
   }
   return 0;
 }

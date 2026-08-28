@@ -48,10 +48,9 @@ check("A. Registros/DayCard não renderiza atalhos de ponto", () => {
 });
 
 check("B. Registro manual continua no card e abre o mesmo fluxo", () => {
-  assert.ok(dayCardSrc.includes("Registro manual"), "rótulo mobile");
-  assert.ok(dayCardSrc.includes("Adicionar registro manual"), "rótulo desktop");
+  assert.ok(dayCardSrc.includes("Adicionar batida"), "rótulo de inclusão");
   assert.ok(dayCardSrc.includes("setShowAdd(true)"));
-  assert.ok(dayCardSrc.includes("onAddEntry({ date: d.date, time: time ?? form.time, type: type ?? form.type"));
+  assert.ok(dayCardSrc.includes("suggestedPunchTypeAt"), "posição cronológica define o tipo");
   assert.ok(dayCardSrc.includes('source: "manual"'));
   assert.ok(dayCardSrc.includes("!futureDay && !abonoDay && (showAdd ?"), "guarda do formulário intacta");
 });

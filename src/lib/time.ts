@@ -32,6 +32,14 @@ export interface Segment {
   minutes: number;
 }
 
+/** Intervalo automático derivado — NÃO é batida persistida. */
+export interface DerivedBreak {
+  start: string;
+  end: string;
+  minutes: number;
+  source: "automatic_break";
+}
+
 export type DayStatus = "empty" | "in-progress" | "excess" | "deficit" | "ok";
 
 export interface DayResult {
@@ -56,6 +64,10 @@ export interface DayResult {
    * incompleto. Déficit/crédito/10+ não consolidam.
    */
   financialPending: boolean;
+  /** Dia fechado E consistente — único caso que gera resultado financeiro. */
+  canFinalizeFinancialDay: boolean;
+  /** Intervalo automático DERIVADO (não é batida persistida). */
+  derivedBreak?: DerivedBreak | null;
 }
 
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -211,11 +223,23 @@ export function computeDay(
   const date = entries[0]?.date ?? "";
   const incompletePast = open && date !== "" && date < todayString();
   const financialPending = !consistent || incompletePast;
-  const finalized = consistent && analysis.isComplete && !financialPending;
+  const canFinalizeFinancialDay = analysis.canFinalizeFinancialDay && !incompletePast;
+  const finalized = canFinalizeFinancialDay;
 
   const balance = worked - expected;
   const excess = finalized ? Math.max(0, worked - settings.maxDailyMinutes) : 0;
   const registrable = finalized ? Math.max(0, Math.min(worked, settings.maxDailyMinutes)) : 0;
+
+  let derivedBreak: DerivedBreak | null = null;
+  if (finalized && lunchDeductedMinutes > 0 && analysis.pairs.length === 1 && sorted[0]) {
+    const startMin = toMinutes(sorted[0].time) + 4 * 60;
+    derivedBreak = {
+      start: fromMinutes(startMin),
+      end: fromMinutes(startMin + lunchDeductedMinutes),
+      minutes: lunchDeductedMinutes,
+      source: "automatic_break",
+    };
+  }
 
   let status: DayStatus = "ok";
   if (entries.length === 0) status = "empty";
@@ -226,19 +250,22 @@ export function computeDay(
   return {
     date,
     entries: sorted,
-    workedMinutes: finalized || (open && consistent) ? worked : analysis.workedMinutesConfirmed,
+    // Inconsistente: NÃO usar pares confirmados como trabalhado financeiro.
+    workedMinutes: consistent ? worked : 0,
     expectedMinutes: expected,
     balanceMinutes: finalized ? balance : 0,
     excessMinutes: excess,
     registrableMinutes: registrable,
-    lunchDeductedMinutes,
-    segments,
+    lunchDeductedMinutes: consistent ? lunchDeductedMinutes : 0,
+    segments: consistent ? segments : [],
     open,
     empty: entries.length === 0,
     status,
     consistent,
     confirmedMinutes: analysis.workedMinutesConfirmed,
     financialPending,
+    canFinalizeFinancialDay,
+    derivedBreak,
   };
 }
 

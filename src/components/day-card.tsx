@@ -17,14 +17,19 @@ import {
   Trash2,
   TriangleAlert,
   Umbrella,
+  Wrench,
   Zap,
 } from "lucide-react";
 import type { Compensation, DayResult, WorkSettings } from "@/lib/types";
 import type { EntryType, TimeEntryLike } from "@/lib/time";
-import { formatDateBR, formatDateShortBR, formatMinutes, isFutureDate, nextWorkday, nowTimeString, todayString, weekdayLong } from "@/lib/time";
+import { formatDateBR, formatDateShortBR, formatMinutes, isFutureDate, nextWorkday, nowTimeString, toMinutes, todayString, weekdayLong } from "@/lib/time";
+import { predictedBreakWindow } from "@/lib/breaks";
 import { Badge, Button, ConfirmDialog, ExcessTenBadge, Input, Select } from "@/components/ui";
 import { CompensationForm, type CompFormData } from "@/components/compensation-form";
+import { CorrectPunchesModal } from "@/components/correct-punches-modal";
 import { SmartExit } from "@/components/smart-exit";
+import { actions } from "@/lib/store";
+import { analyzePunches, suggestedPunchTypeAt } from "@/lib/punches";
 import { allocatedForSource, overflowForSource, type ExtraCapacity } from "@/lib/debt";
 import { absenceLabel, type Absence, type DayBalanceView } from "@/lib/absences";
 import { excessReasonLabel, excessReasonObservation, specialExcessLedger, type DayCreditView } from "@/lib/hour-bank";
@@ -167,6 +172,8 @@ interface Props {
   abonadoHint?: { label: string } | null;
   /** Trabalho dentro da janela ABONADO_PARCIAL (alerta visual; sem crédito automático). */
   workedInAbonoMinutes?: number;
+  /** Detalhe visual do ABONO PARCIAL (sem nova regra financeira). */
+  abonoParcial?: { abonoStart: string; abonoEnd: string; expectedRegular: number } | null;
 }
 
 export function DayCard({
@@ -198,6 +205,7 @@ export function DayCard({
   compensarHint,
   abonadoHint,
   workedInAbonoMinutes,
+  abonoParcial,
 }: Props) {
   // Regra: todos os dias iniciam RECOLHIDOS — o usuário expande apenas o dia desejado.
   const [expanded, setExpanded] = useState(false);
@@ -226,6 +234,10 @@ export function DayCard({
     openMinutes: number;
     unplannedMinutes: number;
   } | undefined>();
+  const [correctOpen, setCorrectOpen] = useState(false);
+  const [showInterval, setShowInterval] = useState(false);
+  const [intOut, setIntOut] = useState("");
+  const [intIn, setIntIn] = useState("");
 
   const d = result;
   const pendingComp = compsForDate.find((c) => c.status === "pendente");
@@ -238,12 +250,16 @@ export function DayCard({
   // (Regra específica de kind === "abono" — NÃO generalizar para outros eventos.)
   const abonoDay = absence?.kind === "abono";
   const incompletePast = isIncompletePastPunch(d.date, d.open, todayString());
+  const punchPending = d.financialPending;
+  const inconsistent = !d.consistent && d.entries.length > 0;
 
   const add = async (type?: EntryType, time?: string) => {
     if (busy) return;
     setBusy(true);
     try {
-      await onAddEntry({ date: d.date, time: time ?? form.time, type: type ?? form.type, note: form.note || null, source: "manual" });
+      const t = time ?? form.time;
+      const chosen = type ?? suggestedPunchTypeAt(d.entries, t);
+      await onAddEntry({ date: d.date, time: t, type: chosen, note: form.note || null, source: "manual" });
       setForm((f) => ({ ...f, note: "" }));
       setShowAdd(false);
     } finally {
@@ -346,7 +362,7 @@ export function DayCard({
     ? creditView.usedSpecialViaTarget + creditView.usedSpecialViaSource
     : allocatedHere;
   const excessRemaining = creditView?.freeSpecial ?? remainingExcess;
-  const showSplit = !d.open && !d.empty && excessOriginal > 0;
+  const showSplit = !punchPending && !d.open && !d.empty && excessOriginal > 0;
   const specialLed = showSplit ? specialExcessLedger(d.date, allComps ?? [], excessOriginal) : null;
   const excessTreated = showSplit && (specialLed?.status === "tratado");
   const deficitParcels = (allComps ?? []).filter(
@@ -357,7 +373,11 @@ export function DayCard({
   const deficitOriginal = commonDeficit;
   const deficitOpen = Math.max(0, deficitOriginal - deficitConcluded);
   const showDeficitFollow =
-    deficitOriginal > 0 && !d.open && (!d.empty || !!falta) && !showSplit;
+    !punchPending && deficitOriginal > 0 && !d.open && (!d.empty || !!falta) && !showSplit;
+  const predicted = !punchPending && d.open
+    ? predictedBreakWindow(d.entries, settings, regularExpected)
+    : null;
+  const breakChip = d.derivedBreak ?? predicted;
 
   return (
     <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -393,6 +413,8 @@ export function DayCard({
               <Badge tone="slate">Jornada não iniciada</Badge>
             ) : incompletePast ? (
               <Badge tone="amber">Registro incompleto</Badge>
+            ) : inconsistent ? (
+              <Badge tone="amber">Registro inconsistente</Badge>
             ) : (
               statusBadge(d)
             )}
@@ -422,12 +444,16 @@ export function DayCard({
             )}
             {d.lunchDeductedMinutes > 0 && (
               <span className="text-[11px] font-medium text-slate-400">
-                almoço descontado ({formatMinutes(d.lunchDeductedMinutes)})
+                intervalo automático ({formatMinutes(d.lunchDeductedMinutes)})
               </span>
             )}
           </div>
         </div>
         <div className="shrink-0 text-right">
+          {punchPending ? (
+            <p className="text-xs font-bold text-amber-700">Pendente</p>
+          ) : (
+          <>
           <p className="text-lg font-extrabold tabular-nums text-slate-900">{formatMinutes(d.workedMinutes)}</p>
           {showSplit ? (
             <>
@@ -459,6 +485,8 @@ export function DayCard({
               )}
             </>
           )}
+          </>
+          )}
         </div>
         {expanded ? <ChevronUp size={18} className="text-slate-400" /> : <ChevronDown size={18} className="text-slate-400" />}
       </button>
@@ -466,7 +494,7 @@ export function DayCard({
       {expanded && (
         <div className="border-t border-slate-100 px-5 py-4">
           {/* Assistente de saída (somente para o dia em andamento; nunca no futuro) */}
-          {d.open && isToday && (
+          {d.open && isToday && !punchPending && (
             <div className="mb-4">
               <SmartExit
                 date={d.date}
@@ -491,17 +519,20 @@ export function DayCard({
 
           {incompletePast && (
             <div className="mb-3 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2.5 text-xs font-medium text-amber-800">
-              <p className="font-bold">Registro incompleto</p>
-              <p className="mt-0.5">Existe uma entrada sem saída correspondente neste dia. Corrija manualmente o registro.</p>
+              <p className="font-extrabold uppercase tracking-wide">Registro incompleto</p>
+              <p className="mt-0.5">Há uma entrada sem saída correspondente. Corrija os registros para que este dia possa ser calculado.</p>
+              <Button size="sm" className="mt-2" onClick={() => setCorrectOpen(true)}>
+                <Wrench size={13} /> Corrigir registros
+              </Button>
             </div>
           )}
-          {d.financialPending && !incompletePast && (
+          {inconsistent && (
             <div className="mb-3 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2.5 text-xs font-medium text-amber-800">
-              <p className="font-bold">Registro inconsistente</p>
-              <p className="mt-0.5">Cálculo pendente — corrija as batidas para finalizar o saldo deste dia.</p>
-              {d.confirmedMinutes > 0 && (
-                <p className="mt-0.5">{formatMinutes(d.confirmedMinutes)} confirmadas em pares válidos — não são o saldo final.</p>
-              )}
+              <p className="font-extrabold uppercase tracking-wide">Registro inconsistente</p>
+              <p className="mt-0.5">A sequência de registros deste dia não é válida. Corrija as batidas para que o dia possa ser calculado e registrado.</p>
+              <Button size="sm" className="mt-2" onClick={() => setCorrectOpen(true)}>
+                <Wrench size={13} /> Corrigir registros
+              </Button>
             </div>
           )}
 
@@ -513,8 +544,16 @@ export function DayCard({
               </p>
             </div>
           )}
+          {abonoParcial && (
+            <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-900">
+              <p className="font-extrabold uppercase tracking-wide">Abono parcial — calendário</p>
+              <p className="mt-1">Período abonado: <b>{abonoParcial.abonoStart}–{abonoParcial.abonoEnd}</b> · 4h</p>
+              <p>Jornada a cumprir: <b>13:00–17:00</b> · {formatMinutes(abonoParcial.expectedRegular)}</p>
+              <p>Base regular: <b>{formatMinutes(abonoParcial.expectedRegular)}</b></p>
+            </div>
+          )}
 
-          {compensarHint && (
+          {compensarHint && !punchPending && (
             <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-900">
               <p className="text-[11px] font-extrabold uppercase tracking-wider text-amber-700">Dia com regra especial</p>
               <p className="mt-0.5 font-bold">{compensarHint.label}</p>
@@ -659,7 +698,8 @@ export function DayCard({
             </div>
           )}
 
-          {/* Métricas */}
+          {/* Métricas — ocultas enquanto o dia não for finalizável */}
+          {!punchPending && (
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <MiniStat
               label={futureDay ? "Registro previsto" : "Trabalhado"}
@@ -692,6 +732,7 @@ export function DayCard({
               sub={futureDay ? "ainda não realizado" : d.excessMinutes > 0 ? "limitado a 10h" : undefined}
             />
           </div>
+          )}
 
           {showDeficitFollow && (
             <div className="mt-3 space-y-2 rounded-xl border border-amber-200 bg-amber-50/70 px-3 py-3">
@@ -742,7 +783,7 @@ export function DayCard({
               />
               <div className={`min-w-0 w-full flex-1 text-xs font-medium sm:w-auto ${excessTreated ? "text-emerald-800" : "text-rose-800"}`}>
                 <p className="flex flex-wrap items-center gap-1.5 text-[11px] font-extrabold uppercase tracking-wider">
-                  {excessTreated ? "Excedente tratado ✓" : <>⚠ Excedente do limite diário <ExcessTenBadge /></>}
+                  {excessTreated ? "Excedente tratado ✓" : <>⚠ EXCEDENTE DO LIMITE DIÁRIO <ExcessTenBadge /></>}
                 </p>
                 <div className="mt-1.5 flex flex-wrap items-end gap-x-4 gap-y-1">
                   <span>
@@ -840,7 +881,7 @@ export function DayCard({
             </div>
           )}
 
-          {compensarHint && !futureDay && absence?.kind !== "acordado" && (
+          {compensarHint && !punchPending && !futureDay && absence?.kind !== "acordado" && (
             <div className="mt-3 flex flex-col gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 sm:flex-row sm:flex-wrap sm:items-center">
               <p className="min-w-0 flex-1 text-xs font-medium text-amber-800">
                 {compensarHint.label}: em aberto a partir da obrigação efetiva{" "}
@@ -867,7 +908,7 @@ export function DayCard({
           )}
 
           {/* Atalho: Acordo a compensar (afastamento acordado — compensar posteriormente) */}
-          {shortcuts?.canCompensate && Math.max(0, shortcuts.acordoRemaining - shortcuts.acordoPlanned) > 0 && (
+          {!punchPending && shortcuts?.canCompensate && Math.max(0, shortcuts.acordoRemaining - shortcuts.acordoPlanned) > 0 && (
             <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2.5">
               {/* Detalhamento completo fica no banner acima — aqui só o convite à ação */}
               <p className="flex-1 text-xs font-medium text-violet-800">
@@ -898,7 +939,7 @@ export function DayCard({
               Coexiste com o atalho do acordo: quando o dia tem acorda parcial a
               compensar SEM batidas, o restante da jornada é déficit comum
               (acordo 4h + déficit 4h — nunca uma dívida única de 8h). */}
-          {!futureDay && shortcuts?.canCompensate && deficitOpen > 0 && (
+          {!punchPending && !futureDay && shortcuts?.canCompensate && deficitOpen > 0 && (
             <div className="mt-3 flex flex-col gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 sm:flex-row sm:flex-wrap sm:items-center">
               <p className="min-w-0 flex-1 text-xs font-medium text-amber-800">
                 Déficit em aberto: <b>{formatMinutes(deficitOpen)}</b>
@@ -942,8 +983,8 @@ export function DayCard({
             </div>
           )}
 
-          {/* Segmentos */}
-          {d.segments.length > 0 && (
+          {/* Segmentos + intervalo automático/previsto (derivado — NÃO é batida) */}
+          {(d.segments.length > 0 || breakChip) && (
             <div className="mt-3 flex flex-wrap items-center gap-2">
               {d.segments.map((s, i) => (
                 <span key={i} className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
@@ -951,6 +992,28 @@ export function DayCard({
                   <span className="text-slate-400">· {formatMinutes(s.minutes)}</span>
                 </span>
               ))}
+              {breakChip && (
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-dashed border-amber-300 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-800">
+                  {breakChip.start} → {breakChip.end}
+                  <span className="text-amber-600">
+                    · {d.derivedBreak ? "intervalo automático" : "intervalo previsto"} {formatMinutes(breakChip.minutes)}
+                  </span>
+                  {!futureDay && !abonoDay && (
+                    <button
+                      type="button"
+                      className="rounded-md p-0.5 text-amber-700 hover:bg-amber-100 cursor-pointer"
+                      aria-label="Editar intervalo automático"
+                      onClick={() => {
+                        setIntOut(breakChip.start);
+                        setIntIn(breakChip.end);
+                        setShowInterval(true);
+                      }}
+                    >
+                      <Pencil size={12} />
+                    </button>
+                  )}
+                </span>
+              )}
             </div>
           )}
 
@@ -998,16 +1061,16 @@ export function DayCard({
           <div className="mt-3 flex min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
             {!futureDay && !abonoDay && (showAdd ? (
               <div className="flex w-full min-w-0 flex-wrap items-end gap-2 rounded-xl border border-dashed border-slate-300 bg-white p-3">
+                <Input label="Horário" type="time" className="w-32" value={form.time} onChange={(ev) => setForm({ ...form, time: ev.target.value, type: suggestedPunchTypeAt(d.entries, ev.target.value) })} />
                 <Select
-                  label="Tipo"
-                  className="w-32"
-                  value={form.type}
+                  label="Tipo (pela posição)"
+                  className="w-36"
+                  value={suggestedPunchTypeAt(d.entries, form.time)}
                   onChange={(ev) => setForm({ ...form, type: ev.target.value as EntryType })}
                 >
                   <option value="entrada">Entrada</option>
                   <option value="saida">Saída</option>
                 </Select>
-                <Input label="Horário" type="time" className="w-32" value={form.time} onChange={(ev) => setForm({ ...form, time: ev.target.value })} />
                 <Input label="Observação (opcional)" className="min-w-[160px] flex-1" value={form.note} onChange={(ev) => setForm({ ...form, note: ev.target.value })} />
                 <Button size="sm" loading={busy} onClick={() => add()}>
                   <Plus size={13} /> Adicionar
@@ -1019,16 +1082,44 @@ export function DayCard({
                 onClick={() => { setShowAdd(true); setForm((f) => ({ ...f, time: nowTimeString() })); }}
                 className="inline-flex w-auto items-center justify-center gap-1.5 rounded-lg border border-dashed border-slate-300 px-2.5 py-1.5 text-xs font-bold text-slate-500 transition-colors hover:border-emerald-400 hover:text-emerald-600 cursor-pointer"
               >
-                <Plus size={14} />
-                <span className="sm:hidden">Registro manual</span>
-                <span className="hidden sm:inline">Adicionar registro manual</span>
+                <Plus size={14} /> Adicionar batida
               </button>
             ))}
+            {!futureDay && !abonoDay && (showInterval ? (
+              <div className="flex w-full min-w-0 flex-wrap items-end gap-2 rounded-xl border border-dashed border-slate-300 bg-white p-3">
+                <Input label="Saída para intervalo" type="time" className="w-36" value={intOut} onChange={(e) => setIntOut(e.target.value)} />
+                <Input label="Retorno do intervalo" type="time" className="w-36" value={intIn} onChange={(e) => setIntIn(e.target.value)} />
+                <Button size="sm" loading={busy} onClick={() => void (async () => {
+                  if (busy || !intOut || !intIn || toMinutes(intIn) <= toMinutes(intOut)) return;
+                  setBusy(true);
+                  try {
+                    const res = actions.addEntries([
+                      { date: d.date, time: intOut, type: "saida", note: null, source: "manual" },
+                      { date: d.date, time: intIn, type: "entrada", note: null, source: "manual" },
+                    ]);
+                    if (res.ok) { setShowInterval(false); setIntOut(""); setIntIn(""); }
+                  } finally { setBusy(false); }
+                })()}>Salvar intervalo</Button>
+                <Button size="sm" variant="ghost" onClick={() => setShowInterval(false)}>Cancelar</Button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setShowInterval(true)}
+                className="inline-flex w-auto items-center justify-center gap-1.5 rounded-lg border border-dashed border-slate-300 px-2.5 py-1.5 text-xs font-bold text-slate-500 transition-colors hover:border-emerald-400 hover:text-emerald-600 cursor-pointer"
+              >
+                <Plus size={14} /> Registrar intervalo
+              </button>
+            ))}
+            {punchPending && !futureDay && !abonoDay && (
+              <Button size="sm" variant="secondary" onClick={() => setCorrectOpen(true)}>
+                <Wrench size={13} /> Corrigir registros
+              </Button>
+            )}
           </div>
 
           {/* Rodapé explicativo do "No ponto" — em dia de Abono o card é
               SOMENTE INFORMATIVO e não exibe textos explicativos. */}
-          {!abonoDay && (
+          {!abonoDay && !punchPending && (
             <p className="mt-3 text-[11px] text-slate-400">
               * "No ponto" é o total que pode ser lançado no sistema da empresa (limitado a{" "}
               {formatMinutes(settings.maxDailyMinutes)}/dia). Horas acima de 10h precisam ser realocadas
@@ -1047,9 +1138,23 @@ export function DayCard({
           pendingDelete ? (
             <div className="space-y-2">
               <p>{formatDateBR(d.date)} · {pendingDelete.time} · {pendingDelete.type === "entrada" ? "Entrada" : "Saída"}</p>
-              <p className="text-xs text-amber-700">
-                Esta exclusão pode deixar a sequência de batidas incompleta. O saldo do dia ficará pendente até a correção.
-              </p>
+              {(() => {
+                const after = analyzePunches(d.entries.filter((e) => e.id !== pendingDelete.id));
+                const wasBad = !d.consistent || d.financialPending;
+                const nowOk = after.isConsistent && (after.isComplete || after.sorted.length === 0 || after.sorted[after.sorted.length - 1]?.type === "entrada");
+                if (wasBad && after.isConsistent) {
+                  return <p className="text-xs text-slate-600">Esta exclusão tende a regularizar a sequência deste dia.</p>;
+                }
+                if (!after.isConsistent || (after.sorted.length > 0 && !after.isComplete && d.date < todayString())) {
+                  return (
+                    <p className="text-xs text-amber-700">
+                      Esta exclusão deixará a sequência de registros incompleta ou inconsistente. O saldo do dia ficará pendente até a correção.
+                    </p>
+                  );
+                }
+                void nowOk;
+                return <p className="text-xs text-slate-600">Confirme para excluir esta batida.</p>;
+              })()}
             </div>
           ) : null
         }
@@ -1072,6 +1177,14 @@ export function DayCard({
           await onCreateComp({ ...payload, kind: compKind });
         }}
       />
+      {correctOpen && (
+        <CorrectPunchesModal
+          open
+          onClose={() => setCorrectOpen(false)}
+          date={d.date}
+          entries={d.entries}
+        />
+      )}
     </section>
   );
 }

@@ -414,7 +414,7 @@ export function companyDayContext(
   const worked = day.workedMinutes;
   const weekend = isWeekendDate(date);
   const statusOf = (): DayResult["status"] =>
-    day.open ? "in-progress" : day.entries.length > 0 ? "ok" : "empty";
+    day.financialPending || day.open ? "in-progress" : day.entries.length > 0 ? "ok" : "empty";
 
   if (calendarEntry) {
     const expectedRegular = Math.max(0, calendarEntry.jornadaEsperadaHoras * 60);
@@ -470,23 +470,25 @@ export function companyDayContext(
   }
 
   if (weekend) {
+    const freeze = day.financialPending;
     const hasPunches = day.entries.length > 0;
     const type: CompanyDayType = hasPunches ? "trabalho-folga" : "folga";
+    const credit = freeze ? 0 : worked;
     return {
       ctx: baseCtx,
       label: hasPunches ? "Trabalho em folga" : "Folga",
       marker: hasPunches ? "trabalho-folga" : "folga",
       expectedRegular: 0,
       abonadasMinutes: 0,
-      cargaConsiderada: worked,
+      cargaConsiderada: credit,
       calendarioACompensar: 0,
-      regularBalance: worked,
+      regularBalance: credit,
       isWeekend: true,
       type,
       effectiveExpected: 0,
-      adjustedBalance: worked,
+      adjustedBalance: credit,
       adjustedDeficit: 0,
-      displayDay: { ...day, expectedMinutes: 0, balanceMinutes: worked, status: statusOf() },
+      displayDay: { ...day, expectedMinutes: 0, balanceMinutes: credit, status: statusOf() },
     };
   }
 

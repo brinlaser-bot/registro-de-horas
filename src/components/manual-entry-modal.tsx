@@ -23,15 +23,17 @@ interface Period {
 interface Props {
   open: boolean;
   onClose: () => void;
+  /** Prefill da data (ex.: card do dia). */
+  initialDate?: string;
   /** Legado: um único par. Preferir persistência via store.addEntries. */
   onSave?: (data: ManualPairData) => void | Promise<void>;
 }
 
 /** Modal para lançar um dia completo (vários períodos) ou um intervalo. */
-export function ManualEntryModal({ open, onClose, onSave }: Props) {
+export function ManualEntryModal({ open, onClose, initialDate, onSave }: Props) {
   const toast = useToast();
   const today = todayString();
-  const [date, setDate] = useState(today);
+  const [date, setDate] = useState(initialDate || today);
   const [note, setNote] = useState("");
   const [mode, setMode] = useState<"periodo" | "intervalo">("periodo");
   const [periods, setPeriods] = useState<Period[]>([{ entrada: "", saida: "" }]);
@@ -40,14 +42,14 @@ export function ManualEntryModal({ open, onClose, onSave }: Props) {
 
   useEffect(() => {
     if (open) {
-      setDate(today);
+      setDate(initialDate || today);
       setNote("");
       setMode("periodo");
       setPeriods([{ entrada: "", saida: "" }]);
       inflight.current = false;
       setBusy(false);
     }
-  }, [open, today]);
+  }, [open, today, initialDate]);
 
   const punchesOf = () => {
     const out: { date: string; time: string; type: EntryType; note: string | null; source: "manual" }[] = [];
@@ -128,12 +130,12 @@ export function ManualEntryModal({ open, onClose, onSave }: Props) {
         />
 
         <Select
-          label="Tipo de lançamento"
+          label="O que deseja registrar?"
           value={mode}
           onChange={(e) => setMode(e.target.value as "periodo" | "intervalo")}
         >
-          <option value="periodo">Período trabalhado</option>
-          <option value="intervalo">Intervalo / saída e retorno</option>
+          <option value="periodo">Horário trabalhado</option>
+          <option value="intervalo">Intervalo / pausa</option>
         </Select>
 
         {periods.map((p, i) => (
@@ -155,7 +157,7 @@ export function ManualEntryModal({ open, onClose, onSave }: Props) {
             </div>
             <div className="grid grid-cols-2 gap-4">
               <Input
-                label={mode === "intervalo" ? "Saída" : "Hora de entrada"}
+                label={mode === "intervalo" ? "Saída para intervalo" : "Hora de entrada"}
                 type="time"
                 value={mode === "intervalo" ? p.entrada : p.entrada}
                 onChange={(e) =>
@@ -163,7 +165,7 @@ export function ManualEntryModal({ open, onClose, onSave }: Props) {
                 }
               />
               <Input
-                label={mode === "intervalo" ? "Retorno" : "Hora de saída"}
+                label={mode === "intervalo" ? "Retorno do intervalo" : "Hora de saída"}
                 type="time"
                 value={p.saida}
                 onChange={(e) =>

@@ -37,6 +37,7 @@ import { canCompleteComp, extraCapacityForDate, kindOf, usesHourExtra } from "@/
 import { compensarObligationOnDate, isAbonadoDay } from "@/lib/compensar";
 import { canRegisterFalta, dayBalanceContribution, faltaOnDate } from "@/lib/faltas";
 import { excessReasonOnDate, shouldPromptExcessReason } from "@/lib/hour-bank";
+import { pendingPunchDatesInCycle } from "@/lib/pending-punches";
 import { HourBankCard } from "@/components/hour-bank-card";
 import { ExcessReasonModal } from "@/components/excess-reason-modal";
 import type { CompKind, DayResult, DaySummary } from "@/lib/types";
@@ -126,7 +127,7 @@ export default function DashboardPage() {
       const cctx = companyDayContext(d, entries, absences, companyCalendars, settings, d === todayStr ? nowMinutes : undefined);
       const s = toSummary(cctx.ctx.day, d);
       s.expectedMinutes = cctx.effectiveExpected;
-      s.balanceMinutes = cctx.regularBalance;
+      s.balanceMinutes = cctx.adjustedBalance;
       recents.push(s);
     }
 
@@ -410,6 +411,8 @@ export default function DashboardPage() {
                   ? "Folga hoje. Se você registrar trabalho, as horas serão contabilizadas como trabalho em folga."
                   : todayCtx.type === "trabalho-folga"
                     ? "Trabalho em folga registrado hoje."
+                    : !t.consistent && t.entries.length > 0
+                      ? "Registro inconsistente — corrija as batidas de hoje."
                     : t.empty
                       ? "Você ainda não bateu o ponto hoje. Registre sua entrada abaixo."
                       : t.open
@@ -441,6 +444,8 @@ export default function DashboardPage() {
                   : `base ${formatMinutes(todayCtx.effectiveExpected)}`}
                 {todayIdle ? (
                   <> · jornada não iniciada</>
+                ) : t.financialPending ? (
+                  <> · pendente</>
                 ) : faltaHoje ? (
                   <>
                     {" "}·{" "}
@@ -498,6 +503,19 @@ export default function DashboardPage() {
             permanece depois dos 4 indicadores (lg:order-3). Componentes
             reutilizados no modo embutido (§7: sem duplicar lógica; §10/§11:
             todas as funções do Registro rápido e do Smart Exit preservadas). */}
+        {(() => {
+          const nPending = pendingPunchDatesInCycle(entries, settings, todayStr).length;
+          if (nPending <= 0) return null;
+          return (
+            <div className="order-2 lg:order-3 rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3">
+              <p className="text-sm font-extrabold text-amber-800">⚠ Registros pendentes: {nPending}</p>
+              <p className="mt-0.5 text-xs text-amber-700">Existem dias que precisam de correção antes do saldo ser definitivo.</p>
+              <Link href="/registros?pendentes=1">
+                <Button size="sm" className="mt-2" variant="secondary">Ver pendências</Button>
+              </Link>
+            </div>
+          );
+        })()}
         <Card
           compact
           className="order-2 lg:order-3"
