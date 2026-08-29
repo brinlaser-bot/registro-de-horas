@@ -122,8 +122,9 @@ check("10. ABONO PARCIAL posterior ao início continua funcionando", () => {
 
 check("11. Resumo Dias sem registro respeita início", () => {
   const r = srcOf("src/app/(app)/resumo/page.tsx");
+  const days = srcOf("src/lib/resumo-days.ts");
   assert.ok(r.includes("user.controlStartDate"));
-  assert.ok(r.includes("isMissingExpectedRecord(date, todayStr, cctx, faltas, user.controlStartDate)"));
+  assert.ok(days.includes("isMissingExpectedRecord(date, today, cctx, faltas, controlStartDate)"));
   const missing = missingExpectedRecordDates(PERIOD, TODAY, [], [], undefined, S, [], START);
   assert.equal(missing.length, 0);
 });

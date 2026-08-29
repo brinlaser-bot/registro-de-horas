@@ -97,6 +97,10 @@ export function periodLabel(p: PointPeriod): string {
   return `${formatDateBR(p.from)} → ${formatDateBR(p.to)}`;
 }
 
+export function samePointPeriod(a: PointPeriod, b: PointPeriod): boolean {
+  return a.from === b.from && a.to === b.to;
+}
+
 /** Todas as datas (YYYY-MM-DD) entre from e to, inclusive. */
 export function listDaysBetween(from: string, to: string): string[] {
   const days: string[] = [];

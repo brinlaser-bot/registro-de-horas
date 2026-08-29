@@ -144,9 +144,11 @@ check("A. cenário canônico ⇒ mesmo cálculo por dia + corte temporal central
   }
   assert.equal(naive, -1150, "a fórmula antiga daria −19h10 (o bug relatado)");
   // Estrutural: as TRÊS telas consomem dayBalanceContribution (fonte única).
-  for (const [name, s] of [["Visão geral", pageSrc], ["Resumo", resumoSrc], ["Registros", registrosSrc]] as const) {
+  const resumoDaysSrc = src("lib/resumo-days.ts");
+  for (const [name, s] of [["Visão geral", pageSrc], ["Resumo", resumoDaysSrc], ["Registros", registrosSrc]] as const) {
     assert.ok(s.includes("dayBalanceContribution(cctx, faltas"), `${name} usa a contribuição central`);
   }
+  assert.ok(resumoSrc.includes("buildResumoDayRow"), "Resumo monta as linhas pela fonte central");
   assert.ok(pageSrc.includes("listDaysBetween(period.from, period.to)"), "Visão geral percorre TODOS os dias do período");
 });
 

@@ -70,6 +70,25 @@ export function situationChip(id: DaySituationId): string {
   return DAY_SITUATION_OPTIONS.find((o) => o.id === id)?.chip ?? id;
 }
 
+/**
+ * “Abaixo da base” exige jornada FINANCEIRAMENTE FINALIZADA:
+ * batidas completas e consistentes, trabalhado < base efetiva.
+ * Sem fatos (zero batidas) NÃO é 0h confirmadas — nunca vira abaixo da base.
+ */
+export function isAbaixoDaBase(p: {
+  date: string;
+  today: string;
+  view: CalendarDayView;
+  missingExpected: boolean;
+}): boolean {
+  const day = p.view.displayDay;
+  if (p.date > p.today) return false;
+  if (p.missingExpected) return false;
+  if (day.entries.length === 0) return false;
+  if (!day.canFinalizeFinancialDay || day.financialPending || day.open) return false;
+  return p.view.adjustedDeficit > 0;
+}
+
 export function parseSituationParam(raw: string | null | undefined): DaySituationId[] {
   if (!raw) return [];
   const seen = new Set<DaySituationId>();
@@ -107,13 +126,7 @@ export function situationsFromView(p: {
 
   if (day.status === "ok") ids.push("dia-ok");
 
-  const finalized =
-    day.canFinalizeFinancialDay &&
-    !day.financialPending &&
-    !day.open &&
-    !missingExpected &&
-    date <= today;
-  if (finalized && view.adjustedDeficit > 0) ids.push("abaixo-base");
+  if (isAbaixoDaBase({ date, today, view, missingExpected })) ids.push("abaixo-base");
 
   if (regularExtra > 0) ids.push("hora-extra-regular");
   if (excessSpecial > 0) ids.push("excedente-10");

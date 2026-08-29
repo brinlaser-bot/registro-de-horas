@@ -4,115 +4,49 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { BarChart3, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Download } from "lucide-react";
 import { settingsOf, useAppData, useIsClient } from "@/lib/store";
-import { formatMinutes, isRealizedDate, isWeekend, todayString, weekdayShort } from "@/lib/time";
-import {
-  absenceLabel,
-  absenceOnDate,
-} from "@/lib/absences";
-import { dayBalanceContribution, effectiveFaltas, faltaOnDate, faltaStatusOf } from "@/lib/faltas";
+import { formatMinutes, isRealizedDate, todayString, weekdayShort } from "@/lib/time";
+import { effectiveFaltas } from "@/lib/faltas";
 import {
   getNextPointPeriod,
   getPointPeriod,
   getPreviousPointPeriod,
   listDaysBetween,
   periodLabel,
+  samePointPeriod,
   type PointPeriod,
 } from "@/lib/periods";
-import { companyDayContext, companyDeficitContribution } from "@/lib/company-calendar";
 import { pendingPunchDates } from "@/lib/pending-punches";
-import { isMissingExpectedRecord } from "@/lib/missing-records";
 import { buildDebtDays } from "@/lib/debt";
 import { specialExcessBook } from "@/lib/hour-bank";
+import { buildResumoDayRow, isQuietResumoDay } from "@/lib/resumo-days";
 import { Badge, Button, Card, EmptyState, Skeleton, StatCard } from "@/components/ui";
 import { StackedPeriodChart } from "@/components/stacked-period-chart";
-import type { Absence } from "@/lib/absences";
-
-interface DayRow {
-  date: string;
-  workedMinutes: number;
-  expectedMinutes: number; // efetiva (com ausência descontada)
-  balanceMinutes: number;
-  excessMinutes: number;
-  registrableMinutes: number;
-  status: string;
-  entryCount: number;
-  eventLabel: string | null;
-  /** Contribuição central deste dia ao Saldo do período. */
-  balanceContribution: number;
-  /** Déficit comum (resolução central). */
-  deficitContribution: number;
-  /** Falta do dia: \"efetiva\" vale (saldo/déficit); \"prevista\" mascarada. */
-  faltaStatus: "efetiva" | "prevista" | null;
-  absence: Absence | undefined;
-  missingExpected: boolean;
-}
 
 export default function ResumoPage() {
   const mounted = useIsClient();
   const { user, entries, compensations, absences, companyCalendars, faltas, excessReasons } = useAppData();
   const settings = settingsOf(user);
   const todayStr = todayString();
-  const [period, setPeriod] = useState<PointPeriod>(() => getPointPeriod(new Date().toISOString().slice(0, 10)));
+  const currentPeriod = getPointPeriod(todayStr);
+  const [period, setPeriod] = useState<PointPeriod>(() => getPointPeriod(todayString()));
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const viewingCurrentPeriod = samePointPeriod(period, currentPeriod);
 
-  const allDays: DayRow[] = useMemo(() => {
+  const allDays = useMemo(() => {
     return listDaysBetween(period.from, period.to)
-      .map((date) => {
-        const cctx = companyDayContext(date, entries, absences, companyCalendars, settings);
-        const ctx = cctx.ctx;
-        const absence = absenceOnDate(absences, date);
-        const falta = faltaOnDate(faltas, date);
-        const faltaStatus = falta ? faltaStatusOf(date, todayStr) : null;
-        const realized = isRealizedDate(date, todayStr);
-        const idleToday = date === todayStr && ctx.day.empty && faltaStatus !== "efetiva" && !absence && cctx.effectiveExpected > 0;
-        const missingExpected = isMissingExpectedRecord(date, todayStr, cctx, faltas, user.controlStartDate);
-        return {
+      .map((date) =>
+        buildResumoDayRow({
           date,
-          workedMinutes: realized ? ctx.day.workedMinutes : 0,
-          expectedMinutes: cctx.expectedRegular,
-          balanceMinutes: realized ? cctx.regularBalance : 0,
-          excessMinutes: realized ? ctx.day.excessMinutes : 0,
-          registrableMinutes: realized ? ctx.day.registrableMinutes : 0,
-          status: !realized
-            ? ctx.day.entries.length > 0
-              ? "future"
-              : "empty"
-            : idleToday
-              ? "idle"
-            : missingExpected
-              ? "empty"
-            : faltaStatus === "efetiva"
-            ? "falta"
-            : absence
-              ? absence.kind === "ferias"
-                ? "ferias"
-                : "afastamento"
-              : ctx.day.open
-                ? "in-progress"
-                : ctx.day.excessMinutes > 0
-                  ? "excess"
-                  : ctx.adjustedDeficit > 0
-                    ? "deficit"
-                    : ctx.day.entries.length > 0
-                      ? "ok"
-                      : "empty",
-          entryCount: ctx.day.entries.length,
-          eventLabel:
-            cctx.label ??
-            (absence ? absenceLabel(absence) : null) ??
-            (faltaStatus === "efetiva" ? "Falta" : faltaStatus === "prevista" ? "Falta prevista" : null),
-          /* Contribuição CENTRAL (dayBalanceContribution) — a MESMA soma da
-           * Visão geral e de Registros: falta efetiva conta (−jornada efetiva),
-           * prevista é mascarada em 0, demais dias pelo agregador central. */
-          balanceContribution: dayBalanceContribution(cctx, faltas, date, todayStr),
-          deficitContribution:
-            missingExpected || date > todayStr || faltaStatus === "prevista" ? 0 : companyDeficitContribution(cctx),
-          faltaStatus,
-          absence,
-          missingExpected,
-        };
-      })
-      .filter((d) => d.entryCount > 0 || d.eventLabel || !isWeekend(d.date));
+          today: todayStr,
+          entries,
+          absences,
+          calendars: companyCalendars,
+          settings,
+          faltas,
+          controlStartDate: user.controlStartDate,
+        }),
+      )
+      .filter(isQuietResumoDay);
   }, [entries, absences, companyCalendars, faltas, settings, period, todayStr, user.controlStartDate]);
 
   const totals = useMemo(
@@ -234,7 +168,7 @@ export default function ResumoPage() {
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Button variant="secondary" size="sm" onClick={() => setPeriod(getPreviousPointPeriod(period))} aria-label="Período anterior">
             <ChevronLeft size={16} />
           </Button>
@@ -244,6 +178,11 @@ export default function ResumoPage() {
           <Button variant="secondary" size="sm" onClick={() => setPeriod(getNextPointPeriod(period))} aria-label="Próximo período">
             <ChevronRight size={16} />
           </Button>
+          {!viewingCurrentPeriod && (
+            <Button variant="secondary" size="sm" onClick={() => setPeriod(currentPeriod)}>
+              Período atual
+            </Button>
+          )}
         </div>
         <Button variant="secondary" size="sm" onClick={exportCsv}>
           <Download size={14} /> Exportar CSV
@@ -459,7 +398,7 @@ export default function ResumoPage() {
               </tbody>
             </table>
             <p className="mt-2 text-[11px] text-slate-400">
-              * "No ponto" = total que pode ser lançado no sistema da empresa (limitado a{" "}
+              * &quot;No ponto&quot; = total que pode ser lançado no sistema da empresa (limitado a{" "}
               {formatMinutes(settings.maxDailyMinutes)}/dia). Férias e afastamentos reduzem a jornada
               esperada do dia.
             </p>
