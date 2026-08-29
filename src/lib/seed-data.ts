@@ -22,22 +22,61 @@ export const DEFAULT_WORK_SETTINGS = {
   autoDeductLunch: true,
 } as const;
 
-export const DEFAULT_USER: User = {
-  id: 1,
+/** Identidade real do aplicativo — nunca substituída por seed/demo. */
+export const REAL_USER_IDENTITY = {
+  name: "Maria Helena",
+  email: "meu@horario.com",
+  birthDate: "1989-08-23",
+} as const;
+
+/** Identidade antiga de demonstração — migrada na hidratação para o perfil real. */
+export const DEMO_USER_IDENTITY = {
   name: "Alex Santos",
   email: "voce@exemplo.com",
-  ...DEFAULT_WORK_SETTINGS,
   birthDate: "1990-08-10",
+} as const;
+
+export function isDemoUserIdentity(user: Pick<User, "name" | "email">): boolean {
+  return user.name === DEMO_USER_IDENTITY.name && user.email === DEMO_USER_IDENTITY.email;
+}
+
+/** Copia nome, e-mail e nascimento da origem — jornada e controlStartDate ficam no destino. */
+export function withPreservedIdentity<T extends Pick<User, "name" | "email" | "birthDate">>(
+  target: T,
+  source: Pick<User, "name" | "email" | "birthDate">,
+): T {
+  return {
+    ...target,
+    name: source.name,
+    email: source.email,
+    birthDate: source.birthDate,
+  };
+}
+
+/** Troca só a identidade de demo (Alex Santos) pelo perfil real, sem tocar fatos. */
+export function applyDemoIdentityMigration(data: AppData): AppData {
+  if (!isDemoUserIdentity(data.user)) return data;
+  return {
+    ...data,
+    user: {
+      ...data.user,
+      ...REAL_USER_IDENTITY,
+    },
+  };
+}
+
+export const DEFAULT_USER: User = {
+  id: 1,
+  ...REAL_USER_IDENTITY,
+  ...DEFAULT_WORK_SETTINGS,
   controlStartDate: SEED_CONTROL_START,
 };
 
-/** Perfil de instalação nova: regras estruturais, sem identidade de demonstração. */
+/** Instalação nova: perfil real + regras estruturais, sem fatos de demonstração. */
 export const EMPTY_USER: User = {
   id: 1,
-  name: "",
-  email: "",
+  ...REAL_USER_IDENTITY,
   ...DEFAULT_WORK_SETTINGS,
-  birthDate: null,
   controlStartDate: null,
 };
 

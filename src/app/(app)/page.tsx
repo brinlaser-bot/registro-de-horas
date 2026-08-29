@@ -402,7 +402,7 @@ export default function DashboardPage() {
         <div className="order-1 flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
           <div className="min-w-0 flex-1">
             <h2 className="text-xl font-extrabold tracking-tight text-slate-900">
-              Olá, {firstName}! 👋
+              Olá, {user.name}! 👋
             </h2>
             <p className="mt-0.5 text-sm text-slate-500">
               {faltaHoje

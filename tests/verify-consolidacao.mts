@@ -373,7 +373,7 @@ check("S. acordado-dispensado integral sem batidas = expected 0, déficit 0, sal
 check("T. seed 3.1: datas fixas, calendário fictício, 20/08 quitado, 14/08 com 6 batidas", () => {
   const seed = buildSeedData();
   assert.ok((seed.companyCalendars?.length ?? 0) >= 1, "seed traz calendário fictício");
-  assert.equal(seed.user.birthDate, "1990-08-10");
+  assert.equal(seed.user.birthDate, "1989-08-23");
   assert.equal(seed.entries.some((e) => e.date === "2026-08-25"), false, "25/08 sem batidas");
   assert.ok(seed.entries.some((e) => e.date === "2026-08-24"));
   assert.ok(seed.entries.some((e) => e.date === "2026-08-07"));

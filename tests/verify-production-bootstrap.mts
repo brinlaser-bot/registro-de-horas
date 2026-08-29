@@ -117,7 +117,9 @@ check("8. configurações estruturais continuam disponíveis", () => {
   assert.equal(empty.user.lunchEnd, DEFAULT_WORK_SETTINGS.lunchEnd);
   assert.equal(empty.user.maxDailyMinutes, 600);
   assert.equal(empty.user.autoDeductLunch, true);
-  assert.equal(empty.user.birthDate, null);
+  assert.equal(empty.user.name, "Maria Helena");
+  assert.equal(empty.user.email, "meu@horario.com");
+  assert.equal(empty.user.birthDate, "1989-08-23");
   assert.match(empty.user.controlStartDate ?? "", /^\d{4}-\d{2}-\d{2}$/);
   assert.equal(PERIOD.from.slice(8, 10), "21");
   assert.equal(PERIOD.to.slice(8, 10), "20");
@@ -157,7 +159,8 @@ check("10. seed explícito continua funcionando", () => {
   actions.reseed();
   assert.equal(getAppData().entries.length, seed.entries.length);
   assert.equal(getAppData().compensations.length, seed.compensations.length);
-  assert.ok(storeSrc.includes("mutate(() => buildSeedData())"));
+  assert.ok(storeSrc.includes("buildSeedData()"));
+  assert.ok(storeSrc.includes("withPreservedIdentity"));
   assert.ok(seedSrc.includes("createEmptyState"));
   assert.ok(seedSrc.includes("createDemoSeed"));
 });

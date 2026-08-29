@@ -120,7 +120,12 @@ export default function ConfiguracoesPage() {
   };
 
   const reseed = () => {
-    if (!window.confirm("Substituir tudo pelos dados de exemplo? Seus registros atuais serão perdidos.")) return;
+    if (
+      !window.confirm(
+        "Restaurar os dados operacionais de exemplo? Seus registros atuais serão substituídos. Nome, e-mail e data de nascimento serão mantidos.",
+      )
+    )
+      return;
     actions.reseed();
     toast.show("Dados de exemplo restaurados.");
   };

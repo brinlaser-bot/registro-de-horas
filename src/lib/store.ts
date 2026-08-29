@@ -5,7 +5,7 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { computeDay, formatMinutes, FUTURE_DATE_ERROR, insertPunchError, isFutureDate, todayString, type EntryType } from "./time";
 import { applyControlStartMigration } from "./control-start";
-import { buildSeedData, createEmptyState } from "./seed-data";
+import { applyDemoIdentityMigration, buildSeedData, createEmptyState, withPreservedIdentity } from "./seed-data";
 import { absencesEqual, compsEqual, entriesEqual, excessReasonsEqual, mergeByIdAndContent } from "./backup";
 import { actualExtraForDate, allocatedForSource, canCompleteComp, concludedForSource, extraCapacityForDate, kindOf, usesHourExtra, acordoLinkedComps, originalHourExtraDebt, sourcePlanningHeadroom, OVERPLAN_MSG } from "./debt";
 import { compensarObligationOnDate, reconcileCompensarComps } from "./compensar";
@@ -128,7 +128,7 @@ export function parseStoredAppData(raw: string): AppData | null {
 export function hydrateAppData(raw: string | null, today: string = todayString()): AppData {
   if (raw) {
     const parsed = parseStoredAppData(raw);
-    if (parsed) return applyControlStartMigration(parsed, today);
+    if (parsed) return applyDemoIdentityMigration(applyControlStartMigration(parsed, today));
   }
   return createEmptyState(today);
 }
@@ -159,8 +159,13 @@ function load() {
     if (raw) {
       const parsed = parseStoredAppData(raw);
       if (parsed) {
-        data = applyControlStartMigration(parsed, today);
-        if ((parsed.user.controlStartDate ?? null) !== (data.user.controlStartDate ?? null)) {
+        data = applyDemoIdentityMigration(applyControlStartMigration(parsed, today));
+        if (
+          (parsed.user.controlStartDate ?? null) !== (data.user.controlStartDate ?? null) ||
+          parsed.user.name !== data.user.name ||
+          parsed.user.email !== data.user.email ||
+          (parsed.user.birthDate ?? null) !== (data.user.birthDate ?? null)
+        ) {
           persist();
         }
         emit();
@@ -1314,10 +1319,17 @@ export const actions = {
     mutate((d) => ({ ...d, user: { ...d.user, ...patch } }));
   },
 
-  /** Carrega o seed de demonstração — somente por ação explícita (nunca no bootstrap). */
+  /**
+   * Restaura o seed operacional de demonstração (batidas, faltas, compensações,
+   * [10+], calendário). Preserva nome, e-mail e data de nascimento atuais.
+   * Somente por ação explícita — nunca no bootstrap.
+   */
   reseed() {
     resetCreateGuard();
-    mutate(() => buildSeedData());
+    mutate((d) => {
+      const seed = buildSeedData();
+      return { ...seed, user: withPreservedIdentity(seed.user, d.user) };
+    });
   },
 
   /**
