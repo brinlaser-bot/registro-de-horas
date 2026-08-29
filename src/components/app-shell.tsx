@@ -19,7 +19,7 @@ import { useAppData, useIsClient } from "@/lib/store";
 const NAV = [
   { href: "/", label: "Visão geral", icon: LayoutDashboard },
   { href: "/registros", label: "Registros", icon: CalendarClock },
-  { href: "/compensacoes", label: "Compensações", icon: ArrowLeftRight },
+  { href: "/compensacoes", label: "Central de Horas", icon: ArrowLeftRight },
   { href: "/ferias", label: "Férias e Afastamentos", icon: Umbrella },
   { href: "/resumo", label: "Resumo do período", icon: BarChart3 },
   { href: "/configuracoes", label: "Configurações", icon: Settings },

@@ -133,7 +133,7 @@ export function HourBankCard({
       actions={
         <Link href="/compensacoes">
           <Badge tone="indigo" className="cursor-pointer hover:bg-indigo-100">
-            Gerenciar em Compensações
+            Gerenciar na Central de Horas
           </Badge>
         </Link>
       }
