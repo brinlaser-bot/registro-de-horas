@@ -1315,10 +1315,22 @@ export const actions = {
     mutate(() => buildSeedData());
   },
 
-  /** Apaga registros, compensações e motivos de excedente (mantém o perfil/jornada). */
+  /**
+   * Apaga TODOS os dados operacionais deste navegador (batidas, faltas,
+   * ausências, calendários, compensações e motivos). Preserva perfil e jornada.
+   * Não esvazia o storage do domínio inteiro — só regrava a chave do Meu Horário.
+   */
   clearAll() {
     resetCreateGuard();
-    mutate((d) => ({ ...d, entries: [], compensations: [], excessReasons: [] }));
+    mutate((d) => ({
+      user: d.user,
+      entries: [],
+      compensations: [],
+      absences: [],
+      companyCalendars: undefined,
+      faltas: [],
+      excessReasons: [],
+    }));
   },
 
   /** Substitui integralmente os dados pelos do backup. */

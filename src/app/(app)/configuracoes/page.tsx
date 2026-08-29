@@ -24,7 +24,7 @@ import {
   type CompanyCalendar,
 } from "@/lib/company-calendar";
 import { expectedMinutesOf, formatMinutes, todayString } from "@/lib/time";
-import { Button, Card, Input, Select, Skeleton, Toggle } from "@/components/ui";
+import { Button, Card, ConfirmDialog, Input, Select, Skeleton, Toggle } from "@/components/ui";
 import { ImportBackupModal } from "@/components/import-backup-modal";
 import { useToast } from "@/components/toast";
 
@@ -50,6 +50,7 @@ export default function ConfiguracoesPage() {
   /** De onde veio o arquivo em prévia: novo ciclo ou substituição de um ciclo específico. */
   const [importMode, setImportMode] = useState<{ type: "add" } | { type: "replace"; cycleStart: string }>({ type: "add" });
   const [showCalendarFor, setShowCalendarFor] = useState<string | null>(null);
+  const [clearOpen, setClearOpen] = useState(false);
   const calendarFileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -109,10 +110,10 @@ export default function ConfiguracoesPage() {
     toast.show("Dados de exemplo restaurados.");
   };
 
-  const clearAll = () => {
-    if (!window.confirm("Apagar todos os registros e compensações? Essa ação não pode ser desfeita.")) return;
+  const confirmClearAll = () => {
     actions.clearAll();
-    toast.show("Todos os dados foram apagados.");
+    setClearOpen(false);
+    toast.show("Dados do controle apagados.");
   };
 
   const downloadText = (filename: string, text: string) => {
@@ -507,7 +508,7 @@ export default function ConfiguracoesPage() {
           <Button variant="secondary" size="sm" onClick={reseed}>
             <Database size={14} /> Restaurar dados de exemplo
           </Button>
-          <Button variant="danger" size="sm" onClick={clearAll}>
+          <Button variant="danger" size="sm" onClick={() => setClearOpen(true)}>
             <Trash2 size={14} /> Apagar todos os dados
           </Button>
         </div>
@@ -556,6 +557,17 @@ export default function ConfiguracoesPage() {
       <ImportBackupModal open={importOpen} onClose={() => setImportOpen(false)} />
       {/* A ÚNICA interface de Definir/Alterar o Abono de aniversário */}
       <AbonoModal open={abonoOpen} onClose={() => setAbonoOpen(false)} />
+      {clearOpen && (
+        <ConfirmDialog
+          open
+          danger
+          title="Apagar todos os dados?"
+          confirmLabel="Apagar todos os dados"
+          message="Isso excluirá definitivamente todos os registros, faltas, férias, afastamentos, compensações, excedentes, acordos e eventos de calendário salvos neste navegador. As configurações gerais serão mantidas."
+          onClose={() => setClearOpen(false)}
+          onConfirm={confirmClearAll}
+        />
+      )}
     </div>
   );
 }
