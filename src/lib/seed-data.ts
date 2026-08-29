@@ -8,18 +8,48 @@ import type { AppData, Compensation, ExcessReason, Falta, TimeEntry, User } from
 
 export const SEED_VERSION = "3.1";
 
-export const DEFAULT_USER: User = {
-  id: 1,
-  name: "Alex Santos",
-  email: "voce@exemplo.com",
+/** Jornada e teto estruturais — defaults de funcionamento, não dados de teste. */
+export const DEFAULT_WORK_SETTINGS = {
   workStart: "08:00",
   workEnd: "17:00",
   lunchStart: "12:00",
   lunchEnd: "13:00",
   maxDailyMinutes: 600,
   autoDeductLunch: true,
+} as const;
+
+export const DEFAULT_USER: User = {
+  id: 1,
+  name: "Alex Santos",
+  email: "voce@exemplo.com",
+  ...DEFAULT_WORK_SETTINGS,
   birthDate: "1990-08-10",
 };
+
+/** Perfil de instalação nova: regras estruturais, sem identidade de demonstração. */
+export const EMPTY_USER: User = {
+  id: 1,
+  name: "",
+  email: "",
+  ...DEFAULT_WORK_SETTINGS,
+  birthDate: null,
+};
+
+/**
+ * Estado transacional vazio para primeiro uso em produção.
+ * Sem punches, faltas, ausências, compensações, calendário de demo ou [10+].
+ */
+export function createEmptyState(): AppData {
+  return {
+    user: { ...EMPTY_USER },
+    entries: [],
+    compensations: [],
+    absences: [],
+    companyCalendars: undefined,
+    faltas: [],
+    excessReasons: [],
+  };
+}
 
 function e(id: number, date: string, time: string, type: "entrada" | "saida", note: string | null = null): TimeEntry {
   return { id, date, time, type, note };
@@ -146,4 +176,9 @@ export function buildSeedData(): AppData {
     faltas,
     excessReasons,
   };
+}
+
+/** Alias explícito do seed de demonstração — nunca usado no bootstrap de produção. */
+export function createDemoSeed(): AppData {
+  return buildSeedData();
 }

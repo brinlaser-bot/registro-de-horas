@@ -512,8 +512,10 @@ export default function ConfiguracoesPage() {
           </Button>
         </div>
         <p className="mt-3 text-[11px] text-slate-400">
-          Ao limpar o cache/cookies do navegador, os registros são apagados — use o backup JSON ou o
-          CSV do Resumo para manter uma cópia.
+          O backup JSON contém os dados locais deste aplicativo neste navegador: perfil, jornada,
+          registros, compensações, calendários, faltas e motivos. Ao limpar o cache/cookies do
+          navegador, os registros são apagados — use o backup JSON ou o CSV do Resumo para manter
+          uma cópia.
         </p>
       </Card>
 

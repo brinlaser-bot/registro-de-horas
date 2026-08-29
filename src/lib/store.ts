@@ -4,7 +4,7 @@
 // Uso pessoal: todos os dados ficam apenas no navegador.
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { computeDay, formatMinutes, FUTURE_DATE_ERROR, insertPunchError, isFutureDate, todayString, type EntryType } from "./time";
-import { buildSeedData, DEFAULT_USER } from "./seed-data";
+import { buildSeedData, createEmptyState } from "./seed-data";
 import { absencesEqual, compsEqual, entriesEqual, excessReasonsEqual, mergeByIdAndContent } from "./backup";
 import { actualExtraForDate, allocatedForSource, canCompleteComp, concludedForSource, extraCapacityForDate, kindOf, usesHourExtra, acordoLinkedComps, originalHourExtraDebt, sourcePlanningHeadroom, OVERPLAN_MSG } from "./debt";
 import { compensarObligationOnDate, reconcileCompensarComps } from "./compensar";
@@ -83,15 +83,54 @@ import type {
 
 const STORAGE_KEY = "meu-horario:data:v1";
 
-const pristine: AppData = {
-  user: { ...DEFAULT_USER },
-  entries: [],
-  compensations: [],
-  absences: [],
-  companyCalendars: undefined,
-  faltas: [],
-  excessReasons: [],
-};
+const pristine: AppData = createEmptyState();
+
+/** Interpreta o JSON do localStorage. Inválido → null (não apaga o valor persistido). */
+export function parseStoredAppData(raw: string): AppData | null {
+  try {
+    const parsed = JSON.parse(raw) as Partial<AppData> & AppData;
+    if (
+      !parsed ||
+      !parsed.user ||
+      !Array.isArray(parsed.entries) ||
+      !Array.isArray(parsed.compensations)
+    ) {
+      return null;
+    }
+    const absences = Array.isArray(parsed.absences) ? parsed.absences : [];
+    const legacy = parsed as unknown as { companyCalendar?: unknown; companyCalendars?: unknown };
+    const companyCalendars =
+      normalizeCompanyCalendars(legacy.companyCalendars) ??
+      normalizeCompanyCalendars(legacy.companyCalendar);
+    const faltas = Array.isArray(parsed.faltas) ? parsed.faltas : [];
+    const excessReasons = Array.isArray(parsed.excessReasons) ? parsed.excessReasons : [];
+    return {
+      user: parsed.user,
+      entries: parsed.entries,
+      compensations: parsed.compensations,
+      absences,
+      companyCalendars,
+      faltas,
+      excessReasons,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Hidrata o estado a partir do storage.
+ * - raw existente e válido → preserva (nunca substitui por seed);
+ * - storage vazio/ausente → createEmptyState() (produção limpa);
+ * - raw inválido → vazio em memória (o caller NÃO deve persistir por cima).
+ */
+export function hydrateAppData(raw: string | null): AppData {
+  if (raw) {
+    const parsed = parseStoredAppData(raw);
+    if (parsed) return parsed;
+  }
+  return createEmptyState();
+}
 
 let data: AppData = pristine;
 let ready = false;
@@ -116,36 +155,22 @@ function load() {
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (raw) {
-      const parsed = JSON.parse(raw) as Partial<AppData> & AppData;
-      if (
-        parsed &&
-        parsed.user &&
-        Array.isArray(parsed.entries) &&
-        Array.isArray(parsed.compensations)
-      ) {
-        // Retrocompatibilidade: dados antigos podem não ter "absences"
-        const absences = Array.isArray(parsed.absences) ? parsed.absences : [];
-        // MIGRAÇÃO multi-calendário: formato antigo { companyCalendar } (único)
-        // vira coleção { companyCalendars } com ciclos normalizados na leitura.
-        const legacy = parsed as unknown as { companyCalendar?: unknown; companyCalendars?: unknown };
-        const companyCalendars =
-          normalizeCompanyCalendars(legacy.companyCalendars) ??
-          normalizeCompanyCalendars(legacy.companyCalendar);
-        // Retrocompatibilidade: dados antigos podem não ter "faltas".
-        const faltas = Array.isArray(parsed.faltas) ? parsed.faltas : [];
-        // Retrocompatibilidade (§39): dados antigos não têm "excessReasons" —
-        // o excedente segue derivado das batidas; só o motivo fica pendente.
-        const excessReasons = Array.isArray(parsed.excessReasons) ? parsed.excessReasons : [];
-        data = { user: parsed.user, entries: parsed.entries, compensations: parsed.compensations, absences, companyCalendars, faltas, excessReasons };
+      const parsed = parseStoredAppData(raw);
+      if (parsed) {
+        data = parsed;
         emit();
         return;
       }
+      // Storage presente mas ilegível: não sobrescreve o valor persistido.
+      data = createEmptyState();
+      emit();
+      return;
     }
-    // Primeiro acesso: popula com dados de exemplo
-    data = buildSeedData();
+    // Primeiro acesso: estado transacional vazio (seed só via reseed explícito).
+    data = createEmptyState();
     persist();
   } catch {
-    data = pristine;
+    data = createEmptyState();
   }
   emit();
 }
@@ -1284,7 +1309,7 @@ export const actions = {
     mutate((d) => ({ ...d, user: { ...d.user, ...patch } }));
   },
 
-  /** Substitui tudo pelos dados de exemplo. */
+  /** Carrega o seed de demonstração — somente por ação explícita (nunca no bootstrap). */
   reseed() {
     resetCreateGuard();
     mutate(() => buildSeedData());
