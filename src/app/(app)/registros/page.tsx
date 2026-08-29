@@ -37,6 +37,13 @@ import { compensarObligationOnDate, isAbonadoDay } from "@/lib/compensar";
 import { dayBalanceContribution, effectiveFaltas, faltaOnDate, faltaStatusOf } from "@/lib/faltas";
 import { dayCreditView, excessReasonOnDate, hasEligibleSpecialExcessInCycle, shouldPromptExcessReason } from "@/lib/hour-bank";
 import { isMissingExpectedRecord, registrosTimelineDates } from "@/lib/missing-records";
+import {
+  dayMatchesSituations,
+  parseSituationParam,
+  serializeSituationParam,
+  situationsFromView,
+  type DaySituationId,
+} from "@/lib/day-situation";
 
 import type { CompKind, WorkSettings } from "@/lib/types";
 import { DayCard } from "@/components/day-card";
@@ -45,6 +52,7 @@ import { FaltaModal } from "@/components/falta-modal";
 import { FillDayRecordsModal } from "@/components/fill-day-records-modal";
 import { ExcessReasonModal } from "@/components/excess-reason-modal";
 import { AllocateExcessModal } from "@/components/allocate-excess-modal";
+import { DaySituationChips, DaySituationFilter } from "@/components/day-situation-filter";
 import { Button, Card, EmptyState, Skeleton } from "@/components/ui";
 import { useToast } from "@/components/toast";
 
@@ -106,6 +114,10 @@ function RegistrosBody() {
   const [fillDate, setFillDate] = useState<string | null>(null);
   const wantPending = searchParams.get("pendentes") === "1";
   const wantMissing = searchParams.get("semRegistro") === "1";
+  const situacaoRaw = searchParams.get("situacao");
+  const situationIds = parseSituationParam(
+    wantPending || wantMissing ? null : situacaoRaw,
+  );
 
   // Faltas que JÁ valem (date <= hoje) — previstas não geram déficit/saldo
   const effectiveFaltaList = useMemo(() => effectiveFaltas(faltas, todayStr), [faltas, todayStr]);
@@ -137,6 +149,16 @@ function RegistrosBody() {
         const falta = faltaOnDate(faltas, date);
         const faltaStatus = falta ? faltaStatusOf(date, todayStr) : null;
         const missingExpected = isMissingExpectedRecord(date, todayStr, cctx, faltas);
+        const creditView = dayCreditView(date, entries, compensations, absences, companyCalendars, settings, excessReasons);
+        const situations = situationsFromView({
+          date,
+          today: todayStr,
+          view: cctx,
+          missingExpected,
+          faltaStatus,
+          regularExtra: creditView.regularExtra,
+          excessSpecial: creditView.excessSpecial,
+        });
         const empty = cctx.ctx.day.empty;
         const compact =
           empty &&
@@ -179,9 +201,11 @@ function RegistrosBody() {
           absence: absenceOnDate(absences, date),
           missingExpected,
           compact,
+          creditView,
+          situations,
         };
       });
-  }, [entries, absences, companyCalendars, faltas, settings, range, todayStr, nowMinutes]);
+  }, [entries, compensations, absences, companyCalendars, faltas, excessReasons, settings, range, todayStr, nowMinutes]);
 
   // Resumo do intervalo, AGRUPADO POR CICLO ANUAL (nunca mistura pendências)
   const summaries = useMemo(() => {
@@ -253,15 +277,39 @@ function RegistrosBody() {
   const missingCount = days.filter((d) => d.missingExpected).length;
   const pendingOnly = wantPending && !wantMissing && pendingCount > 0;
   const missingOnly = wantMissing && !wantPending && missingCount > 0;
+  const situationActive = situationIds.length > 0 && !pendingOnly && !missingOnly;
+  const listedDays = pendingOnly
+    ? days.filter((d) => d.displayDay.financialPending || !d.displayDay.consistent)
+    : missingOnly
+    ? days.filter((d) => d.missingExpected)
+    : situationActive
+    ? days.filter((d) => dayMatchesSituations(d.situations, situationIds))
+    : days;
+
+  const writeSituacao = (ids: DaySituationId[]) => {
+    const params = new URLSearchParams();
+    const serialized = serializeSituationParam(ids);
+    if (serialized) params.set("situacao", serialized);
+    const q = params.toString();
+    router.replace(q ? `/registros?${q}` : "/registros");
+  };
 
   useEffect(() => {
     if (wantPending && wantMissing) {
       router.replace("/registros?semRegistro=1");
       return;
     }
+    if (wantPending && situacaoRaw) {
+      router.replace("/registros?pendentes=1");
+      return;
+    }
+    if (wantMissing && situacaoRaw) {
+      router.replace("/registros?semRegistro=1");
+      return;
+    }
     if (wantPending && pendingCount === 0) router.replace("/registros");
     if (wantMissing && missingCount === 0) router.replace("/registros");
-  }, [wantPending, wantMissing, pendingCount, missingCount, router]);
+  }, [wantPending, wantMissing, pendingCount, missingCount, router, situacaoRaw]);
 
   /* ── Handlers (preservam comportamento validado) ── */
 
@@ -480,6 +528,7 @@ function RegistrosBody() {
     const to = queryDraft.to;
     if (wantPending) router.replace("/registros");
     if (wantMissing) router.replace("/registros");
+    if (situationIds.length > 0) writeSituacao(situationIds);
     if (!from && !to) {
       setQuery(null);
       return;
@@ -497,6 +546,13 @@ function RegistrosBody() {
       return;
     }
     setQuery({ from, to });
+  };
+
+  const clearAllFilters = () => {
+    setQuery(null);
+    setQueryDraft({ from: "", to: "" });
+    setPeriod(getPointPeriod(todayStr));
+    router.replace("/registros");
   };
 
   if (!mounted) {
@@ -574,8 +630,12 @@ function RegistrosBody() {
               className="mt-0.5 block h-9 rounded-xl border border-slate-300 bg-white px-2 text-xs font-semibold text-slate-700 outline-none focus:border-emerald-500"
             />
           </label>
+          <DaySituationFilter selected={situationIds} onChange={writeSituacao} />
           <Button variant="secondary" size="sm" onClick={runQuery}>
             <Search size={14} /> Consultar
+          </Button>
+          <Button variant="ghost" size="sm" onClick={clearAllFilters}>
+            Limpar
           </Button>
           <p className="basis-full text-[11px] text-slate-400">
             Informe uma data para busca específica ou duas datas para consultar um período.
@@ -601,6 +661,14 @@ function RegistrosBody() {
           </div>
         );
       })()}
+
+      {situationActive && (
+        <DaySituationChips
+          selected={situationIds}
+          found={listedDays.length}
+          onRemove={(id) => writeSituacao(situationIds.filter((x) => x !== id))}
+        />
+      )}
 
       {pendingCount > 0 && (
         <div className="sticky top-16 z-20 flex flex-wrap items-center gap-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-2.5 shadow-sm">
@@ -661,14 +729,20 @@ function RegistrosBody() {
           title={query ? "Nenhum registro no intervalo consultado" : "Nenhum registro neste período"}
           description="Use o lançamento manual para incluir entradas e saídas de dias anteriores."
         />
+      ) : listedDays.length === 0 ? (
+        <EmptyState
+          icon={<Clock3 size={26} />}
+          title="Nenhum dia encontrado com os filtros selecionados."
+          description="Ajuste a situação do dia ou o intervalo consultado."
+          action={
+            <Button variant="secondary" size="sm" onClick={() => writeSituacao([])}>
+              Limpar filtros
+            </Button>
+          }
+        />
       ) : (
         <div className={missingOnly || pendingOnly ? "space-y-4" : "space-y-2"}>
-          {(pendingOnly
-            ? days.filter((d) => d.displayDay.financialPending || !d.displayDay.consistent)
-            : missingOnly
-            ? days.filter((d) => d.missingExpected)
-            : days
-          ).map(({ date, balanceView, displayDay, absence, calendarLabel, falta, workedInAbonoMinutes, abonoParcial, missingExpected, compact }) => (
+          {listedDays.map(({ date, balanceView, displayDay, absence, calendarLabel, falta, workedInAbonoMinutes, abonoParcial, missingExpected, compact }) => (
             <DayCard
               key={date}
               result={displayDay}
