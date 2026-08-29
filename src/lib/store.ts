@@ -4,6 +4,7 @@
 // Uso pessoal: todos os dados ficam apenas no navegador.
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { computeDay, formatMinutes, FUTURE_DATE_ERROR, insertPunchError, isFutureDate, todayString, type EntryType } from "./time";
+import { applyControlStartMigration } from "./control-start";
 import { buildSeedData, createEmptyState } from "./seed-data";
 import { absencesEqual, compsEqual, entriesEqual, excessReasonsEqual, mergeByIdAndContent } from "./backup";
 import { actualExtraForDate, allocatedForSource, canCompleteComp, concludedForSource, extraCapacityForDate, kindOf, usesHourExtra, acordoLinkedComps, originalHourExtraDebt, sourcePlanningHeadroom, OVERPLAN_MSG } from "./debt";
@@ -124,12 +125,12 @@ export function parseStoredAppData(raw: string): AppData | null {
  * - storage vazio/ausente → createEmptyState() (produção limpa);
  * - raw inválido → vazio em memória (o caller NÃO deve persistir por cima).
  */
-export function hydrateAppData(raw: string | null): AppData {
+export function hydrateAppData(raw: string | null, today: string = todayString()): AppData {
   if (raw) {
     const parsed = parseStoredAppData(raw);
-    if (parsed) return parsed;
+    if (parsed) return applyControlStartMigration(parsed, today);
   }
-  return createEmptyState();
+  return createEmptyState(today);
 }
 
 let data: AppData = pristine;
@@ -153,21 +154,25 @@ function load() {
   if (ready || typeof window === "undefined") return;
   ready = true;
   try {
+    const today = todayString();
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const parsed = parseStoredAppData(raw);
       if (parsed) {
-        data = parsed;
+        data = applyControlStartMigration(parsed, today);
+        if ((parsed.user.controlStartDate ?? null) !== (data.user.controlStartDate ?? null)) {
+          persist();
+        }
         emit();
         return;
       }
       // Storage presente mas ilegível: não sobrescreve o valor persistido.
-      data = createEmptyState();
+      data = createEmptyState(today);
       emit();
       return;
     }
     // Primeiro acesso: estado transacional vazio (seed só via reseed explícito).
-    data = createEmptyState();
+    data = createEmptyState(today);
     persist();
   } catch {
     data = createEmptyState();

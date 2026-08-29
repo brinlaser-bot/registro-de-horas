@@ -16,6 +16,11 @@ export interface User {
   /** Data de nascimento (YYYY-MM-DD, data local) — usada no banner de
    *  aniversário e na SUGESTÃO de data do Abono de aniversário. Opcional. */
   birthDate?: string | null;
+  /**
+   * Data LOCAL (YYYY-MM-DD) a partir da qual o app cobra registro ou
+   * justificativa. Dias anteriores não são Sem registro. Opcional em dados
+   * antigos — a hidratação preenche. */
+  controlStartDate?: string | null;
 }
 
 export interface TimeEntry {

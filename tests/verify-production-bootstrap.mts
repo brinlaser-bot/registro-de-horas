@@ -118,7 +118,7 @@ check("8. configurações estruturais continuam disponíveis", () => {
   assert.equal(empty.user.maxDailyMinutes, 600);
   assert.equal(empty.user.autoDeductLunch, true);
   assert.equal(empty.user.birthDate, null);
-  assert.deepEqual(empty.user, { ...EMPTY_USER });
+  assert.match(empty.user.controlStartDate ?? "", /^\d{4}-\d{2}-\d{2}$/);
   assert.equal(PERIOD.from.slice(8, 10), "21");
   assert.equal(PERIOD.to.slice(8, 10), "20");
   assert.equal(getAnnualPointCycle("2026-04-30"), "2025/2026");

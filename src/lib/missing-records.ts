@@ -25,14 +25,21 @@ import type { Falta, TimeEntry, WorkSettings } from "./types";
  *
  * ABONO PARCIAL: se a base efetiva restante > 0 e não há batidas,
  * classifica como Sem registro (a parte a cumprir ficou sem fato).
+ *
+ * Data de início do controle: date < controlStartDate nunca é Sem registro.
+ * Ausente/inválida → sem piso extra (compatível com testes e dados antigos).
  */
 export function isMissingExpectedRecord(
   date: string,
   today: string,
   view: CalendarDayView,
   faltas?: Falta[],
+  controlStartDate?: string | null,
 ): boolean {
   if (!date || date >= today) return false;
+  if (controlStartDate && /^\d{4}-\d{2}-\d{2}$/.test(controlStartDate) && date < controlStartDate) {
+    return false;
+  }
   if (view.ctx.day.entries.length > 0) return false;
   if (view.effectiveExpected <= 0) return false;
   if (faltaOnDate(faltas, date)) return false;
@@ -48,10 +55,11 @@ export function missingExpectedRecordDates(
   calendars: CompanyCalendars | undefined,
   settings: WorkSettings,
   faltas?: Falta[],
+  controlStartDate?: string | null,
 ): string[] {
   return listDaysBetween(range.from, range.to).filter((date) => {
     const view = companyDayContext(date, entries, absences, calendars, settings);
-    return isMissingExpectedRecord(date, today, view, faltas);
+    return isMissingExpectedRecord(date, today, view, faltas, controlStartDate);
   });
 }
 

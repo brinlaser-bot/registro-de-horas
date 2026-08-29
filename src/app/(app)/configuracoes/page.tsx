@@ -51,6 +51,8 @@ export default function ConfiguracoesPage() {
   const [importMode, setImportMode] = useState<{ type: "add" } | { type: "replace"; cycleStart: string }>({ type: "add" });
   const [showCalendarFor, setShowCalendarFor] = useState<string | null>(null);
   const [clearOpen, setClearOpen] = useState(false);
+  const [controlStartDate, setControlStartDate] = useState("");
+  const [busyControlStart, setBusyControlStart] = useState(false);
   const calendarFileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -64,6 +66,7 @@ export default function ConfiguracoesPage() {
       maxDailyMinutes: user.maxDailyMinutes,
       autoDeductLunch: user.autoDeductLunch,
     });
+    setControlStartDate(user.controlStartDate ?? "");
   }, [mounted, user]);
 
   const saveProfile = async () => {
@@ -89,6 +92,18 @@ export default function ConfiguracoesPage() {
     actions.updateUser(schedule);
     setBusySchedule(false);
     toast.show("Jornada atualizada!");
+  };
+
+  const saveControlStart = async () => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(controlStartDate)) {
+      toast.show("Informe uma data válida.", "error");
+      return;
+    }
+    setBusyControlStart(true);
+    await new Promise((r) => setTimeout(r, 250));
+    actions.updateUser({ controlStartDate });
+    setBusyControlStart(false);
+    toast.show("Data de início do controle atualizada.");
   };
 
   const exportJson = () => {
@@ -317,6 +332,27 @@ export default function ConfiguracoesPage() {
             description="Se não houver batida entre o início e o fim do almoço, o intervalo é descontado das horas do dia."
           />
         </div>
+      </Card>
+
+      <Card
+        title="Início do controle"
+        subtitle="A partir desta data, o app passa a identificar dias de jornada sem registro ou justificativa."
+        actions={
+          <Button size="sm" onClick={saveControlStart} loading={busyControlStart}>
+            <Save size={14} /> Salvar
+          </Button>
+        }
+      >
+        <Input
+          label="Data de início do controle"
+          type="date"
+          className="sm:max-w-64"
+          value={controlStartDate}
+          onChange={(e) => setControlStartDate(e.target.value)}
+        />
+        <p className="mt-3 text-xs text-slate-500">
+          Registros anteriores continuam podendo ser lançados manualmente.
+        </p>
       </Card>
 
       {/* Calendários da empresa — um por ciclo anual (01/05 → 30/04) */}

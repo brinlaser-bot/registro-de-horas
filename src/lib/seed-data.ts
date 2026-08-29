@@ -4,7 +4,11 @@
 // 3.1 adiciona 14/08 com 6 batidas (wrap/responsividade) sem alterar os cenários 3.0.
 import type { Absence } from "./absences";
 import { seedCompanyCalendars } from "./seed-calendars";
+import { todayString } from "./time";
 import type { AppData, Compensation, ExcessReason, Falta, TimeEntry, User } from "./types";
+
+/** Início do seed 3.1 — anterior ao primeiro cenário da fixture. */
+export const SEED_CONTROL_START = "2026-04-01";
 
 export const SEED_VERSION = "3.1";
 
@@ -24,6 +28,7 @@ export const DEFAULT_USER: User = {
   email: "voce@exemplo.com",
   ...DEFAULT_WORK_SETTINGS,
   birthDate: "1990-08-10",
+  controlStartDate: SEED_CONTROL_START,
 };
 
 /** Perfil de instalação nova: regras estruturais, sem identidade de demonstração. */
@@ -33,15 +38,17 @@ export const EMPTY_USER: User = {
   email: "",
   ...DEFAULT_WORK_SETTINGS,
   birthDate: null,
+  controlStartDate: null,
 };
 
 /**
  * Estado transacional vazio para primeiro uso em produção.
  * Sem punches, faltas, ausências, compensações, calendário de demo ou [10+].
+ * controlStartDate = hoje local (injetável nos testes).
  */
-export function createEmptyState(): AppData {
+export function createEmptyState(today: string = todayString()): AppData {
   return {
-    user: { ...EMPTY_USER },
+    user: { ...EMPTY_USER, controlStartDate: today },
     entries: [],
     compensations: [],
     absences: [],

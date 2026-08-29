@@ -70,7 +70,8 @@ function validUser(v: unknown): v is User {
     isNum(u.maxDailyMinutes) &&
     isBool(u.autoDeductLunch) &&
     // birthDate é opcional (backups v1/v2/v3 antigos não o tinham)
-    (u.birthDate === undefined || u.birthDate === null || isDate(u.birthDate))
+    (u.birthDate === undefined || u.birthDate === null || isDate(u.birthDate)) &&
+    (u.controlStartDate === undefined || u.controlStartDate === null || isDate(u.controlStartDate))
   );
 }
 

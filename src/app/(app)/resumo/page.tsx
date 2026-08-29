@@ -65,7 +65,7 @@ export default function ResumoPage() {
         const faltaStatus = falta ? faltaStatusOf(date, todayStr) : null;
         const realized = isRealizedDate(date, todayStr);
         const idleToday = date === todayStr && ctx.day.empty && faltaStatus !== "efetiva" && !absence && cctx.effectiveExpected > 0;
-        const missingExpected = isMissingExpectedRecord(date, todayStr, cctx, faltas);
+        const missingExpected = isMissingExpectedRecord(date, todayStr, cctx, faltas, user.controlStartDate);
         return {
           date,
           workedMinutes: realized ? ctx.day.workedMinutes : 0,
@@ -113,7 +113,7 @@ export default function ResumoPage() {
         };
       })
       .filter((d) => d.entryCount > 0 || d.eventLabel || !isWeekend(d.date));
-  }, [entries, absences, companyCalendars, faltas, settings, period, todayStr]);
+  }, [entries, absences, companyCalendars, faltas, settings, period, todayStr, user.controlStartDate]);
 
   const totals = useMemo(
     () =>

@@ -148,7 +148,7 @@ function RegistrosBody() {
         const baseView = companyDayBalanceView(cctx);
         const falta = faltaOnDate(faltas, date);
         const faltaStatus = falta ? faltaStatusOf(date, todayStr) : null;
-        const missingExpected = isMissingExpectedRecord(date, todayStr, cctx, faltas);
+        const missingExpected = isMissingExpectedRecord(date, todayStr, cctx, faltas, user.controlStartDate);
         const creditView = dayCreditView(date, entries, compensations, absences, companyCalendars, settings, excessReasons);
         const situations = situationsFromView({
           date,
@@ -205,7 +205,7 @@ function RegistrosBody() {
           situations,
         };
       });
-  }, [entries, compensations, absences, companyCalendars, faltas, excessReasons, settings, range, todayStr, nowMinutes]);
+  }, [entries, compensations, absences, companyCalendars, faltas, excessReasons, settings, range, todayStr, nowMinutes, user.controlStartDate]);
 
   // Resumo do intervalo, AGRUPADO POR CICLO ANUAL (nunca mistura pendências)
   const summaries = useMemo(() => {

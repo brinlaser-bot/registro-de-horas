@@ -155,6 +155,7 @@ export function situationsOfDay(
     compensations?: Compensation[];
     faltas?: Falta[];
     excessReasons?: ExcessReason[];
+    controlStartDate?: string | null;
   },
 ): DaySituationId[] {
   const view = companyDayContext(date, entries, absences, calendars, settings);
@@ -172,7 +173,7 @@ export function situationsOfDay(
     date,
     today,
     view,
-    missingExpected: isMissingExpectedRecord(date, today, view, opts?.faltas),
+    missingExpected: isMissingExpectedRecord(date, today, view, opts?.faltas, opts?.controlStartDate),
     faltaStatus: falta ? faltaStatusOf(date, today) : null,
     regularExtra: credit.regularExtra,
     excessSpecial: credit.excessSpecial,

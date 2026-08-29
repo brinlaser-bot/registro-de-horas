@@ -191,6 +191,7 @@ check("22. configurações estruturais permanecem", () => {
   assert.equal(after.user.lunchEnd, preservedUser.lunchEnd);
   assert.equal(after.user.maxDailyMinutes, preservedUser.maxDailyMinutes);
   assert.equal(after.user.autoDeductLunch, preservedUser.autoDeductLunch);
+  assert.equal(after.user.controlStartDate, preservedUser.controlStartDate);
   assert.equal(getAnnualPointCycle("2026-04-30"), "2025/2026");
   assert.equal(getAnnualPointCycle("2026-05-01"), "2026/2027");
 });
