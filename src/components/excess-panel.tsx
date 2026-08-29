@@ -17,7 +17,7 @@ import {
   suggestTargets,
   totalsOf,
 } from "@/lib/debt";
-import { dayCreditView, excessReasonOnDate, hasEligibleSpecialExcessInCycle, negativeBalanceViews, specialExcessLedger } from "@/lib/hour-bank";
+import { excessReasonOnDate, hasEligibleSpecialExcessInCycle, negativeBalanceViews, pendingSpecialExcessDays, specialExcessBook } from "@/lib/hour-bank";
 import { quitacaoLine } from "@/lib/compensar";
 import { useToast } from "@/components/toast";
 import { formatDateBR, formatDateShortBR, formatMinutes, todayString, weekdayShort } from "@/lib/time";
@@ -174,26 +174,22 @@ export function ExcessPanel({
       ),
     [entries, compensations, absences, companyCalendars, settings, excessReasons, today],
   );
-  const specialBook = useMemo(() => {
-    const dates = [...new Set(entries.filter((e) => e.date >= range.from && e.date <= range.to && e.date <= today).map((e) => e.date))];
-    let original = 0;
-    let realized = 0;
-    let planned = 0;
-    let free = 0;
-    const days: { date: string; original: number; realized: number; planned: number; free: number; worked: number }[] = [];
-    for (const date of dates) {
-      const v = dayCreditView(date, entries, compensations, absences, companyCalendars, settings, excessReasons);
-      if (v.excessSpecial <= 0 || v.day.open || v.day.empty) continue;
-      const led = specialExcessLedger(date, compensations, v.excessSpecial);
-      original += led.original;
-      realized += led.realized;
-      planned += led.planned;
-      free += led.free;
-      days.push({ date, original: led.original, realized: led.realized, planned: led.planned, free: led.free, worked: v.day.workedMinutes });
-    }
-    return { original, realized, planned, free, days };
-  }, [entries, compensations, absences, companyCalendars, settings, excessReasons, range, today]);
-  const excessOpen = specialBook.days.filter((d) => d.free > 0 || d.planned > 0);
+  /* fonte: specialExcessLedger via specialExcessBook (período 21→20). */
+  const specialBook = useMemo(
+    () =>
+      specialExcessBook(
+        entries, compensations, absences, companyCalendars, settings, excessReasons, range, today,
+      ),
+    [entries, compensations, absences, companyCalendars, settings, excessReasons, range, today],
+  );
+  const cycleBook = useMemo(
+    () =>
+      specialExcessBook(
+        entries, compensations, absences, companyCalendars, settings, excessReasons, cycleBounds, today,
+      ),
+    [entries, compensations, absences, companyCalendars, settings, excessReasons, cycleBounds, today],
+  );
+  const excessOpen = pendingSpecialExcessDays(cycleBook);
   // §19: expansão das parcelas de um déficit consolidado (estado local, visual).
   const [expandedDeficit, setExpandedDeficit] = useState<string | null>(null);
 
@@ -262,13 +258,13 @@ export function ExcessPanel({
         {/* Dias com excedente pendente */}
         <Card
           title="Dias com excedente pendente"
-          subtitle="Excedente do limite diário ainda a realocar"
+          subtitle={`${excessOpen.length} dia(s) do ciclo anual com minutos [10+] ainda sem destino`}
         >
           {excessOpen.length === 0 ? (
             <EmptyState
               icon={<CheckCircle2 size={24} />}
-              title="Nenhum excedente deste período em aberto"
-              description={`Nenhum excedente originado no período ${monthLabel} está pendente. Compensações de outros períodos/ciclos permanecem visíveis na página Compensações.`}
+              title="Nenhum excedente livre no ciclo anual"
+              description="Não há minutos de excedente do limite diário [10+] ainda sem destino neste ciclo (01/05 → 30/04)."
             />
           ) : (
             <ul className="space-y-3">
@@ -289,17 +285,18 @@ export function ExcessPanel({
                       {reason ? (
                         <Badge tone="slate">motivo registrado</Badge>
                       ) : (
-                        <Badge tone="amber">⚠ Motivo não informado</Badge>
+                        <Badge tone="amber">Motivo pendente</Badge>
                       )}
-                      {d.free > 0 ? (
-                        <Badge tone="amber">restam {formatMinutes(d.free)}</Badge>
-                      ) : (
-                        <Badge tone="sky">{formatMinutes(d.planned)} programado</Badge>
-                      )}
+                      <Badge tone="amber">Livre {formatMinutes(d.free)}</Badge>
                       <div className="ml-auto flex items-center gap-1.5">
                         {!reason && onRegisterReason && (
                           <Button size="sm" variant="ghost" onClick={() => onRegisterReason(d.date)}>
                             Registrar motivo
+                          </Button>
+                        )}
+                        {reason && onRegisterReason && (
+                          <Button size="sm" variant="ghost" onClick={() => onRegisterReason(d.date)}>
+                            Alterar motivo
                           </Button>
                         )}
                         <Button size="sm" variant="danger" onClick={() => setAllocateDate(d.date)} disabled={!reason}
@@ -311,7 +308,8 @@ export function ExcessPanel({
                     <p className="mt-1.5 text-xs text-slate-500">
                       {formatMinutes(d.worked)} trabalhados ·{" "}
                       {formatMinutes(d.realized)} realocados ·{" "}
-                      {formatMinutes(d.planned)} programados
+                      {formatMinutes(d.planned)} programados ·{" "}
+                      Livre {formatMinutes(d.free)}
                     </p>
                     <div className="mt-2">
                       <ProgressBar

@@ -22,6 +22,7 @@ import { companyDayContext, companyDeficitContribution } from "@/lib/company-cal
 import { pendingPunchDates } from "@/lib/pending-punches";
 import { isMissingExpectedRecord } from "@/lib/missing-records";
 import { buildDebtDays } from "@/lib/debt";
+import { specialExcessBook } from "@/lib/hour-bank";
 import { Badge, Button, Card, EmptyState, Skeleton, StatCard } from "@/components/ui";
 import { StackedPeriodChart } from "@/components/stacked-period-chart";
 import type { Absence } from "@/lib/absences";
@@ -48,7 +49,7 @@ interface DayRow {
 
 export default function ResumoPage() {
   const mounted = useIsClient();
-  const { user, entries, compensations, absences, companyCalendars, faltas } = useAppData();
+  const { user, entries, compensations, absences, companyCalendars, faltas, excessReasons } = useAppData();
   const settings = settingsOf(user);
   const todayStr = todayString();
   const [period, setPeriod] = useState<PointPeriod>(() => getPointPeriod(new Date().toISOString().slice(0, 10)));
@@ -184,6 +185,14 @@ export default function ResumoPage() {
       missingRecords: allDays.filter((d) => d.missingExpected).length,
     };
   }, [allDays, totals, entries, compensations, settings, period, absences, companyCalendars, faltas, todayStr]);
+
+  const periodExcessBook = useMemo(
+    () =>
+      specialExcessBook(
+        entries, compensations, absences, companyCalendars, settings, excessReasons, period, todayStr,
+      ),
+    [entries, compensations, absences, companyCalendars, settings, excessReasons, period, todayStr],
+  );
 
   const exportCsv = () => {
     const rows = [
@@ -324,6 +333,17 @@ export default function ResumoPage() {
             />
             <Detail label="Registros pendentes" value={String(detailStats.pendingPunches)} tone="text-amber-700" />
             <Detail label="Dias sem registro" value={String(detailStats.missingRecords)} tone="text-amber-700" />
+            <div className="col-span-2 sm:col-span-3 lg:col-span-5 mt-1 border-t border-slate-200 pt-2">
+              <p className="mb-1.5 text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
+                Gestão de excedentes do período
+              </p>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                <Detail label="Excedente do período" value={formatMinutes(periodExcessBook.original)} />
+                <Detail label="Já realocado do excedente gerado no período" value={formatMinutes(periodExcessBook.realized)} />
+                <Detail label="Ainda a realocar do excedente gerado no período" value={formatMinutes(periodExcessBook.free)} />
+                <Detail label="Déficit do período" value={formatMinutes(detailStats.deficitMinutes)} />
+              </div>
+            </div>
           </div>
         )}
       </div>

@@ -35,11 +35,13 @@ import {
   futureCompStatus,
   hourBankSummary,
   deficitViews,
+  pendingSpecialExcessDays,
+  specialExcessBook,
   specialExcessLedger,
   type FutureCompView,
 } from "@/lib/hour-bank";
 import { annualCycleBounds, getAnnualPointCycle } from "@/lib/periods";
-import { Badge, Button, Card, EmptyState, Skeleton } from "@/components/ui";
+import { Badge, Button, Card, EmptyState, Skeleton, StatCard } from "@/components/ui";
 import { CompensationForm } from "@/components/compensation-form";
 import { ExcessReasonModal } from "@/components/excess-reason-modal";
 import { AllocateExcessModal } from "@/components/allocate-excess-modal";
@@ -141,6 +143,15 @@ export default function CompensacoesPage() {
     [entries, compensations, absences, companyCalendars, faltas, settings, cycleBounds, todayStr],
   );
   const unplannedDeficitTotal = deficitsCiclo.reduce((s, d) => s + d.unplannedMinutes, 0);
+
+  const cycleExcessBook = useMemo(
+    () =>
+      specialExcessBook(
+        entries, compensations, absences, companyCalendars, settings, excessReasons, cycleBounds, todayStr,
+      ),
+    [entries, compensations, absences, companyCalendars, settings, excessReasons, cycleBounds, todayStr],
+  );
+  const cyclePendingDays = pendingSpecialExcessDays(cycleExcessBook);
 
   /* ── §21 GRUPO 1: reservas de excedente >10h (prioridade) ────── */
   const excessReserves = useMemo(() => {
@@ -546,6 +557,45 @@ export default function CompensacoesPage() {
         <Button onClick={openNewCompForm}>
           <PlusCircle size={15} /> Nova compensação
         </Button>
+      </div>
+
+      <div>
+        <h3 className="mb-1 text-sm font-extrabold uppercase tracking-wider text-slate-400">
+          Gestão de excedentes — ciclo atual
+        </h3>
+        <p className="mb-3 text-xs text-slate-500">
+          Ciclo {formatDateBR(cycleBounds.from)} → {formatDateBR(cycleBounds.to)}
+        </p>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <StatCard
+            compact
+            label="Excedente livre [10+]"
+            value={formatMinutes(cycleExcessBook.free)}
+            sub={`${cyclePendingDays.length} dia(s) aguardando realocação`}
+            tone={cycleExcessBook.free > 0 ? "amber" : "slate"}
+          />
+          <StatCard
+            compact
+            label="Excedente programado"
+            value={formatMinutes(cycleExcessBook.planned)}
+            sub="com destino definido, aguardando realização"
+            tone={cycleExcessBook.planned > 0 ? "indigo" : "slate"}
+          />
+          <StatCard
+            compact
+            label="Excedente realocado"
+            value={formatMinutes(cycleExcessBook.realized)}
+            sub="excedente já tratado"
+            tone="emerald"
+          />
+          <StatCard
+            compact
+            label="Déficit aberto"
+            value={formatMinutes(bank.openDeficitTotal)}
+            sub="abaixo da base em aberto no ciclo"
+            tone={bank.openDeficitTotal > 0 ? "rose" : "slate"}
+          />
+        </div>
       </div>
 
       {/* §22 TOPO: somente números factuais — "programadas" nunca é chamado de

@@ -878,6 +878,75 @@ export function specialExcessStatusOf(original: number, realized: number, planne
   return "livre";
 }
 
+/** Um dia com reserva especial [10+] no intervalo consultado. */
+export interface SpecialExcessDayBook {
+  date: string;
+  original: number;
+  realized: number;
+  planned: number;
+  free: number;
+  worked: number;
+  hasReason: boolean;
+}
+
+/** Agregado do excedente [10+] gerado no intervalo (período 21→20 ou ciclo 01/05→30/04). */
+export interface SpecialExcessBook {
+  original: number;
+  realized: number;
+  planned: number;
+  free: number;
+  days: SpecialExcessDayBook[];
+}
+
+/**
+ * Livro-caixa do excedente especial no intervalo: mesma matemática de
+ * specialExcessLedger / dayCreditView. NÃO recalcula [10+].
+ * Datas futuras, abertas ou inconsistentes não entram.
+ */
+export function specialExcessBook(
+  entries: TimeEntry[],
+  comps: Compensation[],
+  absences: Absence[],
+  calendars: CompanyCalendars | undefined,
+  settings: WorkSettings,
+  reasons: ExcessReason[] | undefined,
+  range: { from: string; to: string },
+  today: string,
+): SpecialExcessBook {
+  const dates = [...new Set(entries.map((e) => e.date))]
+    .filter((d) => isRealizedDate(d, today) && d >= range.from && d <= range.to)
+    .sort((a, b) => b.localeCompare(a));
+  let original = 0;
+  let realized = 0;
+  let planned = 0;
+  let free = 0;
+  const days: SpecialExcessDayBook[] = [];
+  for (const date of dates) {
+    const v = dayCreditView(date, entries, comps, absences, calendars, settings, reasons);
+    if (v.excessSpecial <= 0 || v.day.open || v.day.empty || v.day.financialPending) continue;
+    const led = specialExcessLedger(date, comps, v.excessSpecial, calendars);
+    original += led.original;
+    realized += led.realized;
+    planned += led.planned;
+    free += led.free;
+    days.push({
+      date,
+      original: led.original,
+      realized: led.realized,
+      planned: led.planned,
+      free: led.free,
+      worked: v.day.workedMinutes,
+      hasReason: !!v.reason,
+    });
+  }
+  return { original, realized, planned, free, days };
+}
+
+/** Dias do intervalo com minutos [10+] ainda LIVRES (sem destino). Motivo não filtra. */
+export function pendingSpecialExcessDays(book: SpecialExcessBook): SpecialExcessDayBook[] {
+  return book.days.filter((d) => d.free > 0);
+}
+
 /** Livro-caixa do excedente >10h de UM dia — fonte da Gestão/Compensações. */
 export function specialExcessLedger(
   date: string,
