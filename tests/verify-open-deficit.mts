@@ -26,7 +26,7 @@
 import assert from "node:assert/strict";
 
 import { dayCreditView, specialExcessLedger } from "../src/lib/hour-bank.ts";
-import { buildSeedData } from "../src/lib/seed-data.ts";
+import { buildLegacyDemoScenario } from "../src/lib/seed-data.ts";
 import { getPointPeriod } from "../src/lib/periods.ts";
 import {
   openDeficitByCycle,
@@ -194,7 +194,7 @@ check("G. ciclo 1 (déficit 1h, settlement 30, crédito 0) × ciclo 2 (crédito 
 
 /* ── H. Seed 3.1: 21/08 → 20/09 ────────────────────────────── */
 check("H. seed → histórico 45 · [10+] realizado 40 · regular 5 · aberto 0 · líquido +6h15", () => {
-  const seed = buildSeedData();
+  const seed = buildLegacyDemoScenario();
   const s = settingsOf(seed.user);
   const period = getPointPeriod(TODAY);
   const input: OpenDeficitInput = {
@@ -256,7 +256,7 @@ check("I. invariantes: settled≤déficit, settled+covered≤déficit, aberto=d�
 
 /* ── J. Regressão: 2A e 2B intactas no seed ────────────────── */
 check("J. 2A/2B intactas: seed → fatos 7h/45min/+6h15 e cobertura regular 45min/0", () => {
-  const seed = buildSeedData();
+  const seed = buildLegacyDemoScenario();
   const s = settingsOf(seed.user);
   const period = getPointPeriod(TODAY);
   const base = {

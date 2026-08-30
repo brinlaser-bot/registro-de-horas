@@ -28,7 +28,7 @@ import { buildCompanyCalendar, companyDayBalanceView, companyDayContext, parseCo
 import { actualExtraForDate, buildDebtDays, extraCapacityForDate } from "../src/lib/debt.ts";
 import { dayBalanceContribution } from "../src/lib/faltas.ts";
 import { dayCreditView } from "../src/lib/hour-bank.ts";
-import { buildSeedData } from "../src/lib/seed-data.ts";
+import { buildLegacyDemoScenario } from "../src/lib/seed-data.ts";
 import { getPointPeriod, listDaysBetween } from "../src/lib/periods.ts";
 import { actions, enrichComp, getAppData, settingsOf } from "../src/lib/store.ts";
 import { computeDay, regularBalanceMinutes } from "../src/lib/time.ts";
@@ -420,7 +420,7 @@ check("J. helper único regularBalanceMinutes é usado nas fontes centrais", () 
     assert.ok(srcOf(rel).includes("regularBalanceMinutes"), `${rel} usa o helper único`);
   }
   // Seed 3.1: 24/08 (11h) e 28/08 (11h30) passam a +2h cada no Resumo
-  const seed = buildSeedData();
+  const seed = buildLegacyDemoScenario();
   const s = settingsOf(seed.user);
   const c24 = companyDayContext("2026-08-24", seed.entries, seed.absences, seed.companyCalendars, s);
   assert.equal(c24.regularBalance, 120, "seed 24/08 11h → +2h");

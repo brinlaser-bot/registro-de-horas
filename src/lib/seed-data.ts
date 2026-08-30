@@ -1,17 +1,31 @@
-// Seed determinístico 3.1 — bancada permanente de testes manuais.
-// Datas fixas (não relativas a "hoje"): Restaurar dados de exemplo reproduz o mesmo conjunto,
-// inclusive calendário fictício da empresa e excessReasons.
-// 3.1 adiciona 14/08 com 6 batidas (wrap/responsividade) sem alterar os cenários 3.0.
-// 26/08 7h30 e 28/08 11h30 entram na mesma bancada para inspeção visual do Resumo.
+// Seed determinístico 4.0 — bancada de teste manual do MODELO ATUAL do Meu Horário.
+// Datas fixas (não relativas a "hoje"): Restaurar dados de exemplo reproduz o mesmo conjunto.
+//
+// 4.0 (2026-08): reorganizado para validar o fluxo [10+] NOVO (3A/3B/3C/3D/3E):
+//   - 3 origens factuais de [10+] (18/08 40min, 20/08 1h, 28/08 30min — total 2h10);
+//   - 2 destinos de jornada abaixo do previsto (24/08 7h30, 26/08 7h);
+//   - 1 dia normal 8h (25/08) como controle;
+//   - 1 registro incompleto (27/08) para contrastar com "abaixo do previsto";
+//   - SEM compensações/ausências/faltas/calendário/motivos legados: o cenário
+//     demonstra UMA OPERAÇÃO (jornada factual → [10+] → projeção), sem poluição
+//     dos dois modelos lado a lado.
+//
+// O cenário 3.1 anterior (bancada do modelo legado) permanece INTACTO em
+// buildLegacyDemoScenario() — fixture própria dos testes de regressão legada.
+// Nenhum dado real é afetado; o seed só entra quando o usuário escolhe
+// explicitamente "Restaurar dados de exemplo".
 import type { Absence } from "./absences";
 import { seedCompanyCalendars } from "./seed-calendars";
 import { todayString } from "./time";
 import type { AppData, Compensation, ExcessReason, Falta, TimeEntry, User } from "./types";
 
-/** Início do seed 3.1 — anterior ao primeiro cenário da fixture. */
-export const SEED_CONTROL_START = "2026-04-01";
+/** Início do controle do seed 4.0 — anterior ao primeiro dia demonstrativo. */
+export const SEED_CONTROL_START = "2026-08-01";
 
-export const SEED_VERSION = "3.1";
+/** Início do controle do cenário legado 3.1 (fixture dos testes legados). */
+export const LEGACY_SEED_CONTROL_START = "2026-04-01";
+
+export const SEED_VERSION = "4.0";
 
 /** Jornada e teto estruturais — defaults de funcionamento, não dados de teste. */
 export const DEFAULT_WORK_SETTINGS = {
@@ -111,7 +125,66 @@ function day(id0: number, date: string, end: string, note: string | null = null)
   ];
 }
 
+/**
+ * Seed de demonstração 4.0 — um único modelo operacional, o ATUAL:
+ * jornada factual → saldo regular factual → [10+] gerado → uso [10+] → projeção.
+ *
+ * Ciclo anual 2026/2027 (01/05/2026 → 30/04/2027); validação em agosto/2026.
+ * Os [10+] NASCEM das batidas (excesso acima do teto de 10h) — nada é
+ * hardcodado em estrutura paralela.
+ */
 export function buildSeedData(): AppData {
+  const entries: TimeEntry[] = [
+    // ORIGEM 1 — 18/08 (ter): 10h40 → [10+] 40min (07:30–12:00 + 13:00–19:10)
+    e(1, "2026-08-18", "07:30", "entrada"),
+    e(2, "2026-08-18", "12:00", "saida"),
+    e(3, "2026-08-18", "13:00", "entrada"),
+    e(4, "2026-08-18", "19:10", "saida", "Exemplo — gera 40min [10+]"),
+    // ORIGEM 2 — 20/08 (qui): 11h → [10+] 1h (07:00–12:00 + 13:00–19:00)
+    e(5, "2026-08-20", "07:00", "entrada"),
+    e(6, "2026-08-20", "12:00", "saida"),
+    e(7, "2026-08-20", "13:00", "entrada"),
+    e(8, "2026-08-20", "19:00", "saida", "Exemplo — gera 1h [10+]"),
+    // DESTINO 7h30 — 24/08 (seg): falta 30min para completar a jornada
+    ...day(10, "2026-08-24", "16:30", "Exemplo — jornada 7h30"),
+    // CONTROLE — 25/08 (ter): dia normal 8h, saldo 0 (sem botão [10+])
+    ...day(20, "2026-08-25", "17:00", "Exemplo — dia normal 8h"),
+    // DESTINO PRINCIPAL — 26/08 (qua): falta 1h (uso parcial + segundo uso + cancel)
+    ...day(30, "2026-08-26", "16:00", "Exemplo — jornada 7h"),
+    // REGISTRO INCOMPLETO — 27/08 (qui): sem saída final (≠ abaixo do previsto)
+    e(40, "2026-08-27", "08:00", "entrada"),
+    e(41, "2026-08-27", "12:00", "saida"),
+    e(42, "2026-08-27", "13:00", "entrada", "Exemplo — registro incompleto"),
+    // ORIGEM 3 — 28/08 (sex): 10h30 → [10+] 30min (07:30–12:00 + 13:00–19:00)
+    // Posterior ao destino 26/08 e já realizada: visível no modo manual.
+    e(50, "2026-08-28", "07:30", "entrada"),
+    e(51, "2026-08-28", "12:00", "saida"),
+    e(52, "2026-08-28", "13:00", "entrada"),
+    e(53, "2026-08-28", "19:00", "saida", "Exemplo — gera 30min [10+]"),
+  ];
+
+  return {
+    user: { ...DEFAULT_USER },
+    entries,
+    // Cenário limpo: sem modelo legado ativo no visual (compensações/ausências/
+    // faltas/calendário/motivos ficam na fixture 3.1 para os testes legados).
+    compensations: [],
+    absences: [],
+    companyCalendars: undefined,
+    faltas: [],
+    excessReasons: [],
+    // Banco [10+] nasce dos fatos acima; os usos são feitos pelo usuário
+    // através da interface (botão "Completar jornada com [10+]").
+    specialExcessUses: [],
+  };
+}
+
+/**
+ * CENÁRIO LEGADO 3.1 — fixture própria dos testes de regressão do modelo
+ * legado ([10+] com motivo + realocação/compensação). Preservado byte-a-byte;
+ * NUNCA é usado pelo "Restaurar dados de exemplo" da UI.
+ */
+export function buildLegacyDemoScenario(): AppData {
   const now = Date.parse("2026-08-25T12:00:00");
   const entries: TimeEntry[] = [
     // 29/04 ciclo anterior — déficit 1h (NÃO elegível para 24/08)
@@ -225,7 +298,7 @@ export function buildSeedData(): AppData {
   ];
 
   return {
-    user: { ...DEFAULT_USER },
+    user: { ...DEFAULT_USER, controlStartDate: LEGACY_SEED_CONTROL_START },
     entries,
     compensations,
     absences,
@@ -238,7 +311,7 @@ export function buildSeedData(): AppData {
   };
 }
 
-/** Alias explícito do seed de demonstração — nunca usado no bootstrap de produção. */
+/** Alias explícito do seed de demonstração 4.0 — nunca usado no bootstrap de produção. */
 export function createDemoSeed(): AppData {
   return buildSeedData();
 }

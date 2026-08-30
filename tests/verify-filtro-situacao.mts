@@ -17,7 +17,7 @@ import {
 import { registrosTimelineDates } from "../src/lib/missing-records.ts";
 import { hourBankSummary } from "../src/lib/hour-bank.ts";
 import { seedCompanyCalendars } from "../src/lib/seed-calendars.ts";
-import { buildSeedData, DEFAULT_USER } from "../src/lib/seed-data.ts";
+import { buildLegacyDemoScenario, DEFAULT_USER } from "../src/lib/seed-data.ts";
 import { actions, getAppData } from "../src/lib/store.ts";
 import type { Absence } from "../src/lib/absences.ts";
 import type { Falta, TimeEntry, WorkSettings } from "../src/lib/types.ts";
@@ -33,7 +33,7 @@ const check = (id: string, fn: () => void) => { fn(); passed++; console.log(`✔
 
 const TODAY = "2026-08-28";
 const PERIOD = { from: "2026-08-21", to: "2026-09-20" };
-const seed = buildSeedData();
+const seed = buildLegacyDemoScenario();
 
 function classify(date: string, extra?: {
   entries?: TimeEntry[];

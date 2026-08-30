@@ -15,7 +15,7 @@ import {
   specialExcessLedger,
   specialExcessStatusOf,
 } from "../src/lib/hour-bank.ts";
-import { buildSeedData } from "../src/lib/seed-data.ts";
+import { buildLegacyDemoScenario } from "../src/lib/seed-data.ts";
 import { actions, DUPLICATE_SUBMIT_MSG, getAppData } from "../src/lib/store.ts";
 import { computeDay } from "../src/lib/time.ts";
 import type { Compensation, ExcessReason, TimeEntry, User, WorkSettings } from "../src/lib/types.ts";
@@ -266,7 +266,7 @@ check("L. day-card: −15 factual + ✓/Parcial/Em aberto; Como foi quitado igno
 
 /* ── M. 21/08 seed: 15 quitados = 5 regular + 10 especial ───── */
 check("M. 21/08 seed: déficit 15 quitado com 5 regular + 10 especial de 24/08", () => {
-  const seed = buildSeedData();
+  const seed = buildLegacyDemoScenario();
   const [dv] = deficitViews(
     seed.entries, seed.compensations, seed.absences, seed.companyCalendars,
     seed.faltas, settings, { from: "2026-08-21", to: "2026-08-21" }, TODAY,
@@ -286,7 +286,7 @@ check("M. 21/08 seed: déficit 15 quitado com 5 regular + 10 especial de 24/08",
 
 /* ── N. Gestão 24/08: 60 original / 10 realocado / 50 livre ─── */
 check("N. 24/08 ledger especial = 60 / realizado 25 / livre 35 (planejado ≠ tratado)", () => {
-  const seed = buildSeedData();
+  const seed = buildLegacyDemoScenario();
   const day = computeDay(seed.entries.filter((e) => e.date === "2026-08-24"), settings);
   assert.equal(day.workedMinutes, 660);
   assert.equal(day.excessMinutes, 60);
@@ -313,7 +313,7 @@ check("O. specialExcessStatusOf: livre / programado / parcial / tratado", () => 
   assert.equal(specialExcessStatusOf(45, 0, 45), "programado");
   assert.equal(specialExcessStatusOf(60, 10, 0), "parcial");
   assert.equal(specialExcessStatusOf(30, 30, 0), "tratado");
-  const seed = buildSeedData();
+  const seed = buildLegacyDemoScenario();
   assert.equal(specialExcessLedger("2026-08-18", seed.compensations, 45).status, "programado");
   assert.equal(specialExcessLedger("2026-08-17", seed.compensations, 30).status, "tratado");
   assert.equal(specialExcessLedger("2026-08-11", seed.compensations, 15).status, "livre");
@@ -371,7 +371,7 @@ check("S. acordado-dispensado integral sem batidas = expected 0, déficit 0, sal
 
 /* ── T. Seed 2.0 determinístico ─────────────────────────────── */
 check("T. seed 3.1: datas fixas, calendário fictício, 20/08 quitado, 14/08 com 6 batidas", () => {
-  const seed = buildSeedData();
+  const seed = buildLegacyDemoScenario();
   assert.ok((seed.companyCalendars?.length ?? 0) >= 1, "seed traz calendário fictício");
   assert.equal(seed.user.birthDate, "1989-08-23");
   assert.equal(seed.entries.some((e) => e.date === "2026-08-25"), false, "25/08 sem batidas");

@@ -22,6 +22,7 @@ import {
 import { isMissingExpectedRecord, missingExpectedRecordDates } from "../src/lib/missing-records.ts";
 import { annualCycleBounds, getAnnualPointCycle, getPointPeriod } from "../src/lib/periods.ts";
 import {
+  buildLegacyDemoScenario,
   buildSeedData,
   createDemoSeed,
   createEmptyState,
@@ -139,21 +140,21 @@ check("9. localStorage existente não é apagado", () => {
   const hydrated = hydrateAppData(raw);
   assert.equal(hydrated.entries.length, seed.entries.length);
   assert.ok(hydrated.entries.some((e) => e.date === "2026-08-24"));
-  assert.ok(hydrated.excessReasons?.some((r) => r.date === "2026-08-24"));
+  assert.equal((hydrated.excessReasons ?? []).length, 0, "seed 4.0 sem motivos legados");
   assert.equal(parseStoredAppData("{not-json"), null);
   assert.equal(hydrateAppData("{not-json").entries.length, 0);
 });
 
 check("10. seed explícito continua funcionando", () => {
-  assert.equal(SEED_VERSION, "3.1");
+  assert.equal(SEED_VERSION, "4.0");
   const demo = createDemoSeed();
   const seed = buildSeedData();
   assert.equal(JSON.stringify(demo), JSON.stringify(seed));
   assert.ok(demo.entries.length > 0);
-  assert.ok(demo.entries.some((e) => e.date === "2026-08-11"));
-  assert.ok(demo.entries.some((e) => e.date === "2026-08-17"));
-  assert.ok(demo.entries.some((e) => e.date === "2026-08-18"));
-  assert.ok(demo.entries.some((e) => e.date === "2026-08-24"));
+  assert.ok(demo.entries.some((e) => e.date === "2026-08-18"), "origem [10+] 18/08");
+  assert.ok(demo.entries.some((e) => e.date === "2026-08-20"), "origem [10+] 20/08");
+  assert.ok(demo.entries.some((e) => e.date === "2026-08-26"), "destino 26/08");
+  assert.ok(demo.entries.some((e) => e.date === "2026-08-24"), "destino 24/08");
   actions.replaceAll(createEmptyState());
   assert.equal(getAppData().entries.length, 0);
   actions.reseed();
@@ -169,10 +170,12 @@ check("11. fixtures dos verify continuam disponíveis", () => {
   assert.ok(existsSync(join(root, "tests/fixtures/calendario-sebrae-2025-2026.csv")));
   assert.ok(existsSync(join(root, "tests/fixtures/calendario-ficticio-2026-2027.csv")));
   assert.ok(existsSync(join(root, "src/lib/seed-calendars.ts")));
-  const demo = createDemoSeed();
-  assert.ok((demo.companyCalendars ?? []).length >= 1);
-  assert.ok((demo.companyCalendars ?? [])[0].entries.some((e) => e.tratamento === "COMPENSAR"));
-  assert.ok((demo.companyCalendars ?? [])[0].entries.some((e) => e.tratamento === "ABONADO_PARCIAL"));
+  // O seed 4.0 é limpo (sem calendário); o calendário fictício continua
+  // disponível na fixture legada 3.1.
+  const legacy = buildLegacyDemoScenario();
+  assert.ok((legacy.companyCalendars ?? []).length >= 1);
+  assert.ok((legacy.companyCalendars ?? [])[0].entries.some((e) => e.tratamento === "COMPENSAR"));
+  assert.ok((legacy.companyCalendars ?? [])[0].entries.some((e) => e.tratamento === "ABONADO_PARCIAL"));
 });
 
 check("12. backup continua funcionando", () => {

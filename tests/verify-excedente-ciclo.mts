@@ -13,7 +13,7 @@ import {
 } from "../src/lib/hour-bank.ts";
 import { annualCycleBounds, getAnnualPointCycle, getPointPeriod } from "../src/lib/periods.ts";
 import { seedCompanyCalendars } from "../src/lib/seed-calendars.ts";
-import { buildSeedData } from "../src/lib/seed-data.ts";
+import { buildLegacyDemoScenario } from "../src/lib/seed-data.ts";
 import { computeDay } from "../src/lib/time.ts";
 import type { Compensation, ExcessReason, TimeEntry, WorkSettings } from "../src/lib/types.ts";
 
@@ -29,7 +29,7 @@ const check = (id: string, fn: () => void) => { fn(); passed++; console.log(`✔
 const TODAY = "2026-08-28";
 const CYCLE = annualCycleBounds(getAnnualPointCycle(TODAY));
 const PERIOD = getPointPeriod(TODAY);
-const seed = buildSeedData();
+const seed = buildLegacyDemoScenario();
 
 function book(range = CYCLE, today = TODAY, extra?: {
   entries?: TimeEntry[];

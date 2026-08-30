@@ -16,7 +16,7 @@ import { isMissingExpectedRecord, missingExpectedRecordDates, registrosTimelineD
 import { situationsOfDay } from "../src/lib/day-situation.ts";
 import { annualCycleBounds, getAnnualPointCycle, getPointPeriod } from "../src/lib/periods.ts";
 import { seedCompanyCalendars } from "../src/lib/seed-calendars.ts";
-import { buildSeedData, createEmptyState, SEED_CONTROL_START } from "../src/lib/seed-data.ts";
+import { buildLegacyDemoScenario, buildSeedData, createEmptyState, SEED_CONTROL_START } from "../src/lib/seed-data.ts";
 import { actions, getAppData, hydrateAppData, parseStoredAppData, settingsOf } from "../src/lib/store.ts";
 import { computeDay, dateToString } from "../src/lib/time.ts";
 import type { TimeEntry, WorkSettings } from "../src/lib/types.ts";
@@ -223,7 +223,7 @@ check("21. reseed explícito continua funcionando", () => {
   actions.reseed();
   assert.equal(getAppData().entries.length, seed.entries.length);
   assert.equal(getAppData().user.controlStartDate, SEED_CONTROL_START);
-  assert.ok(SEED_CONTROL_START < "2026-04-29");
+  assert.ok(SEED_CONTROL_START < "2026-08-18", "anterior ao primeiro dia demonstrativo");
 });
 
 check("22. estado existente com dados não é apagado", () => {
@@ -249,7 +249,8 @@ check("23. estado antigo vazio recebe hoje na migração", () => {
 });
 
 check("24. estado antigo com fatos não recebe hoje de forma que esconda fatos", () => {
-  const seed = buildSeedData();
+  // Fixture legada 3.1: este check depende de fatos em 11/08 (cenário legado).
+  const seed = buildLegacyDemoScenario();
   const user = { ...seed.user };
   delete (user as { controlStartDate?: string | null }).controlStartDate;
   const raw = JSON.stringify({ ...seed, user });
@@ -266,10 +267,11 @@ check("24. estado antigo com fatos não recebe hoje de forma que esconda fatos",
 });
 
 check("25. filtros Situação continuam funcionando com fatos históricos", () => {
-  const seed = buildSeedData();
+  // Fixture legada 3.1: 24/08 com 11h (situação "excedente-10") só existe no cenário legado.
+  const seed = buildLegacyDemoScenario();
   const ids = situationsOfDay(
     "2026-08-24", TODAY, seed.entries, seed.absences, seed.companyCalendars, S,
-    { compensations: seed.compensations, faltas: seed.faltas, excessReasons: seed.excessReasons, controlStartDate: SEED_CONTROL_START },
+    { compensations: seed.compensations, faltas: seed.faltas, excessReasons: seed.excessReasons, controlStartDate: seed.user.controlStartDate },
   );
   assert.ok(ids.includes("excedente-10"));
   const beforeStart = situationsOfDay(

@@ -1,83 +1,81 @@
 /**
- * VERIFICAÇÃO — SEED 3.1 / RESTAURAR DADOS DE EXEMPLO
+ * VERIFICAÇÃO — SEED 4.0 / RESTAURAR DADOS DE EXEMPLO (modelo atual)
  *
- *  A  excessReasons após restore: 17/18/24 com motivo; 11/08 sem
- *  B  calendário fictício presente, ABONADO + COMPENSAR + parcial; sem duplicar
- *  C  compensações/status/destinos preservados
- *  D  restore duas vezes = mesmo cenário
- *  E  backup JSON round-trip preserva excessReasons (bug do import)
- *  F  24/08: motivo, 25 realocados, 35 livres, Realocar (não Registrar)
- *  G  11/08 continua sem motivo
- *  H  19/08 tem excedente elegível; UI sem "Usar horas livres"
- *  I  14/08: 6 batidas (bancada de wrap); 8h sem déficit novo
+ * O seed visual demonstra UM modelo operacional (o atual):
+ *   jornada factual → saldo regular factual → [10+] gerado → uso [10+] → projeção.
+ *
+ *  A  restore: sem dados do modelo legado (compensações/ausências/faltas/
+ *     calendário/motivos) no seed visual
+ *  B  sem calendário fictício; restore não duplica
+ *  C  apenas os 7 dias demonstrativos (27 batidas)
+ *  D  restore duas vezes = mesmo cenário (reseed === buildSeedData)
+ *  E  backup JSON round-trip preserva dados (incl. specialExcessUses)
+ *  F  26/08: déficit 1h; banco [10+] 130min (motor 3C); elegível (3A)
+ *  G  25/08: 8h normal, saldo 0, não elegível
+ *  H  24/08: 7h30 (déficit 30min); 27/08: registro incompleto (não elegível)
+ *  I  controlStartDate 01/08/2026; SEED_VERSION 4.0
+ *
+ * O cenário legado 3.1 continua coberto pelos testes de regressão que usam a
+ * fixture própria buildLegacyDemoScenario().
  *
  * Executar: npx tsx tests/verify-seed-restore.mts
  */
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 
 import { buildBackupPayload, parseBackup } from "../src/lib/backup.ts";
-import { dayCreditView, eligibleSpecialSourcesForDeficit, specialExcessLedger } from "../src/lib/hour-bank.ts";
-import { buildSeedData, SEED_VERSION } from "../src/lib/seed-data.ts";
-import { actions, getAppData } from "../src/lib/store.ts";
-import { settingsOf } from "../src/lib/store.ts";
-import { computeDay } from "../src/lib/time.ts";
-import type { AppData, WorkSettings } from "../src/lib/types.ts";
+import { buildSpecialExcessDayView } from "../src/lib/special-excess-day-view.ts";
+import { buildResumoDayRow } from "../src/lib/resumo-days.ts";
+import { buildSeedData, SEED_CONTROL_START, SEED_VERSION } from "../src/lib/seed-data.ts";
+import { actions, getAppData, settingsOf } from "../src/lib/store.ts";
+import type { AppData } from "../src/lib/types.ts";
 
-const srcOf = (rel: string) => readFileSync(new URL(`../${rel}`, import.meta.url), "utf8");
-const TODAY = "2026-08-25";
-const settings: WorkSettings = {
-  workStart: "08:00", workEnd: "17:00", lunchStart: "12:00", lunchEnd: "13:00",
-  maxDailyMinutes: 600, autoDeductLunch: true,
-};
+const ASOF = "2026-08-30";
 
 const snap = (d: AppData) => JSON.stringify(d);
 let passed = 0;
 const check = (id: string, fn: () => void) => { fn(); passed++; console.log(`✔ ${id}`); };
 
-const importSrc = srcOf("src/components/import-backup-modal.tsx");
-const dayCardSrc = srcOf("src/components/day-card.tsx");
-const panelSrc = srcOf("src/components/excess-panel.tsx");
-const bankSrc = srcOf("src/components/hour-bank-card.tsx");
+const dayView = (d: AppData, date: string) =>
+  buildSpecialExcessDayView({
+    date,
+    asOfDate: ASOF,
+    entries: d.entries,
+    absences: d.absences,
+    calendars: d.companyCalendars,
+    settings: settingsOf(d.user),
+    faltas: d.faltas,
+    controlStartDate: d.user.controlStartDate,
+    uses: d.specialExcessUses ?? [],
+  });
 
-assert.equal(SEED_VERSION, "3.1");
-
-check("A. excessReasons: 17/18/24 com motivo; 11/08 sem", () => {
+check("A. seed limpo: sem compensações/ausências/faltas/calendário/motivos legados", () => {
   actions.reseed();
   const d = getAppData();
-  const byDate = new Map((d.excessReasons ?? []).map((r) => [r.date, r]));
-  assert.equal(byDate.get("2026-08-17")?.reason, "demanda-urgente");
-  assert.equal(byDate.get("2026-08-18")?.reason, "atendimento-evento");
-  assert.equal(byDate.get("2026-08-24")?.reason, "demanda-urgente");
-  assert.equal(byDate.has("2026-08-11"), false);
+  assert.equal(d.compensations.length, 0, "um único modelo operacional no visual");
+  assert.equal(d.absences.length, 0);
+  assert.equal(d.faltas.length, 0);
+  assert.equal(d.companyCalendars, undefined);
+  assert.equal((d.excessReasons ?? []).length, 0);
+  assert.deepEqual(d.specialExcessUses, [], "banco novo nasce dos fatos; usos pela interface");
 });
 
-check("B. calendário fictício: ABONADO, COMPENSAR 8h, COMPENSAR 4h; restore não duplica", () => {
+check("B. sem calendário fictício; restore não duplica", () => {
   actions.reseed();
-  const cals = getAppData().companyCalendars ?? [];
-  assert.equal(cals.length, 1);
-  assert.equal(cals[0].cycleStart, "2026-05-01");
-  assert.equal(cals[0].cycleEnd, "2027-04-30");
-  const entries = cals[0].entries;
-  assert.ok(entries.some((e) => e.tratamento === "ABONADO"));
-  assert.ok(entries.some((e) => e.tratamento === "COMPENSAR" && e.horasACompensar === 8));
-  assert.ok(entries.some((e) => e.tratamento === "ABONADO_PARCIAL"));
-  const n = entries.length;
+  const n = getAppData().entries.length;
   actions.reseed();
-  assert.equal((getAppData().companyCalendars ?? [])[0].entries.length, n, "não duplica ocorrências");
+  assert.equal((getAppData().companyCalendars ?? []).length, 0);
+  assert.equal(getAppData().entries.length, n, "não duplica ocorrências");
 });
 
-check("C. compensações: destinos e status preservados; sem duplicar", () => {
+check("C. apenas os 7 dias demonstrativos (27 batidas)", () => {
   actions.reseed();
-  const a = getAppData().compensations;
-  assert.ok(a.some((c) => c.sourceDate === "2026-08-21" && c.portion === "especial" && c.status === "concluida" && c.minutes === 10));
-  assert.ok(a.some((c) => c.sourceDate === "2026-08-20" && c.portion === "especial" && c.status === "concluida" && c.minutes === 15));
-  assert.ok(a.some((c) => c.sourceDate === "2026-08-18" && c.kind === "excedente" && c.status === "pendente" && c.minutes === 45));
-  assert.ok(a.some((c) => c.kind === "acordo" && c.status === "concluida"));
-  assert.ok(a.some((c) => c.kind === "acordo" && c.status === "pendente"));
-  const n = a.length;
-  actions.reseed();
-  assert.equal(getAppData().compensations.length, n);
+  const d = getAppData();
+  const dates = [...new Set(d.entries.map((e) => e.date))].sort();
+  assert.deepEqual(
+    dates,
+    ["2026-08-18", "2026-08-20", "2026-08-24", "2026-08-25", "2026-08-26", "2026-08-27", "2026-08-28"],
+  );
+  assert.equal(d.entries.length, 27);
 });
 
 check("D. restore duas vezes produz o mesmo cenário", () => {
@@ -90,11 +88,9 @@ check("D. restore duas vezes produz o mesmo cenário", () => {
   assert.equal(first, seed, "reseed === buildSeedData");
 });
 
-check("E. parseBackup + replaceAll preserva excessReasons (causa raiz do import)", () => {
-  assert.ok(importSrc.includes("excessReasons: parsed.excessReasons"), "modal envia excessReasons no replace");
-  assert.ok(importSrc.includes("excessReasons: parsed.excessReasons"), "modal envia excessReasons no merge");
+check("E. backup JSON round-trip preserva dados (incl. specialExcessUses)", () => {
   const payload = buildBackupPayload(buildSeedData());
-  assert.ok((payload.excessReasons ?? []).length >= 3);
+  assert.ok(payload.entries.length > 0);
   const parsed = parseBackup(JSON.stringify(payload));
   assert.equal(parsed.ok, true);
   if (!parsed.ok) return;
@@ -106,75 +102,78 @@ check("E. parseBackup + replaceAll preserva excessReasons (causa raiz do import)
     companyCalendars: parsed.backup.companyCalendars,
     faltas: parsed.backup.faltas,
     excessReasons: parsed.backup.excessReasons,
+    specialExcessUses: parsed.backup.specialExcessUses,
   });
-  const byDate = new Map((getAppData().excessReasons ?? []).map((r) => [r.date, r]));
-  assert.equal(byDate.get("2026-08-24")?.reason, "demanda-urgente");
-  assert.equal(byDate.get("2026-08-17")?.reason, "demanda-urgente");
-  assert.equal(byDate.get("2026-08-18")?.reason, "atendimento-evento");
-  assert.equal(byDate.has("2026-08-11"), false);
+  const d = getAppData();
+  assert.equal(d.entries.length, payload.entries.length);
+  assert.ok(d.entries.some((e) => e.date === "2026-08-26"));
+  assert.deepEqual(d.specialExcessUses, []);
+  assert.equal(d.user.controlStartDate, SEED_CONTROL_START);
 });
 
-check("F. 24/08 após restore: motivo, 25 realocados, 35 livres, sem Registrar motivo na UI de motivo presente", () => {
+check("F. 26/08: déficit 1h; banco [10+] 130min (motor 3C); elegível (3A)", () => {
   actions.reseed();
   const d = getAppData();
-  const v = dayCreditView("2026-08-24", d.entries, d.compensations, d.absences, d.companyCalendars, settingsOf(d.user), d.excessReasons);
-  assert.equal(v.reason?.reason, "demanda-urgente");
-  assert.equal(v.excessSpecial, 60);
-  assert.equal(v.freeSpecial, 35);
-  const led = specialExcessLedger("2026-08-24", d.compensations, 60);
-  assert.equal(led.realized, 25);
-  assert.equal(led.free, 35);
-  assert.equal(led.status, "parcial");
-  assert.ok(dayCardSrc.includes("Realocar excedente"));
-  assert.ok(dayCardSrc.includes("{!creditView?.reason && onRegisterReason && ("));
-  assert.ok(dayCardSrc.includes("{creditView?.reason && onRegisterReason && ("));
-});
-
-check("G. 11/08 continua sem motivo", () => {
-  const d = getAppData();
-  const v = dayCreditView("2026-08-11", d.entries, d.compensations, d.absences, d.companyCalendars, settings, d.excessReasons);
-  assert.equal(v.excessSpecial, 15);
-  assert.equal(v.reason, undefined);
-  assert.equal(v.freeSpecial, 15);
-});
-
-check("H. 19/08: excedente elegível; UI sem Usar horas livres", () => {
-  const d = getAppData();
-  const srcs = eligibleSpecialSourcesForDeficit(
-    "2026-08-19", d.entries, d.compensations, d.absences, d.companyCalendars, settings, d.excessReasons, TODAY,
-  );
-  assert.ok(srcs.some((v) => v.date === "2026-08-24" && v.freeSpecial === 35));
-  assert.ok(dayCardSrc.includes("Usar excedente disponível"));
-  assert.ok(!dayCardSrc.includes("Usar horas livres"));
-  assert.ok(!panelSrc.includes("Usar horas livres"));
-  assert.ok(bankSrc.includes("Previsão de horas a compensar"));
-  assert.ok(bankSrc.includes("Ver detalhes"));
-  assert.ok(!bankSrc.includes("Abrir Compensações"));
-});
-
-check("I. Seed 3.1: 14/08 tem 6 batidas, 8h, restore não duplica", () => {
-  actions.reseed();
-  const first = getAppData();
-  const punches = first.entries.filter((e) => e.date === "2026-08-14").sort((a, b) => a.time.localeCompare(b.time));
-  assert.equal(punches.length, 6);
+  const v = dayView(d, "2026-08-26");
+  assert.equal(v.eligible, true, "7h → jornada abaixo do previsto");
+  assert.equal(v.workedMinutes, 420);
+  assert.equal(v.factualBalanceMinutes, -60);
+  assert.equal(v.neededMinutes, 60);
+  assert.equal(v.usedActiveMinutes, 0);
+  assert.equal(v.bankAvailableMinutes, 130, "banco nasce das batidas (40+60+30)");
+  assert.equal(v.canComplete, true);
   assert.deepEqual(
-    punches.map((e) => [e.time, e.type]),
+    v.bank.lots.map((l) => [l.originDate, l.generatedMinutes, l.availableMinutes]),
     [
-      ["08:00", "entrada"],
-      ["10:00", "saida"],
-      ["10:15", "entrada"],
-      ["12:00", "saida"],
-      ["13:00", "entrada"],
-      ["17:15", "saida"],
+      ["2026-08-18", 40, 40],
+      ["2026-08-20", 60, 60],
+      ["2026-08-28", 30, 30],
     ],
+    "lotes: origem data-origem, gerado e disponível",
   );
-  const day = computeDay(punches, settings);
-  assert.equal(day.workedMinutes, 480, "8h — sem déficit/excedente novo");
-  assert.equal(day.excessMinutes, 0);
-  const n = first.entries.length;
-  actions.reseed();
-  assert.equal(getAppData().entries.length, n, "restore 2x não duplica batidas");
-  assert.equal(getAppData().entries.filter((e) => e.date === "2026-08-14").length, 6);
 });
 
-console.log(`\nSEED RESTORE 3.1 — OK (${passed} testes)`);
+check("G. 25/08: 8h normal, saldo 0, sem [10+]", () => {
+  actions.reseed();
+  const d = getAppData();
+  const v = dayView(d, "2026-08-25");
+  assert.equal(v.workedMinutes, 480);
+  assert.equal(v.factualBalanceMinutes, 0);
+  assert.equal(v.eligible, false, "na base → não é elegível");
+  assert.equal(v.canComplete, false);
+});
+
+check("H. 24/08: 7h30 (déficit 30); 27/08: incompleto (não elegível)", () => {
+  actions.reseed();
+  const d = getAppData();
+  const v24 = dayView(d, "2026-08-24");
+  assert.equal(v24.workedMinutes, 450);
+  assert.equal(v24.factualBalanceMinutes, -30);
+  assert.equal(v24.neededMinutes, 30);
+  assert.equal(v24.eligible, true);
+  assert.equal(v24.canComplete, true);
+
+  const row27 = buildResumoDayRow({
+    date: "2026-08-27",
+    today: ASOF,
+    entries: d.entries,
+    absences: d.absences,
+    calendars: d.companyCalendars,
+    settings: settingsOf(d.user),
+    faltas: d.faltas,
+    controlStartDate: d.user.controlStartDate,
+  });
+  assert.equal(row27.status, "incomplete", "sem saída final → Registro incompleto");
+  const v27 = dayView(d, "2026-08-27");
+  assert.equal(v27.eligible, false, "incompleto ≠ abaixo do previsto");
+  assert.equal(v27.canComplete, false);
+});
+
+check("I. controlStartDate 01/08/2026 e versão 4.0", () => {
+  assert.equal(SEED_VERSION, "4.0");
+  assert.equal(SEED_CONTROL_START, "2026-08-01");
+  actions.reseed();
+  assert.equal(getAppData().user.controlStartDate, SEED_CONTROL_START);
+});
+
+console.log(`\nSEED 4.0 / RESTORE — OK (${passed} testes)`);

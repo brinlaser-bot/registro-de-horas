@@ -23,7 +23,7 @@
  */
 import assert from "node:assert/strict";
 
-import { buildSeedData } from "../src/lib/seed-data.ts";
+import { buildLegacyDemoScenario } from "../src/lib/seed-data.ts";
 import { getPointPeriod } from "../src/lib/periods.ts";
 import { regularCoverageByCycle, summarizeRegularCoverage, type RegularFactsRangeInput, type RegularCoverage } from "../src/lib/regular-facts.ts";
 import { settingsOf } from "../src/lib/store.ts";
@@ -186,7 +186,7 @@ check("G. anterior (déficit 1h, crédito 30min) + novo (déficit 30min, crédit
 
 /* ── H. Seed 3.1 validado: 21/08 → 20/09 ────────────────────── */
 check("H. seed 21/08→20/09 → histórico 45min, coberto 45min, sem cobertura 0, líquido +6h15", () => {
-  const seed = buildSeedData();
+  const seed = buildLegacyDemoScenario();
   const s = settingsOf(seed.user);
   const period = getPointPeriod(TODAY);
   const f = summarizeRegularCoverage({
@@ -212,7 +212,7 @@ check("H. seed 21/08→20/09 → histórico 45min, coberto 45min, sem cobertura 
 
 /* ── I. Invariantes em todos os cenários ────────────────────── */
 check("I. invariantes 1–5: covered≤déficit, covered≤crédito, uncovered=déficit−covered, crédito≥déficit⇒uncovered 0 (1 ciclo), nunca entre ciclos", () => {
-  const seed = buildSeedData();
+  const seed = buildLegacyDemoScenario();
   const s = settingsOf(seed.user);
   const period = getPointPeriod(TODAY);
   const seedInput = {

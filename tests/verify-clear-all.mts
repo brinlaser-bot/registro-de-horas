@@ -21,7 +21,7 @@ import {
 } from "../src/lib/hour-bank.ts";
 import { isMissingExpectedRecord } from "../src/lib/missing-records.ts";
 import { annualCycleBounds, getAnnualPointCycle } from "../src/lib/periods.ts";
-import { buildSeedData, createEmptyState } from "../src/lib/seed-data.ts";
+import { buildLegacyDemoScenario, buildSeedData, createEmptyState } from "../src/lib/seed-data.ts";
 import { actions, getAppData, settingsOf } from "../src/lib/store.ts";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -40,9 +40,12 @@ const check = (id: string, fn: () => void) => {
 const storeSrc = srcOf("src/lib/store.ts");
 const cfgSrc = srcOf("src/app/(app)/configuracoes/page.tsx");
 
-actions.reseed();
+// Fonte do "before": a fixture legada 3.1 (tem TODAS as categorias que o
+// clearAll deve apagar: faltas futuras, abonos, acordos, calendário,
+// compensações, motivos). O seed visual 4.0 é limpo de propósito.
+actions.replaceAll(buildLegacyDemoScenario());
 const before = getAppData();
-assert.ok(before.entries.length > 0, "pré-condição: seed carregado");
+assert.ok(before.entries.length > 0, "pré-condição: fixture carregada");
 assert.ok((before.companyCalendars ?? []).length > 0);
 assert.ok(before.faltas.length > 0);
 assert.ok(before.absences.length > 0);
@@ -221,9 +224,9 @@ check("25. reseed explícito continua funcionando", () => {
   const restored = getAppData();
   assert.equal(restored.entries.length, seed.entries.length);
   assert.equal(restored.compensations.length, seed.compensations.length);
-  assert.ok((restored.companyCalendars ?? []).length > 0);
-  assert.ok(restored.faltas.length > 0);
-  assert.ok(restored.absences.length > 0);
+  assert.equal((restored.companyCalendars ?? []).length, 0, "seed 4.0 sem calendário");
+  assert.equal(restored.faltas.length, 0, "seed 4.0 sem faltas");
+  assert.equal(restored.absences.length, 0, "seed 4.0 sem ausências");
   actions.clearAll();
   assert.equal(getAppData().entries.length, 0);
   actions.reseed();
@@ -248,7 +251,7 @@ check("26. backup/importação continuam funcionando", () => {
     excessReasons: parsed.backup.excessReasons,
   });
   assert.equal(getAppData().entries.length, payload.entries.length);
-  assert.ok((getAppData().companyCalendars ?? []).length > 0);
+  assert.equal((getAppData().companyCalendars ?? []).length, 0, "seed 4.0 sem calendário");
 });
 
 check("27. Sem registro continua derivado sem criar dívida", () => {

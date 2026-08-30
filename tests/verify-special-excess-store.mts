@@ -44,7 +44,7 @@
  */
 import assert from "node:assert/strict";
 
-import { buildSeedData } from "../src/lib/seed-data.ts";
+import { buildLegacyDemoScenario, buildSeedData } from "../src/lib/seed-data.ts";
 import {
   actions,
   getAppData,
@@ -539,7 +539,10 @@ check("AG. legacy Compensation permanece intacto após operações [10+]", () =>
 check("AH. seed antigo não é convertido automaticamente (compensações ≠ SpecialExcessUse)", () => {
   const seed = buildSeedData();
   assert.deepEqual(seed.specialExcessUses, [], "banco novo começa vazio");
-  assert.ok(seed.compensations.length >= 10, "seed legado mantém as compensações antigas");
+  assert.equal(seed.compensations.length, 0, "seed 4.0 sem compensações legadas no visual");
+  const legacy = buildLegacyDemoScenario();
+  assert.ok(legacy.compensations.length >= 10, "fixture legada mantém as compensações antigas");
+  assert.deepEqual(legacy.specialExcessUses, [], "compensações legadas NUNCA viram SpecialExcessUse");
 });
 
 console.log(`\nUSO [10+] — PERSISTÊNCIA E AÇÕES (ÉTAPA 3D) — OK (${passed} testes)`);

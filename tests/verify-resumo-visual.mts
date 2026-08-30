@@ -8,7 +8,7 @@ import { readFileSync } from "node:fs";
 import { specialExcessBook, specialExcessLedger } from "../src/lib/hour-bank.ts";
 import { getPointPeriod } from "../src/lib/periods.ts";
 import { buildResumoDayRow, resumoEventKind } from "../src/lib/resumo-days.ts";
-import { buildSeedData } from "../src/lib/seed-data.ts";
+import { buildLegacyDemoScenario } from "../src/lib/seed-data.ts";
 import { settingsOf } from "../src/lib/store.ts";
 import { buildStackedPeriodData } from "../src/components/stacked-period-chart.tsx";
 import { computeDay, formatMinutes } from "../src/lib/time.ts";
@@ -24,7 +24,7 @@ const check = (id: string, fn: () => void) => {
 
 const TODAY = "2026-08-30";
 const PERIOD = getPointPeriod(TODAY);
-const seed = buildSeedData();
+const seed = buildLegacyDemoScenario();
 const S = settingsOf(seed.user);
 
 check("1. quatro cards do Resumo têm ícone e malha alinhada", () => {

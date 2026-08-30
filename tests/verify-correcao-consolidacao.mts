@@ -21,7 +21,7 @@ import {
   hourBankSummary,
   specialExcessLedger,
 } from "../src/lib/hour-bank.ts";
-import { buildSeedData } from "../src/lib/seed-data.ts";
+import { buildLegacyDemoScenario } from "../src/lib/seed-data.ts";
 import { actions, getAppData } from "../src/lib/store.ts";
 import { dayBalanceContribution } from "../src/lib/faltas.ts";
 import { companyDayContext } from "../src/lib/company-calendar.ts";
@@ -88,7 +88,7 @@ check("A. 07/09 08:00–10:00 em 25/08: sem déficit, crédito, totais nem saldo
   assert.equal(dayBalanceContribution(cctx, [], "2026-09-07", TODAY), 0);
   const bank = hourBankSummary(entries, [], [], undefined, [], [], settings, { from: "2026-08-21", to: "2026-09-20" }, TODAY);
   assert.ok(bank.realizedBalance !== 120 - 480, "futuro não entra como −6h");
-  const seed = buildSeedData();
+  const seed = buildLegacyDemoScenario();
   const seedDebts = buildDebtDays(
     seed.entries, seed.compensations, settings,
     { from: "2026-08-21", to: "2026-09-20" }, seed.absences, seed.companyCalendars, seed.faltas, TODAY,
@@ -185,7 +185,7 @@ check("E. pendência sem programação 6h e capacidade 2h → prefill 2h", () =>
 
 /* ── F. Dashboard excedente 24/08: 10/50 não 0/60 ─────────── */
 check("F. 24/08 ledger 60/25/35; progresso usa specialBook não sair-cedo", () => {
-  const seed = buildSeedData();
+  const seed = buildLegacyDemoScenario();
   const led = specialExcessLedger("2026-08-24", seed.compensations, 60);
   assert.equal(led.original, 60);
   assert.equal(led.realized, 25);
@@ -238,7 +238,7 @@ check("I. observation igual ao label do motivo é omitida", () => {
 
 /* ── Fontes inversas ──────────────────────────────────────── */
 check("J. eligibleSpecialSourcesForDeficit lista 24/08 para quitar 19/08", () => {
-  const seed = buildSeedData();
+  const seed = buildLegacyDemoScenario();
   const srcs = eligibleSpecialSourcesForDeficit(
     "2026-08-19", seed.entries, seed.compensations, seed.absences,
     seed.companyCalendars, settings, seed.excessReasons, TODAY,

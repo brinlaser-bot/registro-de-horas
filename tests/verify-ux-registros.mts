@@ -5,8 +5,8 @@
  *  B  Registro manual continua no card (mobile/desktop) e o fluxo é o mesmo
  *  C  Mobile: "Entrada"/"Saída" inteiros; sem truncate; 2 colunas; sem overflow-x
  *  D  Desktop: batidas em fluxo horizontal/wrap
- *  E  Seed 3.1: 6 batidas em 14/08; restore determinístico; calendário + motivos
- *  F  Dia com 6 batidas: wrap no desktop, 2 colunas no mobile, editar/excluir
+ *  E  Seed 4.0: restore determinístico; sem calendário/motivos; 7 datas demo
+ *  F  Dia com 6 batidas (fixture própria): wrap no desktop, 2 colunas no mobile, editar/excluir
  *
  * Executar: npx tsx tests/verify-ux-registros.mts
  */
@@ -16,7 +16,7 @@ import { readFileSync } from "node:fs";
 import { buildSeedData, SEED_VERSION } from "../src/lib/seed-data.ts";
 import { actions, getAppData } from "../src/lib/store.ts";
 import { computeDay } from "../src/lib/time.ts";
-import type { AppData, WorkSettings } from "../src/lib/types.ts";
+import type { AppData, TimeEntry, WorkSettings } from "../src/lib/types.ts";
 
 const srcOf = (rel: string) => readFileSync(new URL(`../${rel}`, import.meta.url), "utf8");
 const settings: WorkSettings = {
@@ -32,7 +32,7 @@ const dayCardSrc = srcOf("src/components/day-card.tsx");
 const regsSrc = srcOf("src/app/(app)/registros/page.tsx");
 const quickSrc = srcOf("src/components/quick-punch.tsx");
 
-assert.equal(SEED_VERSION, "3.1");
+assert.equal(SEED_VERSION, "4.0");
 
 check("A. Registros/DayCard não renderiza atalhos de ponto", () => {
   for (const src of [dayCardSrc, regsSrc]) {
@@ -72,7 +72,7 @@ check("D. Desktop: batidas em fluxo horizontal com wrap", () => {
   assert.ok(!dayCardSrc.includes("grid-cols-1 gap-1.5 sm:grid-cols-1"), "não voltou para 1 batida por linha");
 });
 
-check("E. Seed 3.1: 6 batidas, calendário, motivos, restore 2x idêntico", () => {
+check("E. Seed 4.0: restore 2x idêntico; sem calendário/motivos; 7 datas demo", () => {
   actions.reseed();
   const first = snap(getAppData());
   actions.reseed();
@@ -80,20 +80,25 @@ check("E. Seed 3.1: 6 batidas, calendário, motivos, restore 2x idêntico", () =
   assert.equal(first, snap(buildSeedData()), "reseed === buildSeedData");
 
   const d = getAppData();
-  assert.equal((d.companyCalendars ?? []).length, 1, "calendário fictício presente");
-  assert.equal((d.companyCalendars ?? [])[0].cycleStart, "2026-05-01");
-  const byDate = new Map((d.excessReasons ?? []).map((r) => [r.date, r]));
-  assert.equal(byDate.get("2026-08-24")?.reason, "demanda-urgente");
-  assert.equal(byDate.get("2026-08-17")?.reason, "demanda-urgente");
-  assert.equal(byDate.get("2026-08-18")?.reason, "atendimento-evento");
-  assert.equal(byDate.has("2026-08-11"), false);
-  assert.equal(d.entries.filter((e) => e.date === "2026-08-14").length, 6);
+  assert.equal(d.companyCalendars, undefined, "sem calendário fictício");
+  assert.equal((d.excessReasons ?? []).length, 0, "sem motivos legados no visual");
+  assert.equal(d.compensations.length, 0);
+  const dates = [...new Set(d.entries.map((e) => e.date))].sort();
+  assert.deepEqual(
+    dates,
+    ["2026-08-18", "2026-08-20", "2026-08-24", "2026-08-25", "2026-08-26", "2026-08-27", "2026-08-28"],
+  );
 });
 
-check("F. 14/08 com 6 batidas: 8h, wrap/2 colunas e editar/excluir no chip", () => {
-  const seed = buildSeedData();
-  const punches = seed.entries.filter((e) => e.date === "2026-08-14");
-  assert.equal(punches.length, 6);
+check("F. Dia com 6 batidas (fixture própria): 8h, wrap/2 colunas e editar/excluir no chip", () => {
+  const punches: TimeEntry[] = [
+    { id: 1, date: "2026-08-14", time: "08:00", type: "entrada", note: null },
+    { id: 2, date: "2026-08-14", time: "10:00", type: "saida", note: null },
+    { id: 3, date: "2026-08-14", time: "10:15", type: "entrada", note: null },
+    { id: 4, date: "2026-08-14", time: "12:00", type: "saida", note: null },
+    { id: 5, date: "2026-08-14", time: "13:00", type: "entrada", note: null },
+    { id: 6, date: "2026-08-14", time: "17:15", type: "saida", note: null },
+  ];
   const day = computeDay(punches, settings);
   assert.equal(day.workedMinutes, 480);
   assert.equal(day.segments.length, 3, "três pares → wrap em ~3 linhas no mobile");

@@ -25,7 +25,7 @@
 import assert from "node:assert/strict";
 
 import { buildResumoDayRow } from "../src/lib/resumo-days.ts";
-import { buildSeedData } from "../src/lib/seed-data.ts";
+import { buildLegacyDemoScenario } from "../src/lib/seed-data.ts";
 import { getPointPeriod, listDaysBetween } from "../src/lib/periods.ts";
 import { dayRegularFactBalance, summarizeRegularFacts, type RegularFacts } from "../src/lib/regular-facts.ts";
 import { settingsOf } from "../src/lib/store.ts";
@@ -196,7 +196,7 @@ check("I. falta prevista futura (03/09) → 0/0; dia não vira −8h antes da da
 
 /* ── K. Seed 3.1 validado: 21/08 → 20/09 ───────────────────── */
 check("K. seed 21/08→20/09 → crédito 7h, déficit 45min, líquido +6h15", () => {
-  const seed = buildSeedData();
+  const seed = buildLegacyDemoScenario();
   const s = settingsOf(seed.user);
   const period = getPointPeriod(TODAY);
   assert.equal(period.from, "2026-08-21");
@@ -258,7 +258,7 @@ check("J. invariante líquido = crédito − déficit; seed: soma do agregador d
 
   // Seed: o líquido da apuração é exatamente a soma de balanceContribution
   // que o Resumo soma como "Saldo do período" (mesma fonte).
-  const seed = buildSeedData();
+  const seed = buildLegacyDemoScenario();
   const s = settingsOf(seed.user);
   const period = getPointPeriod(TODAY);
   let resumoTotal = 0;

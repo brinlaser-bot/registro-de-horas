@@ -14,7 +14,7 @@ import {
   futureCommitmentsSummary,
   hasEligibleSpecialExcessInCycle,
 } from "../src/lib/hour-bank.ts";
-import { buildSeedData } from "../src/lib/seed-data.ts";
+import { buildLegacyDemoScenario } from "../src/lib/seed-data.ts";
 import { actions, getAppData } from "../src/lib/store.ts";
 import { buildStackedPeriodData } from "../src/components/stacked-period-chart.tsx";
 import type { Compensation, TimeEntry, User, WorkSettings } from "../src/lib/types.ts";
@@ -111,7 +111,7 @@ check("C. prefill = min(unplanned, capacidade) ao abrir/trocar data", () => {
 
 /* ── D. Fluxo inverso no card do dia ──────────────────────── */
 check("D. card do dia devedor mostra Usar excedente disponível", () => {
-  const seed = buildSeedData();
+  const seed = buildLegacyDemoScenario();
   const srcs = eligibleSpecialSourcesForDeficit(
     "2026-08-19", seed.entries, seed.compensations, seed.absences,
     seed.companyCalendars, settings, seed.excessReasons, TODAY,
@@ -131,7 +131,7 @@ check("D. card do dia devedor mostra Usar excedente disponível", () => {
 
 /* ── E. Ciclo anual em Dias com saldo negativo ────────────── */
 check("E. ciclo anual: 20/08 aparece; futuro não; quitado some; 100% planejado = Programado", () => {
-  const seed = buildSeedData();
+  const seed = buildLegacyDemoScenario();
   const cycle = { from: "2026-05-01", to: "2027-04-30" };
   const views = deficitViews(
     seed.entries, seed.compensations, seed.absences, seed.companyCalendars,
