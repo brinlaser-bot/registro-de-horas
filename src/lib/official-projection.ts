@@ -24,10 +24,23 @@
 // buildDebtDays, hourBankSummary, openDeficit (2C), cobertura 2B,
 // ledger de compensações legado, dayCreditView de destinação.
 //
+// ELEGIBILIDADE: o uso de [10+] serve SOMENTE para COMPLETAR uma
+// jornada factual válida que terminou ABAIXO da base efetiva.
+// NÃO é elegível: falta · férias · afastamento · dia com jornada-base
+// já cumprida (ok, saldo 0) · dia com saldo positivo · dia acima do
+// teto (excess) · dia incompleto · dia inconsistente · dia aberto ·
+// dia futuro/sem fato.
+//
+// Na projeção do período, a elegibilidade é o status "deficit" de
+// buildResumoDayRow — que representa EXATAMENTE esse caso (ver a
+// auditoria documentada em isProjectableDayStatus).
+//
 // [10+] no destino: serve SOMENTE para completar a jornada até a
 // BASE EFETIVA do dia (neededToBase = max(base − registrável, 0)).
 // Nunca cria hora extra regular artificial. Uso acima da necessidade
-// NÃO é corrigido: aplica-se o necessário e sinaliza `needsReview`.
+// — ou em dia NÃO ELEGÍVEL — NÃO é corrigido silenciosamente: aplica-
+// se o necessário (0 no não elegível) e o resto é sinalizado em
+// excessUsedMinutes + needsReview. A função apenas detecta.
 //
 // Ciclo anual (30/04): nesta etapa ainda não há modelo de
 // origem/acordo — os usos chegam JÁ associados ao destino
@@ -55,7 +68,11 @@ export interface RealizedDayOfficialProjectionInput {
   factualRegularBalanceMinutes: number;
   /** Jornada-base efetiva do dia pela resolução central (0 em folga/abonado). */
   effectiveBaseMinutes: number;
-  /** O dia possui fato financeiro VÁLIDO (encerrado, consistente, não pendente). */
+  /**
+   * O dia é ELEGÍVEL para uso de [10+]: jornada factual válida que
+   * terminou ABAIXO da base efetiva. Na projeção do período, o critério
+   * é o status "deficit" do Resumo (isProjectableDayStatus).
+   */
   financialValid: boolean;
   /** O dia já foi realizado (data <= hoje). */
   realized: boolean;
@@ -92,7 +109,10 @@ export interface RealizedDayOfficialProjection {
   neededToBaseMinutes: number;
   /** [10+] efetivamente aplicado: min(usado, necessário). 0 quando não projetável. */
   appliedSpecialMinutes: number;
-  /** Excesso do uso acima do necessário (usado − aplicado) — apenas sinaliza; NUNCA corrige. */
+  /**
+   * Uso acima do aplicado (usado − aplicado) — apenas sinaliza; NUNCA
+   * corrige. Em dia não elegível, aplicado = 0: todo o uso é excesso.
+   */
   excessUsedMinutes: number;
   /** Uso acima da necessidade do dia — precisa de revisão (nunca tratamento silencioso). */
   needsReview: boolean;
@@ -114,7 +134,9 @@ export interface RealizedDayOfficialProjection {
  *   projectedSald = factualRegularBalanceMinutes + applied
  *
  * Dia não projetável → identidade (projetado = factual, aplicado 0,
- * needsReview false): nada é inventado, nada é corrigido.
+ * needed 0): nada é projetado nem inventado. Se ainda assim houver uso
+ * registrado, TODO ele é sinalizado (excessUsedMinutes + needsReview) —
+ * detecção de uso indevido, SEM correção silenciosa.
  * A função é pura: não muta os insumos nem lê estado externo.
  */
 export function projectRealizedDayOfficial(
@@ -130,7 +152,9 @@ export function projectRealizedDayOfficial(
   const appliedSpecialMinutes = projectable
     ? Math.min(used, neededToBaseMinutes)
     : 0;
-  const excessUsedMinutes = projectable ? used - appliedSpecialMinutes : 0;
+  // Uso acima do aplicado — vale também para dia NÃO ELEGÍVEL, onde
+  // aplicado = 0: todo o uso registrado é sinalizado (nunca corrigido).
+  const excessUsedMinutes = used - appliedSpecialMinutes;
 
   return {
     date: input.date,
@@ -146,7 +170,7 @@ export function projectRealizedDayOfficial(
     neededToBaseMinutes,
     appliedSpecialMinutes,
     excessUsedMinutes,
-    needsReview: projectable && excessUsedMinutes > 0,
+    needsReview: excessUsedMinutes > 0,
     projectedWorkedMinutes: input.factualRegistrableMinutes + appliedSpecialMinutes,
     projectedBalanceMinutes: input.factualRegularBalanceMinutes + appliedSpecialMinutes,
   };
@@ -155,22 +179,36 @@ export function projectRealizedDayOfficial(
 /* ── PROJEÇÃO DE UM PERÍODO REALIZADO ─────────────────────── */
 
 /**
- * Status da linha do Resumo que possuem FATO FINANCEIRO DEFINITIVO —
- * são os únicos que aceitam projeção. Futuro, vazio, idle, inconsistente,
- * incompleto e em andamento (aberto) NÃO recebem projeção.
+ * ELEGIBILIDADE (auditoria da classificação real de buildResumoDayRow /
+ * resumoTableStatus): o status "deficit" representa EXATAMENTE "jornada
+ * factual válida que terminou abaixo da base efetiva" — é o ÚNICO status
+ * elegível para uso de [10+].
+ *
+ * A ordem da classificação já exclui o resto ANTES de chegar ao deficit:
+ *  - "future"/"empty"/"idle" → dia não realizado, sem fato ou hoje ainda
+ *    não iniciado (dia sem fato nunca é "abaixo da base");
+ *  - "falta"                 → falta efetiva (checada antes do deficit);
+ *  - "ferias"/"afastamento"  → ausência (integral ou parcial);
+ *  - "inconsistent"          → batidas inconsistentes;
+ *  - "incomplete"            → dia passado com ponto financeiro pendente;
+ *  - "in-progress"           → dia ainda aberto (jornada não definida);
+ *  - "excess"                → jornada acima do teto diário (10h);
+ *  - "ok"                    → jornada encerrada com base cumprida
+ *    (saldo 0 ou positivo).
+ *
+ * "deficit" só ocorre quando TODAS valem: dia realizado, com batidas,
+ * consistente, encerrado (canFinalizeFinancialDay, não aberto, não
+ * pendente financeiro), sem falta efetiva, sem ausência, sem excedente
+ * >10h e adjustedDeficit > 0 (isAbaixoDaBase) — jornada válida ABAIXO da
+ * base efetiva.
+ *
+ * Por isso o critério é o STATUS, não "saldo negativo": dias com saldo
+ * negativo que não são jornada trabalhada (falta) ou dia trabalhado em
+ * ausência têm status próprio ("falta"/"afastamento") e não elegem uso
+ * de [10+].
  */
-const PROJECTABLE_DAY_STATUSES: ReadonlySet<ResumoTableStatus> = new Set([
-  "ok",
-  "deficit",
-  "excess",
-  "falta",
-  "ferias",
-  "afastamento",
-]);
-
-/** O status do dia (camada factual) permite projeção? */
 export function isProjectableDayStatus(status: ResumoTableStatus): boolean {
-  return PROJECTABLE_DAY_STATUSES.has(status);
+  return status === "deficit";
 }
 
 /** Insumo da projeção oficial de um PERÍODO. */

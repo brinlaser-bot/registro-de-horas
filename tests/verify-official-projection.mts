@@ -5,20 +5,32 @@
  * no sistema oficial. Sem UI, sem store, sem planejamento, sem
  * SpecialExcessAgreement, sem adapter legado.
  *
+ * ELEGIBILIDADE (regra de produto): o uso de [10+] serve SOMENTE para
+ * COMPLETAR uma jornada factual válida que terminou ABAIXO da base
+ * efetiva (status "deficit" do Resumo — o único status elegível).
+ * NÃO é elegível: falta · férias · afastamento · base cumprida (ok,
+ * saldo 0) · saldo positivo · excess (>10h) · incompleto · inconsistente.
+ * Em dia não elegível a função NÃO projeta [10+] (projectable false,
+ * applied 0, factual intacto) mas DETECTA o uso indevido
+ * (excessUsedMinutes + needsReview) — sem correção silenciosa.
+ *
  *  A 7h, base 8h, uso [10+] 1h      → applied 1h, projetado 8h / saldo 0
  *  B 7h, uso [10+] 30min            → projetado 7h30 / −30min
  *  C 7h30, uso [10+] 30min          → projetado 8h / 0
  *  D 7h45, uso [10+] 15min          → projetado 8h / 0
- *  E 8h, uso [10+] 30min            → needed 0, applied 0, excess 30, needsReview
- *  F 8h30, uso [10+] 30min          → applied 0, projetado 8h30 / +30min (sem extra artificial)
- *  G 7h30, uso registrado 1h        → needed 30, applied 30, excess 30, needsReview
- *  H registro incompleto/futuro     → projectable false, identity (nada inventado)
+ *  E 8h (base cumprida)             → NÃO elegível: applied 0, excess 30, needsReview, idem
+ *  F 8h30 (+30min) uso 30min        → NÃO elegível: idem 8h30/+30min, excess 30, needsReview
+ *  G 7h30, uso registrado 1h        → needed 30, applied 30, excess 30, needsReview, projetado 8h/0
+ *  H incompleto/futuro              → projectable false, identity; uso → detectado
  *  I 3 dias (8h/10h30/7h): sem uso → factual +1h = projetado +1h;
  *    usando 30min do [10+] no dia 7h → factual CONTINUA +1h, projetado +1h30
  *  J mesmo cenário, uso de 1h no dia 7h → factual +1h, projetado +2h
- *  K uso em dia já ≥ base (10h30)   → applied 0, needsReview, nada artificial
+ *  K uso em dia 10h30 (excess)      → NÃO elegível: applied 0, needsReview, sem extra artificial
  *  L uso em data fora do escopo     → não é aplicado (destino é único)
- *  INV 1–9 (seção 13 do escopo) + mesma fonte do Resumo + pureza
+ *  ELE1–9 elegibilidade pelo status REAL de buildResumoDayRow:
+ *    7h → deficit (elegível) · 7h30 → deficit (elegível) · 8h → ok · 8h30 → ok ·
+ *    falta · férias · afastamento · incompleto · inconsistente → não elegíveis
+ *  INV 1–12 (invariantes)
  *
  * Executar: npx tsx tests/verify-official-projection.mts
  */
@@ -32,7 +44,8 @@ import {
 } from "../src/lib/official-projection.ts";
 import { buildResumoDayRow } from "../src/lib/resumo-days.ts";
 import { listDaysBetween } from "../src/lib/periods.ts";
-import type { TimeEntry, WorkSettings } from "../src/lib/types.ts";
+import type { Absence } from "../src/lib/absences.ts";
+import type { Falta, TimeEntry, WorkSettings } from "../src/lib/types.ts";
 
 const settings: WorkSettings = {
   workStart: "08:00", workEnd: "17:00", lunchStart: "12:00", lunchEnd: "13:00",
@@ -82,7 +95,7 @@ const check = (id: string, fn: () => void) => { fn(); passed++; console.log(`✔
 /* ── A. 7h, uso 1h → completa a base ──────────────────────── */
 check("A. 7h/base8 uso 1h → needed 1h, applied 1h, projetado 8h/saldo 0", () => {
   const p = projectRealizedDayOfficial(dayInput({ usedSpecialMinutes: 60 }));
-  assert.equal(p.projectable, true);
+  assert.equal(p.projectable, true, "jornada válida abaixo da base → elegível");
   assert.equal(p.neededToBaseMinutes, 60, "needed = 8h − 7h = 1h");
   assert.equal(p.appliedSpecialMinutes, 60);
   assert.equal(p.excessUsedMinutes, 0);
@@ -96,6 +109,7 @@ check("A. 7h/base8 uso 1h → needed 1h, applied 1h, projetado 8h/saldo 0", () =
 /* ── B. 7h, uso 30min → 7h30/−30min ───────────────────────── */
 check("B. 7h uso 30min → projetado 7h30/saldo −30min", () => {
   const p = projectRealizedDayOfficial(dayInput({ usedSpecialMinutes: 30 }));
+  assert.equal(p.projectable, true);
   assert.equal(p.appliedSpecialMinutes, 30);
   assert.equal(p.neededToBaseMinutes, 60);
   assert.equal(p.needsReview, false, "uso ≤ necessidade → sem revisão");
@@ -109,6 +123,7 @@ check("C. 7h30 uso 30min → projetado 8h/saldo 0", () => {
     factualWorkedMinutes: 450, factualRegistrableMinutes: 450,
     factualRegularBalanceMinutes: -30, usedSpecialMinutes: 30,
   }));
+  assert.equal(p.projectable, true);
   assert.equal(p.appliedSpecialMinutes, 30);
   assert.equal(p.projectedWorkedMinutes, 480);
   assert.equal(p.projectedBalanceMinutes, 0);
@@ -120,33 +135,37 @@ check("D. 7h45 uso 15min → projetado 8h/saldo 0", () => {
     factualWorkedMinutes: 465, factualRegistrableMinutes: 465,
     factualRegularBalanceMinutes: -15, usedSpecialMinutes: 15,
   }));
+  assert.equal(p.projectable, true);
   assert.equal(p.neededToBaseMinutes, 15);
   assert.equal(p.appliedSpecialMinutes, 15);
   assert.equal(p.projectedWorkedMinutes, 480);
   assert.equal(p.projectedBalanceMinutes, 0);
 });
 
-/* ── E. 8h, uso 30min → needed 0, applied 0, needsReview ──── */
-check("E. 8h uso 30min → needed 0, applied 0, excess 30, needsReview", () => {
+/* ── E. 8h (base cumprida) → NÃO elegível ─────────────────── */
+check("E. 8h uso 30min → NÃO elegível: applied 0, excess 30, needsReview, idem 8h/0", () => {
   const p = projectRealizedDayOfficial(dayInput({
     factualWorkedMinutes: 480, factualRegistrableMinutes: 480,
-    factualRegularBalanceMinutes: 0, usedSpecialMinutes: 30,
+    factualRegularBalanceMinutes: 0, financialValid: false, usedSpecialMinutes: 30,
   }));
+  assert.equal(p.projectable, false, "base cumprida → não elegível");
+  assert.equal(p.reason, "not-financially-valid");
   assert.equal(p.neededToBaseMinutes, 0);
   assert.equal(p.appliedSpecialMinutes, 0);
   assert.equal(p.excessUsedMinutes, 30);
-  assert.equal(p.needsReview, true);
+  assert.equal(p.needsReview, true, "uso indevido detectado");
   assert.equal(p.projectedWorkedMinutes, 480, "projetado permanece 8h");
   assert.equal(p.projectedBalanceMinutes, 0, "saldo permanece 0");
 });
 
-/* ── F. 8h30, uso 30min → sem hora extra artificial ───────── */
-check("F. 8h30 (+30min) uso 30min → applied 0, projetado 8h30/+30min, needsReview", () => {
+/* ── F. 8h30 (+30min) → NÃO elegível, sem extra artificial ── */
+check("F. 8h30 (+30min) uso 30min → NÃO elegível: idem 8h30/+30min, excess 30, needsReview", () => {
   const p = projectRealizedDayOfficial(dayInput({
     factualWorkedMinutes: 510, factualRegistrableMinutes: 510,
-    factualRegularBalanceMinutes: 30, usedSpecialMinutes: 30,
+    factualRegularBalanceMinutes: 30, financialValid: false, usedSpecialMinutes: 30,
   }));
-  assert.equal(p.neededToBaseMinutes, 0, "já ≥ base → needed 0");
+  assert.equal(p.projectable, false, "saldo positivo → não elegível");
+  assert.equal(p.neededToBaseMinutes, 0);
   assert.equal(p.appliedSpecialMinutes, 0);
   assert.equal(p.excessUsedMinutes, 30);
   assert.equal(p.needsReview, true);
@@ -160,6 +179,7 @@ check("G. 7h30 uso 1h → needed 30, applied 30, excess 30, needsReview, projeta
     factualWorkedMinutes: 450, factualRegistrableMinutes: 450,
     factualRegularBalanceMinutes: -30, usedSpecialMinutes: 60,
   }));
+  assert.equal(p.projectable, true);
   assert.equal(p.neededToBaseMinutes, 30);
   assert.equal(p.appliedSpecialMinutes, 30);
   assert.equal(p.excessUsedMinutes, 30);
@@ -168,33 +188,35 @@ check("G. 7h30 uso 1h → needed 30, applied 30, excess 30, needsReview, projeta
   assert.equal(p.projectedBalanceMinutes, 0);
 });
 
-/* ── H. Dia sem fato válido → não inventar projeção ───────── */
-check("H1. registro incompleto (inconsistente) → projectable false, identity", () => {
+/* ── H. Dia não elegível (incompleto/futuro) → nada projetado; uso detectado ─ */
+check("H1. dia incompleto → projectable false, identity, uso detectado (needsReview)", () => {
   const inp = dayInput({ financialValid: false, usedSpecialMinutes: 30 });
   const p = projectRealizedDayOfficial(inp);
   assert.equal(p.projectable, false);
   assert.equal(p.reason, "not-financially-valid");
   assert.equal(p.neededToBaseMinutes, 0);
-  assert.equal(p.appliedSpecialMinutes, 0);
-  assert.equal(p.excessUsedMinutes, 0);
-  assert.equal(p.needsReview, false);
+  assert.equal(p.appliedSpecialMinutes, 0, "[10+] não é projetado em dia não elegível");
+  assert.equal(p.excessUsedMinutes, 30, "uso indevido sinalizado");
+  assert.equal(p.needsReview, true);
   assert.equal(p.projectedWorkedMinutes, inp.factualRegistrableMinutes, "identity: nada projetado");
   assert.equal(p.projectedBalanceMinutes, inp.factualRegularBalanceMinutes, "identity: saldo factual intacto");
 });
-check("H2. dia ainda não realizado → projectable false (reason not-realized)", () => {
-  const p = projectRealizedDayOfficial(dayInput({ realized: false, usedSpecialMinutes: 30 }));
+check("H2. dia ainda não realizado → projectable false (not-realized), uso detectado", () => {
+  const p = projectRealizedDayOfficial(dayInput({ realized: false, financialValid: false, usedSpecialMinutes: 30 }));
   assert.equal(p.projectable, false);
   assert.equal(p.reason, "not-realized");
   assert.equal(p.appliedSpecialMinutes, 0);
+  assert.equal(p.excessUsedMinutes, 30, "uso em dia sem fato é detectado");
+  assert.equal(p.needsReview, true);
   assert.equal(p.projectedWorkedMinutes, 420, "identity");
 });
 
 /* ── Cenário de período: 24/08 8h · 25/08 10h30 · 26/08 7h ── */
 const PERIOD = { from: "2026-08-24", to: "2026-08-26" };
 const scenarioEntries = [
-  ...day8h("2026-08-24"),      // 8h  → 0
-  ...day10h30("2026-08-25"),   // 10h30 → +2h regular (+30min [10+] gerado)
-  ...day7h("2026-08-26"),      // 7h  → −1h
+  ...day8h("2026-08-24"),      // 8h  → 0 (ok — não elegível)
+  ...day10h30("2026-08-25"),   // 10h30 → +2h regular (+30min [10+] gerado) (excess — não elegível)
+  ...day7h("2026-08-26"),      // 7h  → −1h (deficit — elegível)
 ];
 
 const period = (usedByDate: Record<string, number>) =>
@@ -225,22 +247,24 @@ check("I0. sem uso [10+] → factual +1h e projetado +1h (idem)", () => {
   assert.equal(noUse.reviewRequiredMinutes, 0);
   assert.deepEqual(noUse.daysWithReview, []);
 });
-check("I1. 30min de [10+] no dia 7h → factual CONTINUA +1h; projetado +1h30", () => {
+check("I1. 30min de [10+] no dia 7h (deficit) → factual CONTINUA +1h; projetado +1h30", () => {
   const r = period({ "2026-08-26": 30 });
   assert.equal(r.factualBalanceMinutes, 60, "factual inalterado pelo uso");
   assert.equal(r.appliedSpecialMinutes, 30);
   assert.equal(r.projectedBalanceMinutes, 90, "+1h30");
   const d = dayOf(r, "2026-08-26");
+  assert.equal(d.projectable, true, "dia 7h = status 'deficit' → elegível");
   assert.equal(d.appliedSpecialMinutes, 30);
   assert.equal(d.projectedWorkedMinutes, 450, "dia 3 projetado 7h30");
   assert.equal(d.projectedBalanceMinutes, -30, "dia 3 projetado −30min");
   assert.equal(d.factualWorkedMinutes, 420, "dia 3 factual 7h intacto");
 });
-check("I2. dia 10h30 do cenário: [10+] gerado 30min não entra no saldo factual", () => {
+check("I2. dia 10h30 do cenário: [10+] gerado 30min não entra no saldo factual; dia não elegível", () => {
   const d = dayOf(noUse, "2026-08-25");
   assert.equal(d.factualWorkedMinutes, 630, "trabalhado factual 10h30");
   assert.equal(d.factualRegistrableMinutes, 600, "no ponto 10h (teto oficial)");
   assert.equal(d.factualRegularBalanceMinutes, 120, "saldo regular +2h ([10+] fora)");
+  assert.equal(d.projectable, false, "10h30 = status 'excess' → não elegível");
 });
 
 /* ── J. Uso de 1h no dia 7h → factual +1h, projetado +2h ──── */
@@ -257,10 +281,11 @@ check("J. uso 1h no dia 7h → factual +1h, projetado +2h (não é trabalho a ma
   assert.equal(d.needsReview, false);
 });
 
-/* ── K. Uso em dia já ≥ base → nada aplicado, review ──────── */
-check("K. uso 30min no dia 10h30 → applied 0, needsReview, sem extra artificial", () => {
+/* ── K. Uso em dia 10h30 (excess) → NÃO elegível, review ──── */
+check("K. uso 30min no dia 10h30 (excess) → NÃO elegível: applied 0, needsReview, sem extra artificial", () => {
   const r = period({ "2026-08-25": 30 });
   const d = dayOf(r, "2026-08-25");
+  assert.equal(d.projectable, false, "10h30 = status 'excess' → não elegível");
   assert.equal(d.neededToBaseMinutes, 0);
   assert.equal(d.appliedSpecialMinutes, 0);
   assert.equal(d.excessUsedMinutes, 30);
@@ -281,7 +306,142 @@ check("L. uso em data fora do período → não afeta a projeção (destino úni
   assert.deepEqual(r.daysWithReview, []);
 });
 
-/* ── Invariantes (seção 13) ───────────────────────────────── */
+/* ── ELE. Elegibilidade pelo status REAL de buildResumoDayRow ──
+ * 24/08 = segunda-feira. Cada caso usa o MESMO dia com batidas/
+ * faltas/ausências diferentes e 60min de uso registrado (tentativa
+ * de uso) para provar: elegível → aplica; não elegível → não projeta
+ * mas detecta (excessUsed + needsReview), factual intacto.
+ */
+const SINGLE = { from: "2026-08-24", to: "2026-08-24" };
+let nextFaltaId = 1;
+let nextAbsenceId = 1;
+
+function singleDay(entries: TimeEntry[], over: { faltas?: Falta[]; absences?: Absence[] } = {}) {
+  return projectRealizedPeriodOfficial({
+    ...SINGLE,
+    today: TODAY,
+    entries,
+    absences: over.absences ?? [],
+    calendars: undefined,
+    settings,
+    faltas: over.faltas ?? [],
+    controlStartDate: CONTROL_START,
+    usedSpecialMinutesByDate: { "2026-08-24": 60 },
+  });
+}
+function rowStatus(entries: TimeEntry[], over: { faltas?: Falta[]; absences?: Absence[] } = {}) {
+  return buildResumoDayRow({
+    date: "2026-08-24", today: TODAY, entries,
+    absences: over.absences ?? [], calendars: undefined, settings,
+    faltas: over.faltas ?? [], controlStartDate: CONTROL_START,
+  }).status;
+}
+
+check("ELE1. jornada válida 7h/base8 → status 'deficit' → projectable true", () => {
+  const entries = day7h("2026-08-24");
+  assert.equal(rowStatus(entries), "deficit", "status real do dia 7h");
+  const d = dayOf(singleDay(entries), "2026-08-24");
+  assert.equal(d.projectable, true);
+  assert.equal(d.neededToBaseMinutes, 60);
+  assert.equal(d.appliedSpecialMinutes, 60, "uso de 1h completa a base");
+  assert.equal(d.needsReview, false);
+});
+check("ELE2. jornada válida 7h30/base8 → status 'deficit' → projectable true", () => {
+  const entries = day730("2026-08-24");
+  assert.equal(rowStatus(entries), "deficit", "status real do dia 7h30");
+  const d = dayOf(singleDay(entries), "2026-08-24");
+  assert.equal(d.projectable, true);
+  assert.equal(d.neededToBaseMinutes, 30);
+  assert.equal(d.appliedSpecialMinutes, 30, "aplica só o necessário");
+  assert.equal(d.excessUsedMinutes, 30, "o restante é sinalizado");
+  assert.equal(d.needsReview, true);
+});
+check("ELE3. 8h (base cumprida) → status 'ok' → projectable false", () => {
+  const entries = day8h("2026-08-24");
+  assert.equal(rowStatus(entries), "ok", "status real do dia 8h");
+  const d = dayOf(singleDay(entries), "2026-08-24");
+  assert.equal(d.projectable, false);
+  assert.equal(d.appliedSpecialMinutes, 0);
+  assert.equal(d.excessUsedMinutes, 60, "uso indevido detectado");
+  assert.equal(d.needsReview, true);
+  assert.equal(d.projectedWorkedMinutes, 480, "identity 8h");
+  assert.equal(d.projectedBalanceMinutes, 0, "identity saldo 0");
+});
+check("ELE4. 8h30 (saldo positivo) → status 'ok' → projectable false", () => {
+  const entries = day830("2026-08-24");
+  assert.equal(rowStatus(entries), "ok", "status real do dia 8h30");
+  const d = dayOf(singleDay(entries), "2026-08-24");
+  assert.equal(d.projectable, false);
+  assert.equal(d.appliedSpecialMinutes, 0);
+  assert.equal(d.excessUsedMinutes, 60);
+  assert.equal(d.needsReview, true);
+  assert.equal(d.projectedWorkedMinutes, 510, "identity 8h30 (sem +1h artificial)");
+  assert.equal(d.projectedBalanceMinutes, 30, "identity +30min");
+});
+check("ELE5. falta → status 'falta' → projectable false (factual intacto)", () => {
+  const faltas: Falta[] = [{ id: nextFaltaId++, date: "2026-08-24", createdAt: 1 }];
+  assert.equal(rowStatus([], { faltas }), "falta", "status real do dia de falta");
+  const d = dayOf(singleDay([], { faltas }), "2026-08-24");
+  assert.equal(d.projectable, false);
+  assert.equal(d.factualWorkedMinutes, 0, "falta não é jornada trabalhada");
+  assert.equal(d.factualRegularBalanceMinutes, -480, "saldo factual da falta (−jornada) intacto");
+  assert.equal(d.appliedSpecialMinutes, 0, "[10+] não projeta falta");
+  assert.equal(d.excessUsedMinutes, 60);
+  assert.equal(d.needsReview, true);
+  assert.equal(d.projectedWorkedMinutes, 0, "identity");
+  assert.equal(d.projectedBalanceMinutes, -480, "identity");
+});
+check("ELE6. férias → status 'ferias' → projectable false", () => {
+  const absences: Absence[] = [{
+    id: nextAbsenceId++, kind: "ferias", startDate: "2026-08-24", endDate: "2026-08-24",
+    duration: "integral", note: null, createdAt: 1,
+  }];
+  assert.equal(rowStatus([], { absences }), "ferias", "status real do dia de férias");
+  const d = dayOf(singleDay([], { absences }), "2026-08-24");
+  assert.equal(d.projectable, false);
+  assert.equal(d.factualRegularBalanceMinutes, 0, "férias: saldo neutro");
+  assert.equal(d.appliedSpecialMinutes, 0);
+  assert.equal(d.excessUsedMinutes, 60);
+  assert.equal(d.needsReview, true);
+  assert.equal(d.projectedBalanceMinutes, 0, "identity");
+});
+check("ELE7. afastamento → status 'afastamento' → projectable false", () => {
+  const absences: Absence[] = [{
+    id: nextAbsenceId++, kind: "saude", startDate: "2026-08-24", endDate: "2026-08-24",
+    duration: "integral", note: null, createdAt: 1,
+  }];
+  assert.equal(rowStatus([], { absences }), "afastamento", "status real do dia de afastamento");
+  const d = dayOf(singleDay([], { absences }), "2026-08-24");
+  assert.equal(d.projectable, false);
+  assert.equal(d.appliedSpecialMinutes, 0);
+  assert.equal(d.excessUsedMinutes, 60);
+  assert.equal(d.needsReview, true);
+  assert.equal(d.projectedBalanceMinutes, d.factualRegularBalanceMinutes, "identity");
+});
+check("ELE8. dia incompleto (ponto financeiro pendente) → status 'incomplete' → projectable false", () => {
+  const entries = [punch("2026-08-24", "08:00", "entrada")]; // só entrada, dia passado
+  assert.equal(rowStatus(entries), "incomplete", "status real do dia incompleto");
+  const d = dayOf(singleDay(entries), "2026-08-24");
+  assert.equal(d.projectable, false);
+  assert.equal(d.appliedSpecialMinutes, 0);
+  assert.equal(d.excessUsedMinutes, 60);
+  assert.equal(d.needsReview, true, "uso em dia sem fato definido é detectado");
+  assert.equal(d.projectedWorkedMinutes, d.factualWorkedMinutes, "identity");
+  assert.equal(d.projectedBalanceMinutes, d.factualRegularBalanceMinutes, "identity");
+});
+check("ELE9. dia inconsistente → status 'inconsistent' → projectable false", () => {
+  const entries = [punch("2026-08-24", "08:00", "entrada"), punch("2026-08-24", "09:00", "entrada")];
+  assert.equal(rowStatus(entries), "inconsistent", "status real do dia inconsistente");
+  const d = dayOf(singleDay(entries), "2026-08-24");
+  assert.equal(d.projectable, false);
+  assert.equal(d.appliedSpecialMinutes, 0);
+  assert.equal(d.excessUsedMinutes, 60);
+  assert.equal(d.needsReview, true);
+  assert.equal(d.projectedWorkedMinutes, d.factualWorkedMinutes, "identity");
+  assert.equal(d.projectedBalanceMinutes, d.factualRegularBalanceMinutes, "identity");
+});
+
+/* ── Invariantes ──────────────────────────────────────────── */
 check("INV1. factualWorkedMinutes nunca muda (eco dos insumos)", () => {
   for (const used of [0, 30, 60, 120]) {
     const inp = dayInput({ factualWorkedMinutes: 420, usedSpecialMinutes: used });
@@ -307,7 +467,7 @@ check("INV3. appliedSpecialMinutes <= neededToBaseMinutes (todos os casos)", () 
   }
 });
 check("INV4. projeção nunca ultrapassa a base por causa do [10+]", () => {
-  // registrável < base → projetado ≤ base
+  // elegível (abaixo da base) → projetado ≤ base
   for (const worked of [420, 450, 465]) {
     const p = projectRealizedDayOfficial(dayInput({
       factualWorkedMinutes: worked, factualRegistrableMinutes: worked,
@@ -315,10 +475,10 @@ check("INV4. projeção nunca ultrapassa a base por causa do [10+]", () => {
     }));
     assert.ok(p.projectedWorkedMinutes <= BASE, `${worked}: ${p.projectedWorkedMinutes} ≤ ${BASE}`);
   }
-  // registrável ≥ base → projetado = registrável (o [10+] não soma nada)
+  // não elegível (já ≥ base) → identity: nada é somado
   const f = projectRealizedDayOfficial(dayInput({
     factualWorkedMinutes: 510, factualRegistrableMinutes: 510,
-    factualRegularBalanceMinutes: 30, usedSpecialMinutes: 30,
+    factualRegularBalanceMinutes: 30, financialValid: false, usedSpecialMinutes: 30,
   }));
   assert.equal(f.projectedWorkedMinutes, 510);
 });
@@ -326,33 +486,38 @@ check("INV5. [10+] nunca cria crédito regular positivo artificial no destino", 
   for (const [worked, bal] of [[480, 0], [510, 30], [600, 120]] as Array<[number, number]>) {
     const p = projectRealizedDayOfficial(dayInput({
       factualWorkedMinutes: worked, factualRegistrableMinutes: worked,
-      factualRegularBalanceMinutes: bal, usedSpecialMinutes: 30,
+      factualRegularBalanceMinutes: bal, financialValid: false, usedSpecialMinutes: 30,
     }));
-    assert.equal(p.projectedBalanceMinutes, bal, `saldo ${bal} permanece ${bal}`);
     assert.equal(p.appliedSpecialMinutes, 0);
+    assert.equal(p.projectedBalanceMinutes, bal, `saldo ${bal} permanece ${bal}`);
+    assert.equal(p.needsReview, true, "uso em dia não elegível é detectado");
   }
 });
-check("INV6. uso acima da necessidade gera needsReview (e só ele)", () => {
+check("INV6. needsReview ⇔ uso acima do aplicado (inclusive em dia não elegível)", () => {
   const withReview = [
-    projectRealizedDayOfficial(dayInput({ factualWorkedMinutes: 480, factualRegistrableMinutes: 480, factualRegularBalanceMinutes: 0, usedSpecialMinutes: 30 })),
-    projectRealizedDayOfficial(dayInput({ factualWorkedMinutes: 510, factualRegistrableMinutes: 510, factualRegularBalanceMinutes: 30, usedSpecialMinutes: 30 })),
+    // elegível, uso > necessidade
     projectRealizedDayOfficial(dayInput({ factualWorkedMinutes: 450, factualRegistrableMinutes: 450, factualRegularBalanceMinutes: -30, usedSpecialMinutes: 60 })),
+    // não elegível (base cumprida / saldo positivo), uso > 0
+    projectRealizedDayOfficial(dayInput({ factualWorkedMinutes: 480, factualRegistrableMinutes: 480, factualRegularBalanceMinutes: 0, financialValid: false, usedSpecialMinutes: 30 })),
+    projectRealizedDayOfficial(dayInput({ factualWorkedMinutes: 510, factualRegistrableMinutes: 510, factualRegularBalanceMinutes: 30, financialValid: false, usedSpecialMinutes: 30 })),
   ];
-  assert.ok(withReview.every((p) => p.needsReview), "excesso → needsReview");
+  assert.ok(withReview.every((p) => p.needsReview), "excesso/uso indevido → needsReview");
   const noReview = [
-    projectRealizedDayOfficial(dayInput({ usedSpecialMinutes: 60 })),
-    projectRealizedDayOfficial(dayInput({ usedSpecialMinutes: 30 })),
-    projectRealizedDayOfficial(dayInput({ financialValid: false, usedSpecialMinutes: 999 })),
+    projectRealizedDayOfficial(dayInput({ usedSpecialMinutes: 60 })), // elegível, uso ≤ necessidade
+    projectRealizedDayOfficial(dayInput({ usedSpecialMinutes: 0 })), // sem uso
+    projectRealizedDayOfficial(dayInput({ financialValid: false, usedSpecialMinutes: 0 })), // não elegível, sem uso
   ];
-  assert.ok(noReview.every((p) => !p.needsReview), "sem excesso / não projetável → sem review");
+  assert.ok(noReview.every((p) => !p.needsReview), "sem excesso → sem review");
 });
-check("INV7. dia inválido não recebe projeção (identity, applied 0)", () => {
-  for (const over of [{ financialValid: false }, { realized: false }] as const) {
+check("INV7. dia não elegível: sem projeção (identity, applied 0) + uso detectado", () => {
+  for (const over of [{ financialValid: false }, { realized: false, financialValid: false }] as const) {
     const p = projectRealizedDayOfficial(dayInput({ ...over, usedSpecialMinutes: 60 }));
     assert.equal(p.projectable, false);
     assert.equal(p.appliedSpecialMinutes, 0);
-    assert.equal(p.projectedWorkedMinutes, 420);
-    assert.equal(p.projectedBalanceMinutes, -60);
+    assert.equal(p.projectedWorkedMinutes, 420, "identity");
+    assert.equal(p.projectedBalanceMinutes, -60, "factual intacto");
+    assert.equal(p.excessUsedMinutes, 60, "uso indevido sinalizado");
+    assert.equal(p.needsReview, true);
   }
 });
 check("INV8. saldo factual do período é independente do uso [10+]", () => {
@@ -384,17 +549,11 @@ check("INV11. função é pura: não muta o objeto de insumo", () => {
   projectRealizedDayOfficial(inp);
   assert.deepEqual(inp, snapshot, "insumo inalterado");
 });
-check("INV12. statuses: somente dias com fato financeiro definem projeção", () => {
-  assert.ok(isProjectableDayStatus("ok"));
+check("INV12. elegibilidade: SOMENTE status 'deficit' (jornada válida abaixo da base)", () => {
   assert.ok(isProjectableDayStatus("deficit"));
-  assert.ok(isProjectableDayStatus("excess"));
-  assert.ok(isProjectableDayStatus("falta"));
-  assert.ok(!isProjectableDayStatus("in-progress"), "dia aberto não projeta");
-  assert.ok(!isProjectableDayStatus("inconsistent"));
-  assert.ok(!isProjectableDayStatus("incomplete"));
-  assert.ok(!isProjectableDayStatus("future"));
-  assert.ok(!isProjectableDayStatus("empty"));
-  assert.ok(!isProjectableDayStatus("idle"));
+  for (const s of ["ok", "excess", "falta", "ferias", "afastamento", "in-progress", "inconsistent", "incomplete", "future", "empty", "idle"] as const) {
+    assert.ok(!isProjectableDayStatus(s), `"${s}" não elegível`);
+  }
 });
 
 console.log(`\nPROJEÇÃO OFICIAL (ÉTAPA 3A) — OK (${passed} testes)`);
