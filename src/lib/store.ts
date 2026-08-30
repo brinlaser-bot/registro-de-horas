@@ -20,15 +20,53 @@ import {
 } from "./hour-bank";
 import { abonoDayDecision, abonoInCycle, validateAbsence, type Absence, type AbsenceSplit } from "./absences";
 import { canRegisterFalta } from "./faltas";
-import { sameAnnualCycle } from "./periods";
+import { getAnnualPointCycle, sameAnnualCycle } from "./periods";
 import { companyDayContext, normalizeCompanyCalendars, type CompanyCalendar, type CompanyCalendars } from "./company-calendar";
+import { buildResumoDayRow } from "./resumo-days";
+import { isProjectableDayStatus, projectRealizedDayOfficial } from "./official-projection";
+import {
+  allocateSpecialExcessFifo,
+  allocateSpecialExcessManual,
+  buildSpecialExcessBank,
+  type SpecialExcessBankSummary,
+} from "./special-excess-bank";
+import {
+  specialExcessUseMinutes,
+  validateSpecialExcessUse,
+  type SpecialExcessAllocation,
+  type SpecialExcessAllocationStrategy,
+  type SpecialExcessUse,
+} from "./special-excess-use";
 
 /** Resultado estruturado de operações que podem ser rejeitadas por validação. */
 export interface ActionResult {
   ok: boolean;
   /** Mensagem pronta para exibição na interface. */
   error?: string;
-  code?: "over-capacity" | "invalid" | "not-found" | "cross-cycle" | "overlap" | "linked-compensations" | "falta" | "punches" | "confirm-replace" | "concluded-history" | "sequence";
+  code?:
+    | "over-capacity"
+    | "invalid"
+    | "not-found"
+    | "cross-cycle"
+    | "overlap"
+    | "linked-compensations"
+    | "falta"
+    | "punches"
+    | "confirm-replace"
+    | "concluded-history"
+    | "sequence"
+    | "destination-not-eligible"
+    | "destination-no-remaining-need"
+    | "requested-exceeds-destination-need"
+    | "insufficient-special-balance"
+    | "invalid-manual-allocation"
+    | "origin-not-found"
+    | "origin-outside-cycle"
+    | "origin-not-realized"
+    | "use-not-found"
+    | "use-already-cancelled"
+    | "period-closed"
+    | "invalid-use";
   /** Capacidade disponível no dia de destino (quando code = over-capacity). */
   available?: number;
   limitMinutes?: number;
@@ -105,6 +143,8 @@ export function parseStoredAppData(raw: string): AppData | null {
       normalizeCompanyCalendars(legacy.companyCalendar);
     const faltas = Array.isArray(parsed.faltas) ? parsed.faltas : [];
     const excessReasons = Array.isArray(parsed.excessReasons) ? parsed.excessReasons : [];
+    // Dados antigos sem a coleção → [] (nada antigo é apagado ou reinterpretado).
+    const specialExcessUses = Array.isArray(parsed.specialExcessUses) ? parsed.specialExcessUses : [];
     return {
       user: parsed.user,
       entries: parsed.entries,
@@ -113,6 +153,7 @@ export function parseStoredAppData(raw: string): AppData | null {
       companyCalendars,
       faltas,
       excessReasons,
+      specialExcessUses,
     };
   } catch {
     return null;
@@ -225,6 +266,215 @@ function mutate(updater: (d: AppData) => AppData) {
 
 const nextId = (rows: { id: number }[]) =>
   rows.reduce((m, r) => Math.max(m, r.id), 0) + 1;
+
+/* ─────────────────────────────────────────────────────────────
+   NOVO MEU HORÁRIO — BANCO PARALELO [10+] (Etapa 3D)
+   Conecta 3A (projeção/elegibilidade) + 3B (SpecialExcessUse) +
+   3C (banco/FIFO/manual) à persistência. Sem UI nesta etapa.
+
+   - periodClosed = CONTEXTO DO CALLER: o app ainda NÃO possui estado
+     persistido de fechamento oficial; a etapa futura será a fonte.
+   - asOfDate = data de corte civil (default todayString()); origem
+     futura (após o corte) nunca entra — a fonte factual mascara futuro.
+   - now = timestamp injetável (testes determinísticos).
+   - Criação/edição são ATÔMICAS: qualquer rejeição devolve o estado
+     intacto; nada é persistido parcialmente.
+   ───────────────────────────────────────────────────────────── */
+
+const SPECIAL_PERIOD_CLOSED_MSG =
+  "O período já está fechado: não é possível criar, editar ou cancelar usos de [10+].";
+
+/** id string do novo modelo: "seu-<n>" (n = maior sufixo numérico + 1, sem colisão). */
+const nextSpecialUseId = (rows: SpecialExcessUse[]) =>
+  `seu-${rows.reduce((m, u) => Math.max(m, Number(u.id.replace(/\D+/g, "")) || 0), 0) + 1}`;
+
+/** Banco [10+] do ciclo do destino, com o uso em edição fora (libera suas allocations). */
+function specialBankOf(
+  d: AppData,
+  destinationDate: string,
+  asOf: string,
+  excludeUseId: string | null,
+): SpecialExcessBankSummary {
+  return buildSpecialExcessBank({
+    cycle: getAnnualPointCycle(destinationDate),
+    asOfDate: asOf,
+    entries: d.entries,
+    absences: d.absences,
+    calendars: d.companyCalendars,
+    settings: settingsOf(d.user),
+    faltas: d.faltas,
+    controlStartDate: d.user.controlStartDate ?? "",
+    uses: (d.specialExcessUses ?? []).filter((u) => u.id !== excludeUseId),
+  });
+}
+
+interface SpecialDestinationCheck {
+  error: ActionResult | null;
+  neededMinutes: number;
+  remainingMinutes: number;
+}
+
+/**
+ * GATE DO DESTINO — a Etapa 3A é a FONTE da regra ("jornada factual válida
+ * terminada abaixo da base"); nada é reescrito aqui. O dia só aceita uso
+ * se o status do Resumo for projetável E a necessidade restante (base
+ * efetiva − registrável − usos ativos no dia) cobrir o pedido; o motor 3A
+ * com "uso existente + candidato" confirma (needsReview/excesso → rejeita).
+ */
+function checkSpecialDestination(
+  d: AppData,
+  destinationDate: string,
+  asOf: string,
+  excludeUseId: string | null,
+  requestedMinutes: number,
+): SpecialDestinationCheck {
+  const row = buildResumoDayRow({
+    date: destinationDate,
+    today: asOf,
+    entries: d.entries,
+    absences: d.absences,
+    calendars: d.companyCalendars,
+    settings: settingsOf(d.user),
+    faltas: d.faltas,
+    controlStartDate: d.user.controlStartDate,
+  });
+  if (!isProjectableDayStatus(row.status)) {
+    return {
+      error: {
+        ok: false,
+        code: "destination-not-eligible",
+        error:
+          "A jornada de " +
+          destinationDate +
+          " não está elegível para uso de [10+]: só uma jornada factual válida que terminou abaixo da base pode ser completada.",
+      },
+      neededMinutes: 0,
+      remainingMinutes: 0,
+    };
+  }
+  const neededMinutes = Math.max(row.expectedMinutes - row.registrableMinutes, 0);
+  const usedHere = (d.specialExcessUses ?? [])
+    .filter((u) => u.status === "utilizado" && u.destinationDate === destinationDate && u.id !== excludeUseId)
+    .reduce((s, u) => s + specialExcessUseMinutes(u), 0);
+  const remainingMinutes = Math.max(neededMinutes - usedHere, 0);
+  // Motor 3A: uso existente + novo candidato. Excesso/needsReview → rejeitar.
+  const projected = projectRealizedDayOfficial({
+    date: destinationDate,
+    factualWorkedMinutes: row.workedMinutes,
+    factualRegistrableMinutes: row.registrableMinutes,
+    factualRegularBalanceMinutes: row.balanceMinutes,
+    effectiveBaseMinutes: row.expectedMinutes,
+    financialValid: isProjectableDayStatus(row.status),
+    realized: row.entryCount > 0 && destinationDate <= asOf,
+    usedSpecialMinutes: usedHere + requestedMinutes,
+  });
+  if (!projected.projectable || projected.needsReview) {
+    return {
+      error: {
+        ok: false,
+        code: remainingMinutes <= 0 ? "destination-no-remaining-need" : "requested-exceeds-destination-need",
+        error:
+          remainingMinutes <= 0
+            ? "A jornada de " + destinationDate + " já foi totalmente completada pelos usos ativos de [10+]."
+            : "A jornada de " +
+              destinationDate +
+              " só aceita mais " +
+              formatMinutes(remainingMinutes) +
+              " de [10+] (pedido: " +
+              formatMinutes(requestedMinutes) +
+              ").",
+        limitMinutes: remainingMinutes,
+      },
+      neededMinutes,
+      remainingMinutes,
+    };
+  }
+  return { error: null, neededMinutes, remainingMinutes };
+}
+
+/**
+ * Validação da seleção MANUAL (reutiliza a 3C para disponibilidade), com
+ * erros mais específicos: origem futura vs. inexistente vs. outro ciclo.
+ * Devolve as allocations normalizadas (uma por origem, ordem do usuário).
+ */
+function validateManualSelection(
+  bank: SpecialExcessBankSummary,
+  destinationDate: string,
+  asOf: string,
+  requested: SpecialExcessAllocation[],
+): { error: ActionResult | null; allocations: SpecialExcessAllocation[] } {
+  if (requested.length === 0) {
+    return { error: { ok: false, code: "invalid-manual-allocation", error: "Informe ao menos uma origem na seleção manual." }, allocations: [] };
+  }
+  const totals = new Map<string, number>();
+  for (const a of requested) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(a.originDate) || !Number.isInteger(a.minutes) || a.minutes <= 0) {
+      return {
+        error: { ok: false, code: "invalid-manual-allocation", error: `Seleção manual inválida: ${a.originDate} = ${a.minutes}min.` },
+        allocations: [],
+      };
+    }
+    totals.set(a.originDate, (totals.get(a.originDate) ?? 0) + a.minutes);
+  }
+  const lotByDate = new Map(bank.lots.map((l) => [l.originDate, l]));
+  for (const originDate of totals.keys()) {
+    if (originDate > asOf) {
+      return {
+        error: {
+          ok: false,
+          code: "origin-not-realized",
+          error: `A origem ${originDate} ainda não é um dia realizado (corte ${asOf}); o [10+] só pode vir de jornadas já realizadas.`,
+        },
+        allocations: [],
+      };
+    }
+    if (getAnnualPointCycle(originDate) !== bank.cycle) {
+      return {
+        error: {
+          ok: false,
+          code: "origin-outside-cycle",
+          error: `A origem ${originDate} pertence a outro ciclo anual (${getAnnualPointCycle(originDate)}); o [10+] não atravessa o fechamento em 30/04.`,
+        },
+        allocations: [],
+      };
+    }
+    if (!lotByDate.has(originDate)) {
+      return {
+        error: {
+          ok: false,
+          code: "origin-not-found",
+          error: `A origem ${originDate} não existe no banco [10+] do ciclo ${bank.cycle} (sem geração ou uso registrado naquela data).`,
+        },
+        allocations: [],
+      };
+    }
+  }
+  // Disponibilidade por origem (3C) — sem clamping, sem substituição.
+  const manual = allocateSpecialExcessManual({ bank, destinationDate, requestedAllocations: requested });
+  if (!manual.ok) {
+    if (manual.error === "disponibilidade-insuficiente") {
+      const detalhe = (manual.insufficient ?? [])
+        .map((x) => `${x.originDate}: pedido ${x.requested}min, disponível ${x.available}min`)
+        .join(", ");
+      const primeira = (manual.insufficient ?? [])[0];
+      return {
+        error: {
+          ok: false,
+          code: "insufficient-special-balance",
+          error: `Disponibilidade insuficiente no banco [10+] do ciclo ${bank.cycle}: ${detalhe}.`,
+          available: primeira?.available,
+          limitMinutes: primeira?.available,
+        },
+        allocations: [],
+      };
+    }
+    return { error: { ok: false, code: "invalid-manual-allocation", error: `Seleção manual inválida: ${manual.error}.` }, allocations: [] };
+  }
+  return { error: null, allocations: manual.allocations };
+}
+
+const insufficientFifoMsg = (bank: SpecialExcessBankSummary, requested: number, allocated: number, unfulfilled: number) =>
+  `O banco [10+] do ciclo ${bank.cycle} tem apenas ${formatMinutes(allocated)} disponíveis; solicitados ${formatMinutes(requested)} (faltam ${formatMinutes(unfulfilled)}).`;
 
 const CONCLUDED_COMP_MSG =
   "Este horário já sustenta uma compensação concluída. A alteração reduziria as horas utilizadas e não pode ser aplicada automaticamente.";
@@ -1364,6 +1614,7 @@ export const actions = {
       companyCalendars: undefined,
       faltas: [],
       excessReasons: [],
+      specialExcessUses: [],
     }));
   },
 
@@ -1376,6 +1627,7 @@ export const actions = {
     companyCalendars?: CompanyCalendars;
     faltas?: Falta[];
     excessReasons?: ExcessReason[];
+    specialExcessUses?: SpecialExcessUse[];
   }) {
     resetCreateGuard();
     mutate(() => ({
@@ -1386,6 +1638,7 @@ export const actions = {
       companyCalendars: p.companyCalendars,
       faltas: p.faltas ?? [],
       excessReasons: p.excessReasons ?? [],
+      specialExcessUses: p.specialExcessUses ?? [],
     }));
   },
 
@@ -1393,7 +1646,7 @@ export const actions = {
    * Mescla o backup com os dados atuais, preservando eventos distintos.
    * Deduplicação segura via ID + conteúdo completo (nunca apenas dias/minutos).
    */
-  mergeBackup(p: { entries: TimeEntry[]; compensations: Compensation[]; absences?: Absence[]; companyCalendars?: CompanyCalendars; faltas?: Falta[]; excessReasons?: ExcessReason[] }) {
+  mergeBackup(p: { entries: TimeEntry[]; compensations: Compensation[]; absences?: Absence[]; companyCalendars?: CompanyCalendars; faltas?: Falta[]; excessReasons?: ExcessReason[]; specialExcessUses?: SpecialExcessUse[] }) {
     mutate((d) => {
       const entryMerge = mergeByIdAndContent(d.entries, p.entries, entriesEqual);
       const compMerge = mergeByIdAndContent(d.compensations, p.compensations, compsEqual);
@@ -1427,6 +1680,15 @@ export const actions = {
       for (const c of p.companyCalendars ?? []) {
         if (!mergedCalendars.some((m) => m.cycleStart === c.cycleStart)) mergedCalendars.push(c);
       }
+      // Usos do [10+]: união por id (string); em colisão de id, o uso local
+      // prevalece (histórico local é a verdade deste dispositivo).
+      const useMerge = [...(d.specialExcessUses ?? [])];
+      const useIds = new Set(useMerge.map((u) => u.id));
+      for (const u of p.specialExcessUses ?? []) {
+        if (useIds.has(u.id)) continue;
+        useIds.add(u.id);
+        useMerge.push(u);
+      }
       return {
         ...d,
         entries: entryMerge.merged,
@@ -1435,6 +1697,7 @@ export const actions = {
         companyCalendars: mergedCalendars.length > 0 ? mergedCalendars : undefined,
         faltas: faltaMerge,
         excessReasons: reasonMerge.merged,
+        specialExcessUses: useMerge,
       };
     });
   },
@@ -1468,6 +1731,261 @@ export const actions = {
       return { ...d, companyCalendars: list.length > 0 ? list : undefined };
     });
     return OK;
+  },
+
+  /* ── NOVO MEU HORÁRIO — USOS DO BANCO PARALELO [10+] (3D) ──
+     Coletânea: specialExcessUses (3B). Nunca delete: o histórico persiste. */
+
+  /**
+   * Cria UM uso de [10+] para COMPLETAR uma jornada factual abaixo da base.
+   * Atômico: qualquer rejeição persiste nada. O uso nasce "utilizado"
+   * (não existe pendente/planejado/reservado no modelo novo).
+   *
+   * fifo: as origens são escolhidas pela 3C (mais antigas do MESMO ciclo,
+   * origem posterior ao destino é válida se já realizada no asOf).
+   * manual: o caller informa as origens (validação da 3C; duplicatas da
+   * mesma origem são consolidadas em uma única allocation).
+   */
+  createSpecialExcessUse(p: {
+    destinationDate: string;
+    minutes: number;
+    allocationStrategy: "fifo" | "manual";
+    manualAllocations?: SpecialExcessAllocation[];
+    note?: string | null;
+    asOfDate?: string;
+    periodClosed?: boolean;
+    now?: number;
+  }): ActionResult {
+    let result: ActionResult = OK;
+    mutate((d) => {
+      const asOf = p.asOfDate ?? todayString();
+      if (p.periodClosed) {
+        result = { ok: false, code: "period-closed", error: SPECIAL_PERIOD_CLOSED_MSG };
+        return d;
+      }
+      const isManual = p.allocationStrategy === "manual";
+      const manualRequested = p.manualAllocations ?? [];
+      const requestedTotal = isManual
+        ? manualRequested.reduce((s, a) => s + a.minutes, 0)
+        : p.minutes;
+      if (
+        !/^\d{4}-\d{2}-\d{2}$/.test(p.destinationDate) ||
+        !Number.isInteger(requestedTotal) ||
+        requestedTotal <= 0 ||
+        (p.allocationStrategy !== "fifo" && p.allocationStrategy !== "manual")
+      ) {
+        result = {
+          ok: false,
+          code: isManual ? "invalid-manual-allocation" : "invalid",
+          error: "Parâmetros inválidos para criar um uso de [10+].",
+        };
+        return d;
+      }
+      const dest = checkSpecialDestination(d, p.destinationDate, asOf, null, requestedTotal);
+      if (dest.error) {
+        result = dest.error;
+        return d;
+      }
+      const bank = specialBankOf(d, p.destinationDate, asOf, null);
+      let allocations: SpecialExcessAllocation[];
+      if (isManual) {
+        const m = validateManualSelection(bank, p.destinationDate, asOf, manualRequested);
+        if (m.error) {
+          result = m.error;
+          return d;
+        }
+        allocations = m.allocations;
+      } else {
+        const fifo = allocateSpecialExcessFifo({ bank, destinationDate: p.destinationDate, requestedMinutes: p.minutes });
+        if (fifo.error) {
+          result = { ok: false, code: "invalid", error: fifo.error };
+          return d;
+        }
+        if (fifo.unfulfilledMinutes > 0) {
+          result = {
+            ok: false,
+            code: "insufficient-special-balance",
+            error: insufficientFifoMsg(bank, p.minutes, fifo.allocatedMinutes, fifo.unfulfilledMinutes),
+            available: fifo.allocatedMinutes,
+            limitMinutes: fifo.allocatedMinutes,
+          };
+          return d;
+        }
+        allocations = fifo.allocations;
+      }
+      const use: SpecialExcessUse = {
+        id: nextSpecialUseId(d.specialExcessUses ?? []),
+        destinationDate: p.destinationDate,
+        allocations,
+        allocationStrategy: p.allocationStrategy,
+        status: "utilizado",
+        createdAt: p.now ?? Date.now(),
+        ...(p.note != null ? { note: p.note } : {}),
+      };
+      const v = validateSpecialExcessUse(use);
+      if (!v.ok) {
+        result = { ok: false, code: "invalid-use", error: `Uso de [10+] estruturalmente inválido: ${v.errors.join(", ")}.` };
+        return d;
+      }
+      return { ...d, specialExcessUses: [...(d.specialExcessUses ?? []), use] };
+    });
+    return result;
+  },
+
+  /**
+   * Edita um uso ATIVO como SUBSTITUIÇÃO ATÔMICA: valida a nova
+   * configuração contra o banco SEM o uso em edição (suas allocations
+   * antigas ficam temporariamente livres) e só então substitui o registro
+   * (id e createdAt preservados; status permanece "utilizado").
+   * Em qualquer falha o uso antigo permanece intacto.
+   *
+   * Recálculo FIFO somente quando a edição EXPLICITAMENTE o pede
+   * (allocationStrategy "fifo" e/ou novo minutos); caso contrário as
+   * allocations existentes são mantidas e REVALIDADAS. Seleção manual
+   * (manualAllocations) sempre valida como manual.
+   */
+  updateSpecialExcessUse(p: {
+    id: string;
+    destinationDate?: string;
+    minutes?: number;
+    allocationStrategy?: "fifo" | "manual";
+    manualAllocations?: SpecialExcessAllocation[];
+    note?: string | null;
+    asOfDate?: string;
+    periodClosed?: boolean;
+    now?: number;
+  }): ActionResult {
+    let result: ActionResult = OK;
+    mutate((d) => {
+      const asOf = p.asOfDate ?? todayString();
+      if (p.periodClosed) {
+        result = { ok: false, code: "period-closed", error: SPECIAL_PERIOD_CLOSED_MSG };
+        return d;
+      }
+      const target = (d.specialExcessUses ?? []).find((u) => u.id === p.id);
+      if (!target) {
+        result = { ok: false, code: "use-not-found", error: "Uso de [10+] não encontrado." };
+        return d;
+      }
+      if (target.status === "cancelado") {
+        result = {
+          ok: false,
+          code: "use-already-cancelled",
+          error: "Este uso de [10+] já foi cancelado; o histórico não pode ser alterado.",
+        };
+        return d;
+      }
+      const newDest = p.destinationDate ?? target.destinationDate;
+      if (p.destinationDate !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(newDest)) {
+        result = { ok: false, code: "invalid", error: "Data de destino inválida." };
+        return d;
+      }
+      const strategy: SpecialExcessAllocationStrategy =
+        p.allocationStrategy ?? (p.manualAllocations !== undefined ? "manual" : target.allocationStrategy);
+      const oldTotal = target.allocations.reduce((s, a) => s + a.minutes, 0);
+      const requestedTotal =
+        strategy === "fifo" ? (p.minutes ?? oldTotal) : (p.manualAllocations ?? target.allocations).reduce((s, a) => s + a.minutes, 0);
+      if (!Number.isInteger(requestedTotal) || requestedTotal <= 0) {
+        result = {
+          ok: false,
+          code: strategy === "manual" ? "invalid-manual-allocation" : "invalid",
+          error: "Parâmetros inválidos para editar o uso de [10+].",
+        };
+        return d;
+      }
+      // Banco SEM o uso em edição → suas allocations antigas ficam livres.
+      const bank = specialBankOf(d, newDest, asOf, target.id);
+      const dest = checkSpecialDestination(d, newDest, asOf, target.id, requestedTotal);
+      if (dest.error) {
+        result = dest.error;
+        return d;
+      }
+      let allocations: SpecialExcessAllocation[];
+      const recomputeFifo = strategy === "fifo" && (p.allocationStrategy === "fifo" || p.minutes !== undefined);
+      if (recomputeFifo) {
+        const fifo = allocateSpecialExcessFifo({ bank, destinationDate: newDest, requestedMinutes: requestedTotal });
+        if (fifo.error) {
+          result = { ok: false, code: "invalid", error: fifo.error };
+          return d;
+        }
+        if (fifo.unfulfilledMinutes > 0) {
+          result = {
+            ok: false,
+            code: "insufficient-special-balance",
+            error: insufficientFifoMsg(bank, requestedTotal, fifo.allocatedMinutes, fifo.unfulfilledMinutes),
+            available: fifo.allocatedMinutes,
+            limitMinutes: fifo.allocatedMinutes,
+          };
+          return d;
+        }
+        allocations = fifo.allocations;
+      } else {
+        const requested = strategy === "manual" ? (p.manualAllocations ?? target.allocations) : target.allocations;
+        const m = validateManualSelection(bank, newDest, asOf, requested);
+        if (m.error) {
+          result = m.error;
+          return d;
+        }
+        allocations = m.allocations;
+      }
+      const nowTs = p.now ?? Date.now();
+      const updated: SpecialExcessUse = {
+        ...target,
+        destinationDate: newDest,
+        allocations,
+        allocationStrategy: strategy,
+        updatedAt: nowTs,
+        ...(p.note != null ? { note: p.note } : {}),
+      };
+      const v = validateSpecialExcessUse(updated);
+      if (!v.ok) {
+        result = { ok: false, code: "invalid-use", error: `Uso de [10+] estruturalmente inválido: ${v.errors.join(", ")}.` };
+        return d;
+      }
+      return {
+        ...d,
+        specialExcessUses: (d.specialExcessUses ?? []).map((u) => (u.id === target.id ? updated : u)),
+      };
+    });
+    return result;
+  },
+
+  /**
+   * Cancela um uso ATIVO: status "utilizado" → "cancelado" (+ cancelledAt/
+   * updatedAt). NUNCA apaga: id, destino, allocations, estratégia e
+   * createdAt permanecem. O saldo volta ao disponível por derivação (3C
+   * ignora cancelados no consumo ativo) e a projeção 3A deixa de contar o
+   * uso via usedSpecialMinutesByDestination.
+   */
+  cancelSpecialExcessUse(p: { id: string; periodClosed?: boolean; now?: number }): ActionResult {
+    let result: ActionResult = OK;
+    mutate((d) => {
+      if (p.periodClosed) {
+        result = { ok: false, code: "period-closed", error: SPECIAL_PERIOD_CLOSED_MSG };
+        return d;
+      }
+      const target = (d.specialExcessUses ?? []).find((u) => u.id === p.id);
+      if (!target) {
+        result = { ok: false, code: "use-not-found", error: "Uso de [10+] não encontrado." };
+        return d;
+      }
+      if (target.status === "cancelado") {
+        result = {
+          ok: false,
+          code: "use-already-cancelled",
+          error: "Este uso de [10+] já foi cancelado; o histórico não pode ser alterado.",
+        };
+        return d;
+      }
+      const nowTs = p.now ?? Date.now();
+      return {
+        ...d,
+        specialExcessUses: (d.specialExcessUses ?? []).map((u) =>
+          u.id === target.id ? { ...u, status: "cancelado" as const, cancelledAt: nowTs, updatedAt: nowTs } : u,
+        ),
+      };
+    });
+    return result;
   },
 };
 

@@ -1,6 +1,7 @@
 // Import/Export de backup (JSON) com versionamento e validação.
 import type { AppData, Compensation, ExcessReason, Falta, TimeEntry, User } from "./types";
 import type { Absence } from "./absences";
+import type { SpecialExcessUse } from "./special-excess-use";
 import { normalizeCompanyCalendars, type CompanyCalendars } from "./company-calendar";
 
 /**
@@ -24,6 +25,8 @@ export interface BackupPayload {
   faltas?: Falta[];
   /** Motivos de excedente >10h. Campo opcional: backups antigos não o têm. */
   excessReasons?: ExcessReason[];
+  /** Usos do [10+] (novo modelo). Campo opcional: backups antigos não o têm. */
+  specialExcessUses?: SpecialExcessUse[];
 }
 
 export interface BackupSummary {
@@ -44,6 +47,7 @@ export interface ParsedBackup {
   companyCalendars?: CompanyCalendars;
   faltas: Falta[];
   excessReasons: ExcessReason[];
+  specialExcessUses: SpecialExcessUse[];
   version: number;
   summary: BackupSummary;
 }
@@ -121,6 +125,27 @@ function validFalta(v: unknown): v is Falta {
   return isNum(f.id) && isDate(f.date) && isNum(f.createdAt);
 }
 
+/** Valida o shape estrutural de um uso do [10+] (novo modelo). */
+function validSpecialExcessUse(v: unknown): v is SpecialExcessUse {
+  if (!v || typeof v !== "object") return false;
+  const u = v as Record<string, unknown>;
+  return (
+    typeof u.id === "string" &&
+    u.id.length > 0 &&
+    isDate(u.destinationDate) &&
+    (u.allocationStrategy === "fifo" || u.allocationStrategy === "manual") &&
+    (u.status === "utilizado" || u.status === "cancelado") &&
+    isNum(u.createdAt) &&
+    Array.isArray(u.allocations) &&
+    u.allocations.length > 0 &&
+    (u.allocations as unknown[]).every((a) => {
+      if (!a || typeof a !== "object") return false;
+      const al = a as Record<string, unknown>;
+      return isDate(al.originDate) && isNum(al.minutes) && (al.minutes as number) > 0;
+    })
+  );
+}
+
 /** Comparação de conteúdo para mesclagem de faltas: uma falta por dia. */
 export function faltasEqual(a: Falta, b: Falta): boolean {
   return a.date === b.date;
@@ -187,6 +212,7 @@ export function buildBackupPayload(data: AppData): BackupPayload {
     companyCalendars: data.companyCalendars,
     faltas: data.faltas ?? [],
     excessReasons: data.excessReasons ?? [],
+    specialExcessUses: data.specialExcessUses ?? [],
   };
 }
 
@@ -251,6 +277,12 @@ export function parseBackup(
     return { ok: false, error: "bad-excess-reasons" };
   }
   const excessReasons = (rawReasons as ExcessReason[] | undefined) ?? [];
+  // Retrocompatibilidade: backups antigos não possuem "specialExcessUses" → [].
+  const rawUses = obj.specialExcessUses;
+  if (rawUses !== undefined && (!Array.isArray(rawUses) || !rawUses.every(validSpecialExcessUse))) {
+    return { ok: false, error: "bad-special-excess-uses" };
+  }
+  const specialExcessUses = (rawUses as SpecialExcessUse[] | undefined) ?? [];
 
   const allDates = [
     ...entries.map((e) => e.date),
@@ -269,7 +301,7 @@ export function parseBackup(
     periodTo,
   };
 
-  return { ok: true, backup: { user, entries, compensations, absences, companyCalendars, faltas, excessReasons, version, summary } };
+  return { ok: true, backup: { user, entries, compensations, absences, companyCalendars, faltas, excessReasons, specialExcessUses, version, summary } };
 }
 
 /* ──────────────────────────────────────────────────────────

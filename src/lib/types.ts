@@ -111,6 +111,12 @@ export interface AppData {
    * informado" até o usuário registrar.
    */
   excessReasons?: ExcessReason[];
+  /**
+   * USOS do banco paralelo [10+] (novo modelo — Etapas 3B/3D). Exclusivo do
+   * novo Meu Horário: NUNCA armazenar dentro de compensations/debts/hourBank.
+   * Opcional em dados antigos — a hidratação preenche [].
+   */
+  specialExcessUses?: import("./special-excess-use").SpecialExcessUse[];
 }
 
 /** Códigos do MOTIVO DO EXCEDENTE acima de 10h (select do modal). */

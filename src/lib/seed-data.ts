@@ -95,6 +95,7 @@ export function createEmptyState(today: string = todayString()): AppData {
     companyCalendars: undefined,
     faltas: [],
     excessReasons: [],
+    specialExcessUses: [],
   };
 }
 
@@ -231,6 +232,9 @@ export function buildSeedData(): AppData {
     companyCalendars: seedCompanyCalendars(),
     faltas,
     excessReasons,
+    // Seed legado NUNCA é convertido para o modelo novo (adapter é etapa
+    // futura): o novo banco começa vazio, sem duplicar as compensações antigas.
+    specialExcessUses: [],
   };
 }
 
