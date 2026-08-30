@@ -63,10 +63,13 @@ check("3. títulos das três seções têm hierarquia maior que os itens", () =>
 
 check("4. rótulo e valor ficam no mesmo bloco, valor à direita", () => {
   const page = srcOf("src/app/(app)/resumo/page.tsx");
-  assert.ok(page.includes('className="flex items-baseline gap-2"'));
-  assert.ok(page.includes("ml-auto max-w-[60%] text-right"));
+  assert.ok(page.includes('className="flex items-start gap-2"'));
+  assert.ok(page.includes("ml-auto shrink-0 text-right"));
   assert.ok(page.includes('label="No ponto"'));
   assert.ok(page.includes('label="Déficit do período"'));
+  assert.ok(page.includes('label="Acordo a compensar"'));
+  assert.ok(page.includes("hint={`feito ${formatMinutes(detailStats.acordoDone)} · falta ${formatMinutes(detailStats.acordoPending)}`}"));
+  assert.ok(page.includes("value={formatMinutes(detailStats.acordoTotal)}"));
 });
 
 check("5. três colunas como blocos discretos e empilháveis", () => {

@@ -135,6 +135,7 @@ export function hydrateAppData(raw: string | null, today: string = todayString()
 
 let data: AppData = pristine;
 let ready = false;
+let pendingPersist = false;
 const listeners = new Set<() => void>();
 
 function emit() {
@@ -150,9 +151,15 @@ function persist() {
   }
 }
 
-function load() {
+/**
+ * Hidrata o estado do storage SEM emitir (seguro durante getSnapshot/render).
+ * Sem isso, o primeiro getSnapshot devolve `pristine` (controlStartDate = hoje)
+ * e Registros calcula −8h em dia vazio antes de ler a data persistida.
+ */
+function ensureLoaded() {
   if (ready || typeof window === "undefined") return;
   ready = true;
+  pendingPersist = false;
   try {
     const today = todayString();
     const raw = window.localStorage.getItem(STORAGE_KEY);
@@ -160,29 +167,36 @@ function load() {
       const parsed = parseStoredAppData(raw);
       if (parsed) {
         data = applyDemoIdentityMigration(applyControlStartMigration(parsed, today));
-        if (
+        pendingPersist =
           (parsed.user.controlStartDate ?? null) !== (data.user.controlStartDate ?? null) ||
           parsed.user.name !== data.user.name ||
           parsed.user.email !== data.user.email ||
-          (parsed.user.birthDate ?? null) !== (data.user.birthDate ?? null)
-        ) {
-          persist();
-        }
-        emit();
+          (parsed.user.birthDate ?? null) !== (data.user.birthDate ?? null);
         return;
       }
       // Storage presente mas ilegível: não sobrescreve o valor persistido.
       data = createEmptyState(today);
-      emit();
       return;
     }
     // Primeiro acesso: estado transacional vazio (seed só via reseed explícito).
     data = createEmptyState(today);
-    persist();
+    pendingPersist = true;
   } catch {
     data = createEmptyState();
   }
-  emit();
+}
+
+function flushPersist() {
+  if (!pendingPersist) return;
+  pendingPersist = false;
+  persist();
+}
+
+function load() {
+  const wasReady = ready;
+  ensureLoaded();
+  flushPersist();
+  if (!wasReady) emit();
 }
 
 function subscribe(cb: () => void) {
@@ -194,6 +208,7 @@ function subscribe(cb: () => void) {
 }
 
 function getSnapshot() {
+  ensureLoaded();
   return data;
 }
 
@@ -1461,6 +1476,18 @@ export function getAppData(): AppData {
 
 export function useAppData(): AppData {
   return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+}
+
+/** `true` no cliente depois de ler o localStorage — não usar `pristine` como fato. */
+export function useIsStoreReady(): boolean {
+  return useSyncExternalStore(
+    subscribe,
+    () => {
+      ensureLoaded();
+      return ready;
+    },
+    () => false,
+  );
 }
 
 /** `true` após a hidratação (evita flash de estado vazio). */

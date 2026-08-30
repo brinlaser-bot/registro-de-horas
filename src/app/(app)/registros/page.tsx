@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Ban, ChevronLeft, ChevronRight, Clock3, Search, X } from "lucide-react";
-import { actions, getAppData, settingsOf, useAppData, useIsClient } from "@/lib/store";
+import { actions, getAppData, settingsOf, useAppData, useIsClient, useIsStoreReady } from "@/lib/store";
 import {
   computeDay,
   formatDateShortBR,
@@ -93,6 +93,7 @@ export default function RegistrosPage() {
 function RegistrosBody() {
   const toast = useToast();
   const mounted = useIsClient();
+  const storeReady = useIsStoreReady();
   const router = useRouter();
   const searchParams = useSearchParams();
   const { user, entries, compensations, absences, companyCalendars, faltas, excessReasons } = useAppData();
@@ -160,6 +161,7 @@ function RegistrosBody() {
           excessSpecial: creditView.excessSpecial,
         });
         const empty = cctx.ctx.day.empty;
+        const noFacts = empty && !falta && !cctx.ctx.absence;
         const compact =
           empty &&
           !missingExpected &&
@@ -177,9 +179,9 @@ function RegistrosBody() {
           /* View model central: card e resumo consomem SEMPRE a resolução central
            * (calendário/folga/evento) — nunca o saldo bruto de computeDay/dayContext.
            * Falta PREVISTA: saldo/déficit mascarados em 0 até a data chegar.
-           * SEM REGISTRO: pendência operacional — não inventa déficit/saldo. */
+           * SEM REGISTRO / dia sem fatos: pendência operacional — não inventa déficit/saldo. */
           balanceView:
-            date > todayStr || missingExpected
+            date > todayStr || missingExpected || noFacts
               ? { ...baseView, adjustedBalance: 0, adjustedDeficit: 0 }
               : faltaStatus === "prevista"
               ? { ...baseView, adjustedBalance: 0, adjustedDeficit: 0 }
@@ -197,7 +199,7 @@ function RegistrosBody() {
           // Visão geral e do Resumo do período (falta efetiva conta; prevista 0).
           balanceContribution: dayBalanceContribution(cctx, faltas, date, todayStr),
           deficitContribution:
-            missingExpected || date > todayStr || faltaStatus === "prevista" ? 0 : companyDeficitContribution(cctx),
+            missingExpected || noFacts || date > todayStr || faltaStatus === "prevista" ? 0 : companyDeficitContribution(cctx),
           absence: absenceOnDate(absences, date),
           missingExpected,
           compact,
@@ -555,7 +557,7 @@ function RegistrosBody() {
     router.replace("/registros");
   };
 
-  if (!mounted) {
+  if (!mounted || !storeReady) {
     return (
       <div className="space-y-4">
         {[...Array(5)].map((_, i) => <Skeleton key={i} className="h-24" />)}

@@ -272,7 +272,8 @@ export default function ResumoPage() {
               <DetailRow label="Compensações pendentes" value={formatMinutes(detailStats.pendingCompMinutes)} />
               <DetailRow
                 label="Acordo a compensar"
-                value={`${formatMinutes(detailStats.acordoTotal)} (feito ${formatMinutes(detailStats.acordoDone)} · falta ${formatMinutes(detailStats.acordoPending)})`}
+                value={formatMinutes(detailStats.acordoTotal)}
+                hint={`feito ${formatMinutes(detailStats.acordoDone)} · falta ${formatMinutes(detailStats.acordoPending)}`}
               />
             </DetailColumn>
             <DetailColumn title="Ausências e abonos">
@@ -421,11 +422,14 @@ function DetailColumn({ title, children }: { title: string; children: ReactNode 
   );
 }
 
-function DetailRow({ label, value }: { label: string; value: string }) {
+function DetailRow({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
-    <div className="flex items-baseline gap-2">
-      <dt className="min-w-0 shrink text-xs text-slate-500">{label}</dt>
-      <dd className="ml-auto max-w-[60%] text-right text-sm font-extrabold tabular-nums leading-snug text-slate-800">{value}</dd>
+    <div className="flex items-start gap-2">
+      <dt className="min-w-0 shrink text-xs text-slate-500">
+        {label}
+        {hint ? <span className="mt-0.5 block text-[11px] font-medium text-slate-400">{hint}</span> : null}
+      </dt>
+      <dd className="ml-auto shrink-0 text-right text-sm font-extrabold tabular-nums leading-snug text-slate-800">{value}</dd>
     </div>
   );
 }

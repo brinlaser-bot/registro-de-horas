@@ -69,9 +69,9 @@ check("1. storage vazio em produção => estado transacional limpo", () => {
   assert.ok(storeSrc.includes("createEmptyState()"));
   assert.ok(storeSrc.includes("Primeiro acesso: estado transacional vazio"));
   assert.ok(!storeSrc.includes("popula com dados de exemplo"));
-  const loadFn = storeSrc.slice(storeSrc.indexOf("function load("), storeSrc.indexOf("function subscribe"));
-  assert.ok(loadFn.includes("createEmptyState"));
-  assert.ok(!loadFn.includes("buildSeedData"));
+  const hydrateFn = storeSrc.slice(storeSrc.indexOf("function ensureLoaded("), storeSrc.indexOf("function subscribe"));
+  assert.ok(hydrateFn.includes("createEmptyState"));
+  assert.ok(!hydrateFn.includes("buildSeedData"));
 });
 
 check("2. não existem punches seedados", () => {

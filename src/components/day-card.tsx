@@ -264,6 +264,7 @@ export function DayCard({
   const incompletePast = isIncompletePastPunch(d.date, d.open, todayString());
   const punchPending = d.financialPending;
   const inconsistent = !d.consistent && d.entries.length > 0;
+  const noFacts = d.empty && !falta && !absence;
 
   const add = async (type?: EntryType, time?: string) => {
     if (busy) return;
@@ -744,8 +745,8 @@ export function DayCard({
             </div>
           )}
 
-          {/* Métricas — ocultas enquanto o dia não for finalizável ou estiver sem registro */}
-          {!punchPending && !missingExpected && (
+          {/* Métricas — ocultas enquanto o dia não for finalizável, sem fatos ou sem registro */}
+          {!punchPending && !missingExpected && !noFacts && (
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <MiniStat
               label={futureDay ? "Registro previsto" : "Trabalhado"}
@@ -1166,7 +1167,7 @@ export function DayCard({
 
           {/* Rodapé explicativo do "No ponto" — em dia de Abono o card é
               SOMENTE INFORMATIVO e não exibe textos explicativos. */}
-          {!abonoDay && !punchPending && !missingExpected && (
+          {!abonoDay && !punchPending && !missingExpected && !noFacts && (
             <p className="mt-3 text-[11px] text-slate-400">
               * "No ponto" é o total que pode ser lançado no sistema da empresa (limitado a{" "}
               {formatMinutes(settings.maxDailyMinutes)}/dia). Horas acima de 10h precisam ser realocadas
