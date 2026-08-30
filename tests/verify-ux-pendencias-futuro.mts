@@ -108,9 +108,12 @@ check("11. dia incompleto com compensação programada NÃO permite concluir", (
   };
   const checkRes = canCompleteComp(comp, entries, [comp], S, "2026-08-26");
   assert.equal(checkRes.ok, false);
+  // 3E.2: o bloco "Compensação programada/prevista" saiu do card Registros
+  // (fluxo legado de compensação fora da experiência principal); a guarda
+  // central canCompleteComp segue válida — testada acima.
   const card = srcOf("src/components/day-card.tsx");
-  assert.ok(card.includes("Compensação prevista:"));
-  assert.ok(card.includes("Corrija os registros deste dia para verificar e concluir a compensação."));
+  assert.ok(!card.includes("Compensação prevista:"), "bloco de compensação prevista removido (3E.2)");
+  assert.ok(!card.includes("Concluir compensação"), "CTA de conclusão removido (3E.2)");
 });
 
 check("12. ao corrigir o dia a conclusão volta a ser elegível", () => {

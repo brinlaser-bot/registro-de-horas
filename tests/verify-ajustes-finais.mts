@@ -109,24 +109,21 @@ check("C. prefill = min(unplanned, capacidade) ao abrir/trocar data", () => {
   assert.equal(maxOperationMinutes(240, 600), 240);
 });
 
-/* ── D. Fluxo inverso no card do dia ──────────────────────── */
-check("D. card do dia devedor mostra Usar excedente disponível", () => {
+/* ── D. Fluxo inverso (3E.2: motor intacto; fora do card Registros) ── */
+check("D. (3E.2) motor do fluxo inverso intacto; card Registros sem o botão legado", () => {
   const seed = buildLegacyDemoScenario();
   const srcs = eligibleSpecialSourcesForDeficit(
     "2026-08-19", seed.entries, seed.compensations, seed.absences,
     seed.companyCalendars, settings, seed.excessReasons, TODAY,
   );
-  assert.ok(srcs.some((v) => v.date === "2026-08-24" && v.freeSpecial === 35));
-  assert.ok(dayCardSrc.includes("Usar excedente disponível"));
-  assert.ok(dayCardSrc.includes("onUseAvailableExcess"));
-  assert.ok(regsSrc.includes("onUseAvailableExcess"));
-  assert.ok(
-    regsSrc.includes("deficitDate={allocateFromDeficit") || regsSrc.includes("deficitDate={allocateFromDeficit.date}"),
-    "fluxo inverso monta AllocateExcessModal a partir do card",
-  );
+  assert.ok(srcs.some((v) => v.date === "2026-08-24" && v.freeSpecial === 35), "origens elegíveis seguem calculadas");
   assert.ok(hasEligibleSpecialExcessInCycle(
     seed.entries, seed.compensations, seed.absences, seed.companyCalendars, settings, seed.excessReasons, TODAY,
-  ));
+  ), "ciclo com elegível segue detectado");
+  // 3E.2: o botão legado saiu da experiência principal de Registros
+  assert.ok(!dayCardSrc.includes("Usar excedente disponível"));
+  assert.ok(!dayCardSrc.includes("onUseAvailableExcess"));
+  assert.ok(!regsSrc.includes("AllocateExcessModal"), "Registros não monta mais o modal legado");
 });
 
 /* ── E. Ciclo anual em Dias com saldo negativo ────────────── */
@@ -207,7 +204,7 @@ check("G. UI não usa '+10h' / 'Excedentes acima de 10h' como rótulo", () => {
   assert.ok(compsSrc.includes("Excedente do limite diário"));
   assert.ok(!compsSrc.includes("Excedentes acima de 10h"));
   assert.ok(chartSrc.includes("Excedente do limite diário"));
-  assert.ok(dayCardSrc.includes("Realocado:"));
+  assert.ok(!dayCardSrc.includes("Realocado:"), "faixa legada fora do card (3E.2)");
   assert.ok(!dayCardSrc.includes("Alocado:"));
 });
 
@@ -223,11 +220,10 @@ check("H. Excluir falta: sem window.confirm; toast Falta excluída", () => {
   assert.equal(actions.removeFalta(id).ok, true);
 });
 
-/* ── I. Mobile do card de excedente ───────────────────────── */
-check("I. card de excedente: conteúdo full-width e ações abaixo no mobile", () => {
-  assert.ok(dayCardSrc.includes("flex-col gap-3"));
-  assert.ok(dayCardSrc.includes("w-full flex-1"));
-  assert.ok(dayCardSrc.includes("flex w-full flex-col gap-2 sm:ml-auto"));
+/* ── I. Card (3E.2) sem faixa legada; ExcessPanel da Visão geral intacto ── */
+check("I. card (3E.2) sem faixa legada de excedente; ExcessPanel da Visão geral intacto", () => {
+  assert.ok(!dayCardSrc.includes("flex w-full flex-col gap-2 sm:ml-auto"), "faixa legada removida (3E.2)");
+  assert.ok(!dayCardSrc.includes("EXCEDENTE DO LIMITE DIÁRIO"), "faixa legada removida (3E.2)");
   assert.ok(pageSrc.includes("Acordo a compensar") === false || !pageSrc.includes('title="Acordos a compensar"'),
     "Visão geral sem card duplicado de acordos");
   assert.ok(!pageSrc.includes('title="Acordos a compensar"'));

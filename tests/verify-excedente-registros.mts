@@ -80,26 +80,21 @@ check("A. base 8h / trabalhado 11h ⇒ regularExtra = 2h · specialExcess = 1h",
   assert.notEqual(v.regularExtra, v.realizedPositive, "NÃO misturar +3h no crédito regular");
 });
 
-/* ── B. UI não rotula +3h como Saldo regular ─────────────────── */
-check("B. Registros NÃO mostra 'Saldo regular' no dia >10h (usa Hora extra regular)", () => {
-  assert.ok(dayCardSrc.includes('label="Hora extra regular"'), "rótulo Hora extra regular");
-  assert.ok(dayCardSrc.includes("{showSplit ? ("), "split só com excedente especial");
-  assert.ok(dayCardSrc.includes("creditView?.regularExtra"), "número vem da decomposição central");
-  assert.ok(
-    dayCardSrc.includes('label="Saldo regular"'),
-    "Saldo regular permanece nos dias SEM excedente especial",
-  );
-  assert.ok(registrosSrc.includes("creditView={dayCreditView("), "Registros passa dayCreditView ao card");
+/* ── B. UI (3E.2): +2h regular (com teto) e [10+] gerado separados ── */
+check("B. Registros (3E.2): dia >10h mostra 'Saldo regular' (com teto) + '[10+] gerado'", () => {
+  assert.ok(dayCardSrc.includes('label="Saldo regular"'), "saldo regular com teto de 10h (+2h, não +3h)");
+  assert.ok(dayCardSrc.includes('label="[10+] gerado"'), "excedente exibido como [10+] gerado");
+  assert.ok(dayCardSrc.includes("[10+] +"), "header colapsado mostra o [10+] gerado");
+  assert.ok(!dayCardSrc.includes('label="Hora extra regular"'), "rótulo legado removido");
+  assert.ok(!dayCardSrc.includes("creditView?.regularExtra"), "card não consome decomposição legada");
 });
 
-/* ── C. +2h regular e 1h excedente separados ─────────────────── */
-check("C. mostra +2h regular e 1h excedente separado", () => {
-  assert.ok(
-    dayCardSrc.includes("Excedente do limite diário") || dayCardSrc.includes("EXCEDENTE DO LIMITE DIÁRIO"),
-    "faixa própria do excedente",
-  );
-  assert.ok(dayCardSrc.includes("a realocar"), "1h a realocar");
-  assert.ok(dayCardSrc.includes("creditView?.excessSpecial"), "excedente especial da fonte central");
+/* ── C. +2h regular e 1h excedente separados (3E.2: [10+]) ───── */
+check("C. (3E.2) mostra +2h regular e o [10+] gerado separado (sem 'a realocar')", () => {
+  assert.ok(dayCardSrc.includes("excessOriginal = d.excessMinutes"), "valor = excedente factual do dia");
+  assert.ok(dayCardSrc.includes('label="[10+] gerado"'), "[10+] gerado em métrica própria");
+  assert.ok(!dayCardSrc.includes("a realocar"), "nunca 'a realocar'");
+  assert.ok(!dayCardSrc.includes("EXCEDENTE DO LIMITE DIÁRIO"), "faixa legada removida");
   assert.ok(!dayCardSrc.includes("e compense"), "texto antigo de compensar em outro dia removido");
 });
 
@@ -119,24 +114,24 @@ check("D. dia passa <=10h → >10h por edição sem motivo ⇒ shouldPrompt = tr
     }),
     true,
   );
-  assert.ok(registrosSrc.includes("shouldPromptExcessReason"), "Registros usa o helper na mutation");
-  assert.ok(pageSrc.includes("shouldPromptExcessReason"), "Visão geral usa o helper na mutation");
+  // 3E.2: a página Registros NÃO tem mais prompt de motivo (experiência factual);
+  // o helper segue ativo na Visão geral/QuickPunch (fluxo preservado).
+  assert.ok(!registrosSrc.includes("shouldPromptExcessReason"), "Registros sem prompt de motivo (3E.2)");
+  assert.ok(!registrosSrc.includes("promptExcessReasonIfNeeded"), "Registros sem prompt de motivo (3E.2)");
+  assert.ok(pageSrc.includes("shouldPromptExcessReason"), "Visão geral preserva o helper na mutation");
   assert.ok(registrosSrc.includes("onUpdateEntry"), "edição de batida passa pelo fluxo");
   assert.ok(pageSrc.includes("promptExcessReasonIfNeeded(target.date, before)"), "edição no QuickPunch dispara");
 });
 
 /* ── E. excedente antigo ao abrir: ⚠, sem loop de modal ──────── */
-check("E. dia já >10h sem motivo ao abrir ⇒ ⚠ Motivo não informado; sem loop automático", () => {
-  assert.ok(dayCardSrc.includes("⚠ Motivo não informado"), "faixa do excedente antigo");
-  assert.ok(dayCardSrc.includes("Registrar motivo"), "botão manual no card");
+check("E. (3E.2) card sem faixa de motivo; motor ainda rejeita loop para dia encerrado", () => {
+  assert.ok(!dayCardSrc.includes("Motivo não informado"), "faixa de motivo removida do card");
+  assert.ok(!dayCardSrc.includes("Registrar motivo"), "botão de motivo removido do card");
   assert.ok(
     !registrosSrc.includes("useEffect(() => {\n    setReasonDate"),
     "Registros não abre modal em effect/render",
   );
-  assert.ok(
-    registrosSrc.includes("promptExcessReasonIfNeeded") && registrosSrc.includes("snapshotDay"),
-    "disparo só após mutation (snapshot + helper)",
-  );
+  assert.ok(!registrosSrc.includes("promptExcessReasonIfNeeded"), "Registros sem prompt de motivo (3E.2)");
   const alreadyClosed = computeDay(day11h(), settings);
   assert.equal(
     shouldPromptExcessReason({
@@ -151,8 +146,8 @@ check("E. dia já >10h sem motivo ao abrir ⇒ ⚠ Motivo não informado; sem lo
 });
 
 /* ── F. motivo registrado ⇒ faixa mostra Motivo ──────────────── */
-check("F. motivo registrado ⇒ faixa passa a mostrar motivo", () => {
-  assert.ok(dayCardSrc.includes("Motivo: {excessReasonLabel(creditView.reason)}"), "mostra o motivo");
+check("F. (3E.2) motivo segue gravável (motor), mas o card não exibe mais a faixa", () => {
+  assert.ok(!dayCardSrc.includes("excessReasonLabel"), "card não exibe motivo do excedente");
   reset(day11h());
   const ok = actions.setExcessReason({ date: "2026-08-24", reason: "atendimento-evento" });
   assert.equal(ok.ok, true, ok.error);
@@ -176,10 +171,10 @@ check("G. CTA antigo 'Compensar horas' não aparece", () => {
   assert.ok(!dayCardSrc.includes("Compensar horas"), "botão antigo removido");
 });
 
-/* ── H. CTA Gerenciar excedente ──────────────────────────────── */
-check("H. CTA 'Gerenciar excedente' aparece e aponta para Compensações", () => {
-  assert.ok(dayCardSrc.includes("Gerenciar excedente"), "novo CTA");
-  assert.ok(dayCardSrc.includes('/compensacoes#excedentes-prioridade'), "leva ao grupo de prioridade");
+/* ── H. (3E.2) CTA legado removido; [10+] gerado no lugar ────── */
+check("H. (3E.2) CTA 'Gerenciar excedente' removido; card mostra '[10+] gerado'", () => {
+  assert.ok(!dayCardSrc.includes("Gerenciar excedente"), "CTA legado removido");
+  assert.ok(dayCardSrc.includes('label="[10+] gerado"'), "[10+] gerado no card");
 });
 
 /* ── Destinações: 2h regular, 1h20 usado, 40min livre, 1h especial ── */
@@ -264,23 +259,23 @@ check("O. Registrar falta usa variante âmbar/laranja e fica no bloco das batida
   assert.ok(quickSrc.includes("Mesmo bloco: chips das batidas"), "mesmo bloco dos chips");
 });
 
-/* ── Prioridade visual do excedente (recolhido + expandido) ── */
-check("P. card expandido 11h ⇒ Hora extra regular +2h (não Saldo regular +3h)", () => {
-  assert.ok(dayCardSrc.includes('label="Hora extra regular"'));
-  assert.ok(dayCardSrc.includes("+{formatMinutes(creditView?.regularExtra ?? 0)} regular"), "recolhido: +2h regular");
+/* ── Apresentação (3E.2): regular com teto + [10+] gerado ───── */
+check("P. card 11h (3E.2) ⇒ Saldo regular +2h (teto) + [10+] gerado 1h", () => {
+  assert.ok(dayCardSrc.includes('label="Saldo regular"'), "saldo regular com teto");
+  assert.ok(dayCardSrc.includes('label="[10+] gerado"'), "[10+] gerado em métrica própria");
+  assert.ok(!dayCardSrc.includes('label="Hora extra regular"'), "rótulo legado ausente");
   assert.ok(!dayCardSrc.includes("O excedente deve ser compensado em outro dia"), "texto antigo removido");
 });
 
-check("Q. card expandido mostra excedente separado e restante em destaque", () => {
-  assert.ok(
-    dayCardSrc.includes("⚠ Excedente do limite diário") || dayCardSrc.includes("⚠ EXCEDENTE DO LIMITE DIÁRIO"),
-  );
-  assert.ok(dayCardSrc.includes("Restante a realocar"));
-  assert.ok(dayCardSrc.includes("Original:"));
+check("Q. card (3E.2) sem faixa legada 'EXCEDENTE DO LIMITE DIÁRIO' / 'Restante a realocar'", () => {
+  assert.ok(!dayCardSrc.includes("EXCEDENTE DO LIMITE DIÁRIO"));
+  assert.ok(!dayCardSrc.includes("Restante a realocar"));
+  assert.ok(dayCardSrc.includes("[10+] +"), "[10+] gerado no header colapsado");
 });
 
-check("R. card recolhido mostra 1h excedente (ou o restante)", () => {
-  assert.ok(dayCardSrc.includes("{formatMinutes(excessRemaining)} a realocar"), "recolhido: ⚠ restante a realocar");
+check("R. card recolhido (3E.2) mostra o [10+] gerado, nunca 'a realocar'", () => {
+  assert.ok(dayCardSrc.includes("[10+] +{formatMinutes(excessOriginal)}"), "recolhido: [10+] +X");
+  assert.ok(!dayCardSrc.includes("a realocar"));
 });
 
 check("S. excedente parcialmente utilizado ⇒ recolhido usa somente o restante", () => {
@@ -291,11 +286,11 @@ check("S. excedente parcialmente utilizado ⇒ recolhido usa somente o restante"
   const v = dayCreditView("2026-08-24", day11h(), comps, [], both, settings, []);
   assert.equal(v.excessSpecial, 60);
   assert.equal(v.freeSpecial, 20, "restante 20min");
-  assert.ok(dayCardSrc.includes("creditView?.freeSpecial"), "recolhido/expandido usam o restante central");
+  assert.ok(!dayCardSrc.includes("creditView?.freeSpecial"), "card não deriva exibição da decomposição legada (3E.2)");
 });
 
-check("T. restante 0 ⇒ status Excedente tratado", () => {
-  assert.ok(dayCardSrc.includes("✓ Excedente tratado") || dayCardSrc.includes("Excedente tratado ✓"));
+check("T. (3E.2) card sem status 'Excedente tratado' (motor segue calculando)", () => {
+  assert.ok(!dayCardSrc.includes("Excedente tratado"), "status legado ausente do card");
   const comps: Compensation[] = [{
     id: 12, sourceDate: "2026-08-24", targetDate: "2026-08-25", minutes: 60,
     status: "pendente", note: null, kind: "excedente", createdAt: 1,
@@ -304,9 +299,10 @@ check("T. restante 0 ⇒ status Excedente tratado", () => {
   assert.equal(v.freeSpecial, 0);
 });
 
-check("U. texto antigo 'excedente deve ser compensado em outro dia' não aparece", () => {
+check("U. rodapé factual (3E.2): excedente separado no banco [10+]", () => {
   assert.ok(!dayCardSrc.includes("excedente deve ser compensado em outro dia"));
-  assert.ok(dayCardSrc.includes("Horas acima de 10h precisam ser realocadas"));
+  assert.ok(!dayCardSrc.includes("precisam ser realocadas"), "texto legado de realocação ausente");
+  assert.ok(dayCardSrc.includes("separado no banco [10+]"), "rodapé factual");
 });
 
 console.log(`\nEXCEDENTE REGISTROS + FALTA — OK (${passed} testes)`);

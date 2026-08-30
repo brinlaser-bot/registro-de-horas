@@ -232,15 +232,17 @@ check("EXCLUSÃO. apagar 13E deixa inconsistente; restaurar volta a 8h", () => {
   assert.equal(ok.financialPending, false);
 });
 
-check("UI. modal 10+ preserva natureza; Registros tem ações COMPENSAR", () => {
+check("UI. modal 10+ preserva natureza; card (3E.2) sem ações legadas de compensação", () => {
+  // O componente legado segue intacto (2º plano) — só não é mais acionado
+  // pela experiência principal de Registros.
   const alloc = srcOf("src/components/allocate-excess-modal.tsx");
   assert.ok(alloc.includes("Quitar saldo negativo com excedente disponível"));
   assert.ok(alloc.includes("selectedDeficit.originLabel"));
   const card = srcOf("src/components/day-card.tsx");
-  assert.ok(card.includes("Usar excedente disponível"));
-  assert.ok(card.includes("Como foi quitado"));
-  assert.ok(card.includes("Obrigação efetiva"));
   assert.ok(card.includes("Excluir batida?"));
+  assert.ok(!card.includes("Usar excedente disponível"), "fluxo legado removido do card (3E.2)");
+  assert.ok(!card.includes("Como foi quitado"), "lista de quitação removida do card (3E.2)");
+  assert.ok(!card.includes("Obrigação efetiva"), "obrigação COMPENSAR removida do card (3E.2)");
 });
 
 check("SEED. Cinzas não é COMPENSAR 4h", () => {

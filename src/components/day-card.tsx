@@ -1,13 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import Link from "next/link";
 import {
-  ArrowLeftRight,
   Ban,
   Cake,
   CalendarDays,
-  CheckCircle2,
   ChevronDown,
   ChevronUp,
   Handshake,
@@ -15,28 +12,22 @@ import {
   Pencil,
   Plus,
   Trash2,
-  TriangleAlert,
   Umbrella,
   Wrench,
-  Zap,
 } from "lucide-react";
 import type { Compensation, DayResult, WorkSettings } from "@/lib/types";
 import type { EntryType, TimeEntryLike } from "@/lib/time";
-import { formatDateBR, formatDateShortBR, formatMinutes, isFutureDate, nextWorkday, nowTimeString, toMinutes, todayString, weekdayLong } from "@/lib/time";
+import { formatDateBR, formatDateShortBR, formatMinutes, isFutureDate, toMinutes, todayString, weekdayLong } from "@/lib/time";
 import { predictedBreakWindow } from "@/lib/breaks";
-import { Badge, Button, ConfirmDialog, ExcessTenBadge, Input, Select } from "@/components/ui";
-import { CompensationForm, type CompFormData } from "@/components/compensation-form";
+import { Badge, Button, ConfirmDialog, Input, Select } from "@/components/ui";
 import { CorrectPunchesModal } from "@/components/correct-punches-modal";
 import { SmartExit } from "@/components/smart-exit";
 import { SpecialExcessUseSummary } from "@/components/special-excess-use-summary";
 import type { SpecialExcessDayView } from "@/lib/special-excess-day-view";
 import { actions } from "@/lib/store";
-import { analyzePunches, suggestedPunchTypeAt } from "@/lib/punches";
-import { allocatedForSource, overflowForSource, type ExtraCapacity } from "@/lib/debt";
+import { analyzePunches } from "@/lib/punches";
 import { absenceLabel, type Absence, type DayBalanceView } from "@/lib/absences";
-import { excessReasonLabel, excessReasonObservation, specialExcessLedger, type DayCreditView } from "@/lib/hour-bank";
-import { COMPENSAR_EXPLAIN, isIncompletePastPunch, quitacaoLine } from "@/lib/compensar";
-import type { CompKind } from "@/lib/types";
+import { isIncompletePastPunch } from "@/lib/compensar";
 
 export function statusBadge(d: DayResult) {
   if (d.status === "excess") return <Badge tone="rose">Acima do limite</Badge>;
@@ -113,16 +104,13 @@ function absenceBadge(absence: Absence) {
 interface Props {
   result: DayResult;
   settings: WorkSettings;
-  compsForDate: Compensation[]; // compensações com destino neste dia
-  allComps?: Compensation[]; // todas (para o abatimento fracionado)
+  allComps?: Compensation[]; // todas (assistente de saída antecipada — 2º plano)
   nowMinutes?: number;
   isToday?: boolean;
   onAddEntry: (p: { date: string; time: string; type: EntryType; note: string | null; source?: "live" | "manual" }) => Promise<void>;
   onUpdateEntry: (id: number, patch: { time?: string; type?: EntryType; note?: string | null }) => Promise<void>;
   onDeleteEntry: (id: number) => Promise<void>;
   onCompleteComp: (id: number) => Promise<void>;
-  onCreateComp: (data: CompFormData) => Promise<void>;
-  onCapComp?: (date: string, kind: CompKind, maxMinutes: number) => void | Promise<void>;
   /** Ausência (férias/afastamento) que cobre o dia, se houver. */
   absence?: Absence;
   /** Falta registrada no dia (ocorrência de ponto — não é afastamento). */
@@ -135,41 +123,6 @@ interface Props {
   balanceView?: DayBalanceView;
   /** Situação de calendário/folga do dia, quando não houver ausência manual. */
   calendarLabel?: string | null;
-  /** Atalhos de compensação do dia (calculados pela página com as funções centrais). */
-  shortcuts?: {
-    deficitRemaining: number;
-    /** Original do acordo. */
-    acordoMinutes: number;
-    /** Já concluído (compensado). */
-    acordoCompensated: number;
-    /** Planejado e ainda não concluído. */
-    acordoPlanned: number;
-    /** Original − Compensado. */
-    acordoRemaining: number;
-    canCompensate: boolean; // ciclo anual ainda ativo
-  };
-  /** Capacidade de hora extra por dia de destino (função central). */
-  getCapacity?: (targetDate: string) => ExtraCapacity;
-  /** Decomposição central (dayCreditView) — crédito regular × excedente especial. */
-  creditView?: DayCreditView;
-  /** Abre o modal existente de motivo do excedente >10h. */
-  onRegisterReason?: (date: string) => void;
-  /** Abre o fluxo próprio de alocação do excedente especial já realizado. */
-  onAllocateExcess?: (date: string) => void;
-  /** Fluxo inverso: quitar o déficit DESTE dia com excedente realizado. */
-  onUseAvailableExcess?: (date: string, kind?: CompKind) => void;
-  /** Há excedente do limite diário elegível no ciclo (motivo + livre). */
-  hasAvailableSpecialExcess?: boolean;
-  /** Obrigação COMPENSAR deste dia (fonte central). */
-  compensarHint?: {
-    label: string;
-    originalMinutes: number;
-    effectiveObligationMinutes?: number;
-    completedMinutes?: number;
-    plannedMinutes?: number;
-    openMinutes?: number;
-    compKind?: CompKind;
-  } | null;
   /** Dia abonado/afastamento sem obrigação — só alerta visual se houver batidas. */
   abonadoHint?: { label: string } | null;
   /** Trabalho dentro da janela ABONADO_PARCIAL (alerta visual; sem crédito automático). */
@@ -195,7 +148,6 @@ interface Props {
 export function DayCard({
   result,
   settings,
-  compsForDate,
   allComps,
   nowMinutes = 0,
   isToday,
@@ -203,22 +155,12 @@ export function DayCard({
   onUpdateEntry,
   onDeleteEntry,
   onCompleteComp,
-  onCreateComp,
-  onCapComp,
   absence,
   falta,
   onRemoveFalta,
   effectiveExpected,
   balanceView,
   calendarLabel,
-  shortcuts,
-  getCapacity,
-  creditView,
-  onRegisterReason,
-  onAllocateExcess,
-  onUseAvailableExcess,
-  hasAvailableSpecialExcess,
-  compensarHint,
   abonadoHint,
   workedInAbonoMinutes,
   abonoParcial,
@@ -232,15 +174,7 @@ export function DayCard({
 }: Props) {
   // Regra: todos os dias iniciam RECOLHIDOS — o usuário expande apenas o dia desejado.
   const [expanded, setExpanded] = useState(false);
-  const [compKind, setCompKind] = useState<CompKind>("excedente");
-  const [compInitial, setCompInitial] = useState<CompFormData | undefined>();
-  const [showAdd, setShowAdd] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [form, setForm] = useState<{ type: EntryType; time: string; note: string }>({
-    type: "entrada",
-    time: nowTimeString(),
-    note: "",
-  });
   const [editForm, setEditForm] = useState<{ type: EntryType; time: string; note: string }>({
     type: "entrada",
     time: "",
@@ -249,21 +183,12 @@ export function DayCard({
   const [busy, setBusy] = useState(false);
   const [busyFalta, setBusyFalta] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<TimeEntryLike | null>(null);
-  const [compOpen, setCompOpen] = useState(false);
-  const [compPlanning, setCompPlanning] = useState<{
-    originalMinutes: number;
-    compensatedMinutes: number;
-    plannedMinutes: number;
-    openMinutes: number;
-    unplannedMinutes: number;
-  } | undefined>();
   const [correctOpen, setCorrectOpen] = useState(false);
   const [showInterval, setShowInterval] = useState(false);
   const [intOut, setIntOut] = useState("");
   const [intIn, setIntIn] = useState("");
 
   const d = result;
-  const pendingComp = compsForDate.find((c) => c.status === "pendente");
   // REGRA ABSOLUTA: batidas só em data <= hoje. Em card FUTURO nenhum controle
   // de ponto é oferecido (formulário, Smart Exit) — o card fica somente leitura
   // (Falta prevista, métricas e Cancelar falta permanecem).
@@ -276,20 +201,6 @@ export function DayCard({
   const punchPending = d.financialPending;
   const inconsistent = !d.consistent && d.entries.length > 0;
   const noFacts = d.empty && !falta && !absence;
-
-  const add = async (type?: EntryType, time?: string) => {
-    if (busy) return;
-    setBusy(true);
-    try {
-      const t = time ?? form.time;
-      const chosen = type ?? suggestedPunchTypeAt(d.entries, t);
-      await onAddEntry({ date: d.date, time: t, type: chosen, note: form.note || null, source: "manual" });
-      setForm((f) => ({ ...f, note: "" }));
-      setShowAdd(false);
-    } finally {
-      setBusy(false);
-    }
-  };
 
   const startEdit = (e: TimeEntryLike) => {
     setEditingId(e.id);
@@ -309,43 +220,6 @@ export function DayCard({
 
   const remove = (e: TimeEntryLike) => setPendingDelete(e);
 
-  const finishComp = async (id: number) => {
-    if (!window.confirm("Marcar esta compensação como concluída?")) return;
-    await onCompleteComp(id);
-  };
-
-  /** Abre o formulário central de compensação já preenchido (atalho do card). */
-  const openComp = (kind: CompKind, minutes: number, note: string) => {
-    setCompKind(kind);
-    if (kind === "acordo" && shortcuts) {
-      setCompPlanning({
-        originalMinutes: shortcuts.acordoMinutes,
-        compensatedMinutes: shortcuts.acordoCompensated,
-        plannedMinutes: shortcuts.acordoPlanned,
-        openMinutes: shortcuts.acordoRemaining,
-        unplannedMinutes: Math.max(0, shortcuts.acordoRemaining - shortcuts.acordoPlanned),
-      });
-    } else if (kind === "deficit") {
-      setCompPlanning({
-        originalMinutes: deficitOriginal,
-        compensatedMinutes: deficitConcluded,
-        plannedMinutes: deficitPlanned,
-        openMinutes: deficitOpen,
-        unplannedMinutes: Math.max(0, deficitOpen - deficitPlanned),
-      });
-    } else {
-      setCompPlanning(undefined);
-    }
-    setCompInitial({
-      sourceDate: d.date,
-      // excedente → sair mais cedo (próximo dia útil); hora extra → usuário escolhe o dia
-      targetDate: kind === "excedente" ? nextWorkday(d.date) : todayString(),
-      minutes,
-      note,
-    });
-    setCompOpen(true);
-  };
-
   // Registro de saída em 1 clique + conclusão das compensações de saída antecipada
   const smartExit = async (time: string, compIds: number[]) => {
     await onAddEntry({ date: d.date, time, type: "saida", note: "Saída sugerida pelo assistente" });
@@ -357,47 +231,16 @@ export function DayCard({
     for (const id of compIds) await onCompleteComp(id);
   };
 
-  const allocatedHere = allComps
-    ? allocatedForSource(allComps, d.date, "excedente")
-    : 0;
-  const remainingExcess = Math.max(0, d.excessMinutes - allocatedHere);
-
   // Visão central de apresentação do saldo regular do dia.
   const regularExpected = balanceView?.effectiveExpected ?? effectiveExpected ?? d.expectedMinutes;
   const regularBalance = balanceView?.adjustedBalance ?? d.balanceMinutes;
-  const commonDeficit = balanceView?.adjustedDeficit ?? Math.max(0, d.expectedMinutes - d.workedMinutes);
-  const acordoMinutes = balanceView?.acordoMinutes ?? shortcuts?.acordoMinutes ?? 0;
-
-  // Detecção de overflow: compensação vinculada acima da dívida atual (após correção)
-  const deficitHere = commonDeficit;
-  const excessOverflow = allComps ? overflowForSource(allComps, d.date, "excedente", d.excessMinutes) : 0;
-  const deficitOverflow = allComps ? overflowForSource(allComps, d.date, "deficit", deficitHere) : 0;
-
-  const adjustOverflow = async (kind: CompKind) => {
-    const max = kind === "excedente" ? d.excessMinutes : deficitHere;
-    await onCapComp?.(d.date, kind, max);
-  };
 
   const balanceTone = regularBalance > 0 ? "text-emerald-600" : regularBalance < 0 ? "text-rose-600" : "text-slate-500";
-  /* Dia encerrado acima de 10h: NÃO misturar o excedente especial com o
-   * crédito regular. A decomposição vem de dayCreditView (fonte única). */
-  const excessOriginal = creditView?.excessSpecial ?? d.excessMinutes;
-  const excessAllocated = creditView
-    ? creditView.usedSpecialViaTarget + creditView.usedSpecialViaSource
-    : allocatedHere;
-  const excessRemaining = creditView?.freeSpecial ?? remainingExcess;
+  /* Dia encerrado acima do limite diário: o excedente é um valor já realizado e
+   * entra no banco paralelo [10+] (etapas 3A/3C). Nunca é pendência obrigatória
+   * e não reescreve o que foi trabalhado no dia. */
+  const excessOriginal = d.excessMinutes;
   const showSplit = !punchPending && !d.open && !d.empty && excessOriginal > 0;
-  const specialLed = showSplit ? specialExcessLedger(d.date, allComps ?? [], excessOriginal) : null;
-  const excessTreated = showSplit && (specialLed?.status === "tratado");
-  const deficitParcels = (allComps ?? []).filter(
-    (c) => c.sourceDate === d.date && (c.kind ?? "excedente") === "deficit" && c.status !== "cancelada",
-  );
-  const deficitConcluded = deficitParcels.filter((c) => c.status === "concluida").reduce((s, c) => s + c.minutes, 0);
-  const deficitPlanned = deficitParcels.filter((c) => c.status === "pendente").reduce((s, c) => s + c.minutes, 0);
-  const deficitOriginal = commonDeficit;
-  const deficitOpen = Math.max(0, deficitOriginal - deficitConcluded);
-  const showDeficitFollow =
-    !punchPending && deficitOriginal > 0 && !d.open && (!d.empty || !!falta) && !showSplit;
   const predicted = !punchPending && d.open
     ? predictedBreakWindow(d.realizedEntries?.length ? d.realizedEntries : d.entries, settings, regularExpected)
     : null;
@@ -464,17 +307,6 @@ export function DayCard({
                 <span>{falta.status === "prevista" ? "Falta prevista" : "Falta"}</span>
               </Badge>
             )}
-            {/* Acordo: indicação curta do que ainda falta (sem duplicar no badge) */}
-            {absence?.kind === "acordado" &&
-              absence.treatment === "compensar" &&
-              (shortcuts?.acordoRemaining ?? 0) > 0 && (
-                <span
-                  className="inline-flex shrink-0 items-center rounded-full bg-violet-100 px-2.5 py-1 text-[11px] font-bold text-violet-700"
-                  title={`Acordo original ${formatMinutes(shortcuts?.acordoMinutes ?? 0)} · compensado ${formatMinutes(shortcuts?.acordoCompensated ?? 0)}`}
-                >
-                  Restante: {formatMinutes(shortcuts?.acordoRemaining ?? 0)}
-                </span>
-              )}
             {d.open && isToday && (
               <span className="inline-flex items-center gap-1 text-[11px] font-bold text-indigo-500"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-indigo-500" /> em andamento</span>
             )}
@@ -497,33 +329,16 @@ export function DayCard({
           <p className="text-lg font-extrabold tabular-nums text-slate-900">{formatMinutes(d.workedMinutes)}</p>
           {showSplit ? (
             <>
-              <p className="text-xs font-bold tabular-nums text-emerald-600">
-                +{formatMinutes(creditView?.regularExtra ?? 0)} regular
+              <p className="text-xs font-bold tabular-nums text-emerald-600">+{formatMinutes(regularBalance)}</p>
+              <p className="mt-0.5 text-[11px] font-extrabold text-violet-600">
+                [10+] +{formatMinutes(excessOriginal)}
               </p>
-              {excessTreated ? (
-                <p className="mt-0.5 text-[11px] font-semibold text-emerald-700">✓ Excedente tratado</p>
-              ) : (
-                <p className="mt-0.5 inline-flex items-center justify-end gap-1 text-[11px] font-extrabold text-rose-600">
-                  <TriangleAlert size={11} aria-hidden /> {formatMinutes(excessRemaining)} a realocar
-                </p>
-              )}
             </>
           ) : (
-            <>
-              <p className={`text-xs font-bold tabular-nums ${balanceTone}`}>
-                {regularBalance >= 0 ? "+" : ""}
-                {formatMinutes(regularBalance)}
-              </p>
-              {showDeficitFollow && (
-                deficitOpen <= 0 ? (
-                  <p className="mt-0.5 text-[11px] font-semibold text-emerald-700">✓ Déficit quitado</p>
-                ) : deficitConcluded > 0 ? (
-                  <p className="mt-0.5 text-[11px] font-semibold text-amber-700">Parcial · restam {formatMinutes(deficitOpen)}</p>
-                ) : (
-                  <p className="mt-0.5 text-[11px] font-semibold text-rose-600">Em aberto · {formatMinutes(deficitOpen)}</p>
-                )
-              )}
-            </>
+            <p className={`text-xs font-bold tabular-nums ${balanceTone}`}>
+              {regularBalance >= 0 ? "+" : ""}
+              {formatMinutes(regularBalance)}
+            </p>
           )}
           </>
           )}
@@ -621,43 +436,6 @@ export function DayCard({
             </div>
           )}
 
-          {compensarHint && !punchPending && (
-            <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-900">
-              <p className="text-[11px] font-extrabold uppercase tracking-wider text-amber-700">Dia com regra especial</p>
-              <p className="mt-0.5 font-bold">{compensarHint.label}</p>
-              <p className="mt-1">
-                Obrigação original: <b>{formatMinutes(compensarHint.originalMinutes)}</b>
-                {" · "}Trabalhado no próprio dia: <b>{formatMinutes(d.workedMinutes)}</b>
-                {" · "}Obrigação efetiva: <b>{formatMinutes(compensarHint.effectiveObligationMinutes ?? Math.max(0, compensarHint.originalMinutes - d.workedMinutes))}</b>
-              </p>
-              {(compensarHint.completedMinutes != null || compensarHint.openMinutes != null) && (
-                <p className="mt-1">
-                  Quitado: <b className="text-emerald-700">{formatMinutes(compensarHint.completedMinutes ?? 0)}</b>
-                  {" · "}Planejado: <b className="text-sky-700">{formatMinutes(compensarHint.plannedMinutes ?? 0)}</b>
-                  {" · "}Em aberto: <b>{formatMinutes(compensarHint.openMinutes ?? 0)}</b>
-                </p>
-              )}
-              <p className="mt-1 text-[11px] font-extrabold uppercase tracking-wider text-amber-700">Como foi quitado</p>
-              {(() => {
-                const kind = compensarHint.compKind ?? "calendario";
-                const done = (allComps ?? []).filter(
-                  (c) => c.sourceDate === d.date && (c.kind ?? "excedente") === kind && c.status === "concluida",
-                );
-                if (done.length === 0) {
-                  return <p className="mt-0.5 text-xs text-amber-800">Ainda não há quitação realizada.</p>;
-                }
-                return (
-                  <ul className="mt-0.5 space-y-0.5">
-                    {done.map((c) => (
-                      <li key={c.id}>{quitacaoLine(c)}</li>
-                    ))}
-                  </ul>
-                );
-              })()}
-              <p className="mt-1 text-[11px] text-amber-800">{COMPENSAR_EXPLAIN}</p>
-            </div>
-          )}
-
           {abonadoHint && d.entries.length > 0 && (
             <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-900">
               <p className="font-bold">Trabalho registrado em dia abonado</p>
@@ -692,35 +470,6 @@ export function DayCard({
                 )}
               </div>
 
-              {/* Detalhamento do acordo — valores vindos das funções centrais */}
-              {absence.kind === "acordado" &&
-                absence.treatment === "compensar" &&
-                (shortcuts?.acordoMinutes ?? 0) > 0 && (
-                  <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg bg-white/70 px-2.5 py-1.5 text-[11px] font-semibold text-violet-800">
-                    <span>
-                      Acordo original:{" "}
-                      <b>{formatMinutes(shortcuts?.acordoMinutes ?? 0)}</b>
-                    </span>
-                    <span>
-                      · Compensado:{" "}
-                      <b className="text-emerald-700">
-                        {formatMinutes(shortcuts?.acordoCompensated ?? 0)}
-                      </b>
-                    </span>
-                    {(shortcuts?.acordoPlanned ?? 0) > 0 && (
-                      <span>
-                        · Planejado:{" "}
-                        <b className="text-sky-700">{formatMinutes(shortcuts?.acordoPlanned ?? 0)}</b>
-                      </span>
-                    )}
-                    <span>
-                      · Restante:{" "}
-                      <b className="text-amber-700">
-                        {formatMinutes(shortcuts?.acordoRemaining ?? 0)}
-                      </b>
-                    </span>
-                  </div>
-                )}
             </div>
           )}
 
@@ -779,19 +528,17 @@ export function DayCard({
               value={formatMinutes(regularExpected)}
               tone="text-slate-500"
             />
-            {showSplit ? (
+            <MiniStat
+              label="Saldo regular"
+              value={`${regularBalance >= 0 ? "+" : ""}${formatMinutes(regularBalance)}`}
+              tone={balanceTone}
+            />
+            {showSplit && (
               <MiniStat
-                label="Hora extra regular"
-                value={`+${formatMinutes(creditView?.regularExtra ?? 0)}`}
-                tone="text-emerald-600"
-                sub={
-                  creditView && creditView.usedRegular > 0
-                    ? `livre ${formatMinutes(creditView.freeRegular)}`
-                    : undefined
-                }
+                label="[10+] gerado"
+                value={`+${formatMinutes(excessOriginal)}`}
+                tone="text-violet-600"
               />
-            ) : (
-              <MiniStat label="Saldo regular" value={`${regularBalance >= 0 ? "+" : ""}${formatMinutes(regularBalance)}`} tone={balanceTone} />
             )}
             <MiniStat
               label={futureDay ? "Previsto no ponto" : "No ponto*"}
@@ -802,274 +549,16 @@ export function DayCard({
           </div>
           )}
 
-          {showDeficitFollow && (
-            <div className="mt-3 space-y-2 rounded-xl border border-amber-200 bg-amber-50/70 px-3 py-3">
-              <p className="text-[11px] font-extrabold uppercase tracking-wider text-amber-700">
-                Situação do déficit
-              </p>
-              <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs font-medium text-slate-700">
-                <span>Original: <b>{formatMinutes(deficitOriginal)}</b></span>
-                <span>Quitado: <b className="text-emerald-700">{formatMinutes(deficitConcluded)}</b></span>
-                <span>Planejado: <b className="text-sky-700">{formatMinutes(deficitPlanned)}</b></span>
-                <span>Em aberto: <b className="text-amber-800">{formatMinutes(deficitOpen)}</b></span>
-                <span>
-                  Sem programação:{" "}
-                  <b>{formatMinutes(Math.max(0, deficitOpen - deficitPlanned))}</b>
-                </span>
-              </div>
-              <div>
-                <p className="text-[11px] font-extrabold uppercase tracking-wider text-amber-700">
-                  Como foi quitado
-                </p>
-                {deficitParcels.filter((c) => c.status === "concluida").length === 0 ? (
-                  <p className="mt-1 text-xs text-slate-500">Ainda não há quitação realizada.</p>
-                ) : (
-                  <ul className="mt-1 space-y-0.5 text-xs text-slate-700">
-                    {deficitParcels
-                      .filter((c) => c.status === "concluida")
-                      .map((c) => (
-                        <li key={c.id}>{quitacaoLine(c)}</li>
-                      ))}
-                  </ul>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* Faixa PRIORITÁRIA do excedente especial — restante a realocar em destaque. */}
-          {showSplit && (
-            <div
-              className={`mt-3 flex flex-col gap-3 rounded-xl border px-3 py-3 sm:flex-row sm:flex-wrap sm:items-start ${
-                excessTreated
-                  ? "border-emerald-200 bg-emerald-50"
-                  : "border-rose-300 bg-rose-50 ring-1 ring-rose-200"
-              }`}
-            >
-              <TriangleAlert
-                size={18}
-                className={`shrink-0 ${excessTreated ? "text-emerald-600" : "text-rose-600"}`}
-              />
-              <div className={`min-w-0 w-full flex-1 text-xs font-medium sm:w-auto ${excessTreated ? "text-emerald-800" : "text-rose-800"}`}>
-                <p className="flex flex-wrap items-center gap-1.5 text-[11px] font-extrabold uppercase tracking-wider">
-                  {excessTreated ? "Excedente tratado ✓" : <>⚠ EXCEDENTE DO LIMITE DIÁRIO <ExcessTenBadge /></>}
-                </p>
-                <div className="mt-1.5 flex flex-wrap items-end gap-x-4 gap-y-1">
-                  <span>
-                    Original: <b>{formatMinutes(excessOriginal)}</b>
-                  </span>
-                  {excessAllocated > 0 && (
-                    <span>
-                      Realocado: <b>{formatMinutes(excessAllocated)}</b>
-                    </span>
-                  )}
-                  <span className={excessTreated ? "" : "text-sm font-extrabold text-rose-700"}>
-                    Restante a realocar:{" "}
-                    <b className="tabular-nums">{formatMinutes(excessRemaining)}</b>
-                  </span>
-                </div>
-                {creditView?.reason ? (
-                  <p className="mt-1">
-                    Motivo: {excessReasonLabel(creditView.reason)}
-                    {excessReasonObservation(creditView.reason) && (
-                      <span className="italic"> — {excessReasonObservation(creditView.reason)}</span>
-                    )}
-                  </p>
-                ) : !excessTreated ? (
-                  <p className="mt-1 font-bold text-amber-700">⚠ Motivo não informado</p>
-                ) : null}
-                {specialLed && (specialLed.realizedTo.length > 0 || specialLed.plannedTo.length > 0) && (
-                  <div className="mt-1.5 space-y-0.5 text-[11px]">
-                    {specialLed.realizedTo.map((t, i) => (
-                      <p key={`r${i}`}>
-                        {formatMinutes(t.minutes)} realocados → {t.originLabel} · {formatDateBR(t.date)}
-                      </p>
-                    ))}
-                    {specialLed.plannedTo.map((t, i) => (
-                      <p key={`p${i}`}>Programado: {formatMinutes(t.minutes)} → {formatDateBR(t.date)}</p>
-                    ))}
-                  </div>
-                )}
-              </div>
-              <div className="flex w-full flex-col gap-2 sm:ml-auto sm:w-auto sm:flex-row sm:flex-wrap">
-              {!creditView?.reason && onRegisterReason && (
-                <Button size="sm" variant="secondary" className="w-full sm:w-auto" onClick={() => onRegisterReason(d.date)}>
-                  Registrar motivo
-                </Button>
-              )}
-              {creditView?.reason && onRegisterReason && (
-                <Button size="sm" variant="ghost" className="w-full sm:w-auto" onClick={() => onRegisterReason(d.date)}>
-                  Alterar motivo
-                </Button>
-              )}
-              {creditView?.reason && !excessTreated && onAllocateExcess && (
-                <Button size="sm" variant="danger" className="w-full sm:w-auto" onClick={() => onAllocateExcess(d.date)}>
-                  <ArrowLeftRight size={13} /> Realocar excedente
-                </Button>
-              )}
-              <Link href="/compensacoes#excedentes-prioridade" className="w-full sm:w-auto">
-                <Button variant={excessTreated ? "secondary" : "danger"} size="sm" className="w-full sm:w-auto">
-                  <ArrowLeftRight size={13} /> Gerenciar excedente
-                </Button>
-              </Link>
-              </div>
-            </div>
-          )}
-
-          {/* Aviso: compensação vinculada ficou acima da dívida atual */}
-          {(excessOverflow > 0 || deficitOverflow > 0) && (
-            <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2.5">
-              <div className="flex flex-wrap items-center gap-2">
-                <TriangleAlert size={16} className="shrink-0 text-amber-600" />
-                <p className="flex-1 text-xs font-medium text-amber-800">
-                  {excessOverflow > 0 && (
-                    <>
-                      Há <b>{formatMinutes(excessOverflow)}</b> de compensação vinculada acima do novo
-                      excedente deste dia ({formatMinutes(d.excessMinutes)}).
-                    </>
-                  )}
-                  {deficitOverflow > 0 && (
-                    <>
-                      Há <b>{formatMinutes(deficitOverflow)}</b> de compensação vinculada acima do novo
-                      déficit deste dia ({formatMinutes(deficitHere)}).
-                    </>
-                  )}{" "}
-                  O histórico foi preservado — ajuste para manter consistência.
-                </p>
-                {excessOverflow > 0 && (
-                  <Button size="sm" variant="secondary" onClick={() => adjustOverflow("excedente")}>
-                    Revisar compensação
-                  </Button>
-                )}
-                {deficitOverflow > 0 && (
-                  <Button size="sm" variant="secondary" onClick={() => adjustOverflow("deficit")}>
-                    Revisar compensação
-                  </Button>
-                )}
-              </div>
-            </div>
-          )}
-
-          {compensarHint && !punchPending && !futureDay && absence?.kind !== "acordado" && (
-            <div className="mt-3 flex flex-col gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 sm:flex-row sm:flex-wrap sm:items-center">
-              <p className="min-w-0 flex-1 text-xs font-medium text-amber-800">
-                {compensarHint.label}: em aberto a partir da obrigação efetiva{" "}
-                <b>{formatMinutes(Math.max(0, compensarHint.originalMinutes - d.workedMinutes))}</b>
-              </p>
-              <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
-                {hasAvailableSpecialExcess && onUseAvailableExcess && (
-                  <Button size="sm" variant="danger" className="w-full sm:w-auto" onClick={() => onUseAvailableExcess(d.date, "calendario")}>
-                    <ArrowLeftRight size={13} /> Usar excedente disponível
-                  </Button>
-                )}
-                <Button
-                  size="sm"
-                  variant="subtle"
-                  className="w-full sm:w-auto"
-                  onClick={() =>
-                    openComp("calendario", Math.max(0, compensarHint.originalMinutes - d.workedMinutes), `Calendário de ${formatDateShortBR(d.date)}`)
-                  }
-                >
-                  <Zap size={13} /> Programar hora extra
-                </Button>
-              </div>
-            </div>
-          )}
-
-          {/* Atalho: Acordo a compensar (afastamento acordado — compensar posteriormente) */}
-          {!punchPending && shortcuts?.canCompensate && Math.max(0, shortcuts.acordoRemaining - shortcuts.acordoPlanned) > 0 && (
-            <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2.5">
-              {/* Detalhamento completo fica no banner acima — aqui só o convite à ação */}
-              <p className="flex-1 text-xs font-medium text-violet-800">
-                Há <b>{formatMinutes(Math.max(0, shortcuts.acordoRemaining - shortcuts.acordoPlanned))}</b> do acordo ainda sem programação.
-              </p>
-              {hasAvailableSpecialExcess && onUseAvailableExcess && (
-                <Button size="sm" variant="danger" onClick={() => onUseAvailableExcess(d.date, "acordo")}>
-                  <ArrowLeftRight size={13} /> Usar excedente disponível
-                </Button>
-              )}
-              <Button
-                size="sm"
-                variant="subtle"
-                onClick={() =>
-                  openComp(
-                    "acordo",
-                    Math.max(0, shortcuts.acordoRemaining - shortcuts.acordoPlanned),
-                    `Acordo de ${formatDateShortBR(d.date)}`,
-                  )
-                }
-              >
-                <ArrowLeftRight size={13} /> Programar hora extra
-              </Button>
-            </div>
-          )}
-
-          {/* Atalho: déficit comum pendente → quitar com hora extra.
-              Coexiste com o atalho do acordo: quando o dia tem acorda parcial a
-              compensar SEM batidas, o restante da jornada é déficit comum
-              (acordo 4h + déficit 4h — nunca uma dívida única de 8h). */}
-          {!punchPending && !futureDay && shortcuts?.canCompensate && deficitOpen > 0 && (
-            <div className="mt-3 flex flex-col gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 sm:flex-row sm:flex-wrap sm:items-center">
-              <p className="min-w-0 flex-1 text-xs font-medium text-amber-800">
-                Déficit em aberto: <b>{formatMinutes(deficitOpen)}</b>
-                {deficitPlanned > 0 && <> · planejado {formatMinutes(deficitPlanned)}</>}
-                {" "}· sem programação <b>{formatMinutes(Math.max(0, deficitOpen - deficitPlanned))}</b>
-              </p>
-              <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
-              {hasAvailableSpecialExcess && onUseAvailableExcess && (
-                <Button size="sm" variant="danger" className="w-full sm:w-auto" onClick={() => onUseAvailableExcess(d.date, "deficit")}>
-                  <ArrowLeftRight size={13} /> Usar excedente disponível
-                </Button>
-              )}
-              {Math.max(0, deficitOpen - deficitPlanned) > 0 && (
-                <Button
-                  size="sm"
-                  variant="subtle"
-                  className="w-full sm:w-auto"
-                  onClick={() =>
-                    openComp("deficit", Math.max(0, deficitOpen - deficitPlanned), `Déficit de ${formatDateShortBR(d.date)}`)
-                  }
-                >
-                  <Zap size={13} /> Programar hora extra
-                </Button>
-              )}
-              </div>
-            </div>
-          )}
-
-          {/* NOVO [10+] (Etapa 3E): bloco separado — o uso de [10+] nunca altera
+          {/* [10+] (3E/3E.2): bloco único de [10+] no card — o uso nunca altera
               trabalhado/saldo/batidas do card; botão, modal e projeção derivam dos
-              motores 3A/3C (specialExcess), sem regra paralela. Coexiste com os
-              atalhos legados de compensação, que seguem ativos. */}
+              motores 3A/3C (specialExcess), sem regra paralela. Linguagem do fluxo:
+              [10+] gerado / utilizado / disponível (sem dívida nem realocação). */}
           {specialExcess && (
             <div className="mt-3 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2.5">
               <SpecialExcessUseSummary
                 view={specialExcess}
                 onOpen={specialExcess.canComplete && onCompleteJornada ? () => onCompleteJornada(d.date) : undefined}
               />
-            </div>
-          )}
-
-          {/* Compensação programada para este dia */}
-          {pendingComp && (
-            <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2.5">
-              <CheckCircle2 size={16} className="text-indigo-500 shrink-0" />
-              {d.canFinalizeFinancialDay && !punchPending ? (
-                <>
-                  <p className="flex-1 text-xs font-medium text-indigo-700">
-                    Compensação programada para hoje: <b>−{formatMinutes(pendingComp.minutes)}</b>{" "}
-                    (de {formatDateShortBR(pendingComp.sourceDate)})
-                    {pendingComp.note ? ` · ${pendingComp.note}` : ""}
-                  </p>
-                  <Button variant="secondary" size="sm" onClick={() => finishComp(pendingComp.id)}>
-                    <CheckCircle2 size={13} /> Concluir compensação
-                  </Button>
-                </>
-              ) : (
-                <p className="flex-1 text-xs font-medium text-indigo-700">
-                  Compensação prevista: <b>{formatMinutes(pendingComp.minutes)}</b>
-                  {" · "}Corrija os registros deste dia para verificar e concluir a compensação.
-                </p>
-              )}
             </div>
           )}
 
@@ -1150,26 +639,21 @@ export function DayCard({
             )}
           </div>
 
-          {/* Registro manual — NUNCA em data futura, Abono, Sem registro ou histórico vazio (usa o modal atômico). */}
+          {/* Registro manual — NUNCA em data futura, Abono, Sem registro ou
+              histórico vazio (esses usam o modal de preenchimento atômico).
+              "Adicionar batida" abre o MESMO modal de sequência do dia
+              (CorrectPunchesModal) — batida única, com tipo inferido pela
+              sequência e observação opcional. Nenhum formulário inline. */}
           {!missingExpected && !historicalEmpty && (
           <div className="mt-3 flex min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
-            {!futureDay && !abonoDay && (showAdd ? (
-              <div className="flex w-full min-w-0 flex-wrap items-end gap-2 rounded-xl border border-dashed border-slate-300 bg-white p-3">
-                <Input label="Horário" type="time" className="w-32" value={form.time} onChange={(ev) => setForm({ ...form, time: ev.target.value, type: suggestedPunchTypeAt(d.entries, ev.target.value) })} />
-                <Input label="Observação (opcional)" className="min-w-[160px] flex-1" value={form.note} onChange={(ev) => setForm({ ...form, note: ev.target.value })} />
-                <Button size="sm" loading={busy} onClick={() => add()}>
-                  <Plus size={13} /> Adicionar
-                </Button>
-                <Button size="sm" variant="ghost" onClick={() => setShowAdd(false)}>Cancelar</Button>
-              </div>
-            ) : (
+            {!futureDay && !abonoDay && (
               <button
-                onClick={() => { setShowAdd(true); setForm((f) => ({ ...f, time: nowTimeString() })); }}
+                onClick={() => setCorrectOpen(true)}
                 className="inline-flex w-auto items-center justify-center gap-1.5 rounded-lg border border-dashed border-slate-300 px-2.5 py-1.5 text-xs font-bold text-slate-500 transition-colors hover:border-emerald-400 hover:text-emerald-600 cursor-pointer"
               >
                 <Plus size={14} /> Adicionar batida
               </button>
-            ))}
+            )}
             {!futureDay && !abonoDay && (showInterval ? (
               <div className="flex w-full min-w-0 flex-wrap items-end gap-2 rounded-xl border border-dashed border-slate-300 bg-white p-3">
                 <Input label="Saída para intervalo" type="time" className="w-36" value={intOut} onChange={(e) => setIntOut(e.target.value)} />
@@ -1204,8 +688,8 @@ export function DayCard({
           {!abonoDay && !punchPending && !missingExpected && !noFacts && (
             <p className="mt-3 text-[11px] text-slate-400">
               * "No ponto" é o total que pode ser lançado no sistema da empresa (limitado a{" "}
-              {formatMinutes(settings.maxDailyMinutes)}/dia). Horas acima de 10h precisam ser realocadas
-              antes do lançamento no sistema oficial.
+              {formatMinutes(settings.maxDailyMinutes)}/dia). O excedente acima do limite é
+              separado no banco [10+].
             </p>
           )}
         </div>
@@ -1245,18 +729,6 @@ export function DayCard({
           const id = pendingDelete?.id;
           setPendingDelete(null);
           if (id != null) void onDeleteEntry(id);
-        }}
-      />
-      <CompensationForm
-        open={compOpen}
-        onClose={() => setCompOpen(false)}
-        kind={compKind}
-        initial={compInitial}
-        getCapacity={getCapacity}
-        pendingDebtMinutes={compPlanning?.unplannedMinutes ?? compInitial?.minutes}
-        planning={compPlanning}
-        onSave={async (payload) => {
-          await onCreateComp({ ...payload, kind: compKind });
         }}
       />
       {correctOpen && (

@@ -2,7 +2,7 @@
  * VERIFICAÇÃO — UX REGISTROS (atalhos removidos + chips sem truncar + Seed 3.1)
  *
  *  A  Página Registros / DayCard NÃO renderiza atalhos de ponto
- *  B  Registro manual continua no card (mobile/desktop) e o fluxo é o mesmo
+ *  B  Registro manual continua no card e abre o MESMO modal de sequência (3E.2)
  *  C  Mobile: "Entrada"/"Saída" inteiros; sem truncate; 2 colunas; sem overflow-x
  *  D  Desktop: batidas em fluxo horizontal/wrap
  *  E  Seed 4.0: restore determinístico; sem calendário/motivos; 7 datas demo
@@ -47,12 +47,17 @@ check("A. Registros/DayCard não renderiza atalhos de ponto", () => {
   assert.ok(quickSrc.includes("Saída agora"), "Visão geral preserva Saída agora");
 });
 
-check("B. Registro manual continua no card e abre o mesmo fluxo", () => {
+check("B. Registro manual continua no card e abre o MESMO modal de sequência (3E.2)", () => {
   assert.ok(dayCardSrc.includes("Adicionar batida"), "rótulo de inclusão");
-  assert.ok(dayCardSrc.includes("setShowAdd(true)"));
-  assert.ok(dayCardSrc.includes("suggestedPunchTypeAt"), "posição cronológica define o tipo");
-  assert.ok(dayCardSrc.includes('source: "manual"'));
-  assert.ok(dayCardSrc.includes("!futureDay && !abonoDay && (showAdd ?"), "guarda do formulário intacta");
+  assert.ok(dayCardSrc.includes("setCorrectOpen(true)"), "botão abre o modal de sequência do dia");
+  assert.ok(dayCardSrc.includes("CorrectPunchesModal"), "reaproveita o modal moderno existente");
+  assert.ok(!dayCardSrc.includes("showAdd"), "formulário inline removido");
+  // as regras existentes (tipo inferido pela sequência, origem manual,
+  // observação opcional) vivem no modal reaproveitado:
+  const modalSrc = srcOf("src/components/correct-punches-modal.tsx");
+  assert.ok(modalSrc.includes("suggestedPunchTypeAt"), "posição cronológica define o tipo");
+  assert.ok(modalSrc.includes('source: "manual"'));
+  assert.ok(modalSrc.includes('label="Observação (opcional)"'), "observação opcional");
 });
 
 check("C. Mobile: Entrada/Saída inteiros, 2 colunas, sem overflow horizontal", () => {

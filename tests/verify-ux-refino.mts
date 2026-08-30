@@ -86,16 +86,16 @@ check("B. CTA 'Usar horas livres' some da UI; useRealizedCreditForDeficit perman
   assert.equal(getAppData().compensations[0].status, "concluida");
 });
 
-/* ── C. Ações de déficit na mesma linha (desktop) ────────── */
-check("C. desktop: Usar excedente disponível primeiro, mesma linha; mobile pode empilhar", () => {
+/* ── C. Ações de déficit no painel legado (3E.2: fora do card) ── */
+check("C. painel legado preserva as ações; card (3E.2) sem fluxo de compensação", () => {
   assert.ok(panelSrc.includes("Usar excedente disponível"));
-  assert.ok(dayCardSrc.includes("Usar excedente disponível"));
   const panelIdx = panelSrc.indexOf("Usar excedente disponível");
   const extraIdx = panelSrc.indexOf("Programar hora extra", panelIdx);
   assert.ok(panelIdx > 0 && extraIdx > panelIdx, "Usar excedente disponível vem antes de Programar hora extra no painel");
   assert.ok(panelSrc.includes("sm:flex-row"), "painel empilha no mobile / mesma linha no desktop");
-  assert.ok(dayCardSrc.includes("sm:flex-row"), "card do dia: mesma linha no desktop");
-  assert.ok(dayCardSrc.includes("Usar excedente disponível") && dayCardSrc.includes("sm:flex-row"));
+  // 3E.2: o card Registros não aciona mais ações legadas de compensação
+  assert.ok(!dayCardSrc.includes("Usar excedente disponível"));
+  assert.ok(!dayCardSrc.includes("onUseAvailableExcess"));
 });
 
 /* ── D. Previsão de horas a compensar ────────────────────── */
@@ -137,24 +137,23 @@ check("F. CompensationForm: Capacidade disponível + Máximo nesta operação; r
   assert.ok(!formSrc.includes("Já planejado neste dia"));
 });
 
-/* ── G. Nomenclatura do excedente ────────────────────────── */
-check("G. Realocar excedente; 35min a realocar; Excedente do limite diário a realocar", () => {
-  assert.ok(dayCardSrc.includes("Realocar excedente"));
+/* ── G. Nomenclatura (3E.2: [10+] no card; legado nos fluxos de 2º plano) ── */
+check("G. card usa [10+] gerado (3E.2); 'Realocar excedente' só nos fluxos legados", () => {
+  assert.ok(!dayCardSrc.includes("Realocar excedente"), "CTA legado fora do card (3E.2)");
   assert.ok(!dayCardSrc.includes("Alocar excedente"));
   assert.ok(panelSrc.includes("Realocar excedente"));
   assert.ok(!panelSrc.includes("Alocar excedente"));
   assert.ok(compsSrc.includes("Realocar excedente"));
   assert.ok(!compsSrc.includes("Alocar excedente"));
   assert.ok(allocSrc.includes("Realocar excedente"));
-  assert.ok(dayCardSrc.includes("{formatMinutes(excessRemaining)} a realocar"));
+  assert.ok(!dayCardSrc.includes("a realocar"), "nunca 'a realocar' no card (3E.2)");
   assert.ok(
     compsSrc.includes("Excedente do limite diário a realocar") ||
       compsSrc.includes("EXCEDENTE DO LIMITE DIÁRIO [10+]"),
   );
   assert.ok(!compsSrc.includes("Excedente >10h a realocar") && !compsSrc.includes("Excedente &gt;10h a realocar"));
-  assert.ok(dayCardSrc.includes("Horas acima de 10h precisam ser realocadas"));
-  assert.ok(dayCardSrc.includes("w-full sm:w-auto"), "botões de excedente full-width no mobile");
-  assert.ok(dayCardSrc.includes("sm:flex-row sm:flex-wrap sm:items-center"), "ações de déficit na mesma linha no desktop");
+  assert.ok(dayCardSrc.includes("separado no banco [10+]"), "rodapé factual (3E.2)");
+  assert.ok(dayCardSrc.includes("[10+] gerado"), "[10+] gerado no card (3E.2)");
   const guardas = dayCardSrc.split("!futureDay && !abonoDay && (").length - 1;
   assert.ok(guardas >= 1, "registro manual permanece atrás da guarda !abonoDay");
   assert.ok(dayCardSrc.includes("sm:flex sm:flex-wrap"), "batidas em fluxo horizontal no desktop");

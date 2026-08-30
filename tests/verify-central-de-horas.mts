@@ -41,7 +41,8 @@ check("2. clicar continua abrindo /compensacoes", () => {
     /\{\s*href:\s*"\/compensacoes",\s*label:\s*"Central de Horas",\s*icon:\s*ArrowLeftRight\s*\}/,
   );
   assert.ok(bank.includes('href="/compensacoes"'));
-  assert.ok(dayCard.includes("/compensacoes#excedentes-prioridade"));
+  // 3E.2: o CTA legado "Gerenciar excedente" saiu do card Registros
+  assert.ok(!dayCard.includes("/compensacoes#excedentes-prioridade"));
   assert.ok(!shell.includes("/central-de-horas"));
   assert.ok(!page.includes("/central-de-horas"));
   assert.ok(!bank.includes("/central-de-horas"));
@@ -90,8 +91,9 @@ check("6. termos funcionais de compensação continuam intactos", () => {
   assert.ok(page.includes("Compensar com hora extra"));
   assert.ok(visao.includes("Compensações pendentes"));
   assert.ok(resumo.includes("Compensações pendentes"));
-  assert.ok(dayCard.includes("Concluir compensação"));
-  assert.ok(dayCard.includes("Compensação programada para hoje"));
+  // 3E.2: o card Registros não mostra mais compensação programada (fluxo legado)
+  assert.ok(!dayCard.includes("Concluir compensação"));
+  assert.ok(!dayCard.includes("Compensação programada para hoje"));
   assert.ok(config.includes(">Compensações</p>"));
 });
 

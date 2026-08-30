@@ -206,8 +206,12 @@ export function SpecialExcessUseModal({ date, onClose }: Props) {
               {formatMinutes(view.factualBalanceMinutes)}
             </dd>
           </div>
+          {/* 1º uso: só "Falta para completar" (sem número duplicado).
+              Uso parcial: falta original + já utilizado + ainda pode completar. */}
           <div>
-            <dt className="text-slate-500">Falta para completar a jornada</dt>
+            <dt className="text-slate-500">
+              {view.usedActiveMinutes > 0 ? "Falta original" : "Falta para completar a jornada"}
+            </dt>
             <dd className="font-bold tabular-nums text-slate-900">{formatMinutes(view.neededMinutes)}</dd>
           </div>
           {view.usedActiveMinutes > 0 && (
@@ -216,10 +220,12 @@ export function SpecialExcessUseModal({ date, onClose }: Props) {
               <dd className="font-bold tabular-nums text-violet-700">{formatMinutes(view.usedActiveMinutes)}</dd>
             </div>
           )}
-          <div>
-            <dt className="text-slate-500">Ainda pode completar</dt>
-            <dd className="font-bold tabular-nums text-slate-900">{formatMinutes(view.remainingMinutes)}</dd>
-          </div>
+          {view.usedActiveMinutes > 0 && (
+            <div>
+              <dt className="text-slate-500">Ainda pode completar</dt>
+              <dd className="font-bold tabular-nums text-slate-900">{formatMinutes(view.remainingMinutes)}</dd>
+            </div>
+          )}
           <div className="col-span-2 sm:col-span-3">
             <dt className="text-slate-500">
               Banco <span className="font-semibold">[10+]</span> disponível
@@ -264,19 +270,26 @@ export function SpecialExcessUseModal({ date, onClose }: Props) {
         {mode === "auto" ? (
           <div className="space-y-3">
             <div>
-              <Input
-                label="Quanto deseja utilizar?"
-                type="number"
-                min={1}
-                max={maxUsable}
-                inputMode="numeric"
-                value={autoDraft}
-                onChange={(e) => {
-                  setAutoDraft(e.target.value);
-                  setError(null);
-                }}
-                hint={`Máximo agora: ${formatMinutes(maxUsable)}`}
-              />
+              {/* Unidade "min" explícita no campo (internamente continua minutos). */}
+              <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Quanto deseja utilizar?
+              </span>
+              <div className="relative">
+                <Input
+                  type="number"
+                  min={1}
+                  max={maxUsable}
+                  inputMode="numeric"
+                  value={autoDraft}
+                  onChange={(e) => {
+                    setAutoDraft(e.target.value);
+                    setError(null);
+                  }}
+                  aria-label="Minutos a utilizar"
+                />
+                <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-xs font-bold text-slate-400">min</span>
+              </div>
+              <span className="mt-1 block text-xs text-slate-400">Máximo agora: {formatMinutes(maxUsable)}</span>
               <div className="mt-2 flex flex-wrap gap-1.5">
                 {QUICK_OPTIONS.filter((m) => m <= maxUsable).map((m) => (
                   <button
@@ -358,24 +371,27 @@ export function SpecialExcessUseModal({ date, onClose }: Props) {
                         {" "}
                         · Disponível: <b className="text-violet-700">{formatMinutes(lot.availableMinutes)}</b>
                       </span>
-                      <Input
-                        label={undefined}
-                        type="number"
-                        min={0}
-                        max={lot.availableMinutes}
-                        step={5}
-                        inputMode="numeric"
-                        disabled={!checked}
-                        value={checked ? String(sel) : ""}
-                        onChange={(e) =>
-                          setManualSel((prev) => ({
-                            ...prev,
-                            [lot.originDate]: Math.max(0, Math.min(lot.availableMinutes, Math.floor(Number(e.target.value) || 0))),
-                          }))
-                        }
-                        className="w-24"
-                        aria-label={`Minutos da origem ${formatDateShortBR(lot.originDate)}`}
-                      />
+                      <div className="relative">
+                        <Input
+                          type="number"
+                          min={0}
+                          max={lot.availableMinutes}
+                          step={5}
+                          inputMode="numeric"
+                          disabled={!checked}
+                          value={checked ? String(sel) : ""}
+                          onChange={(e) =>
+                            setManualSel((prev) => ({
+                              ...prev,
+                              [lot.originDate]: Math.max(0, Math.min(lot.availableMinutes, Math.floor(Number(e.target.value) || 0))),
+                            }))
+                          }
+                          className="w-24"
+                          aria-label={`Minutos da origem ${formatDateShortBR(lot.originDate)}`}
+                        />
+                        {/* Unidade "min" explícita no campo manual (interno: minutos). */}
+                        <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-[10px] font-bold text-slate-400">min</span>
+                      </div>
                     </li>
                   );
                 })}
@@ -404,9 +420,19 @@ export function SpecialExcessUseModal({ date, onClose }: Props) {
                 <dd className="font-bold tabular-nums text-slate-900">{formatMinutes(view.workedMinutes)}</dd>
               </div>
               <div>
-                <dt className="text-slate-500">Uso [10+]</dt>
+                <dt className="text-slate-500">Novo uso [10+]</dt>
                 <dd className="font-bold tabular-nums text-violet-700">{formatMinutes(selectedTotal)}</dd>
               </div>
+              {/* 2º uso: diferencia o novo uso do total após confirmar (1º uso:
+                  total = novo, então a linha é omitida para não duplicar). */}
+              {view.usedActiveMinutes > 0 && (
+                <div>
+                  <dt className="text-slate-500">Total [10+] após confirmar</dt>
+                  <dd className="font-bold tabular-nums text-violet-700">
+                    {formatMinutes(view.usedActiveMinutes + selectedTotal)}
+                  </dd>
+                </div>
+              )}
               <div>
                 <dt className="text-slate-500">Projeção</dt>
                 <dd className="font-bold tabular-nums text-slate-900">{formatMinutes(projection.projectedWorkedMinutes)}</dd>

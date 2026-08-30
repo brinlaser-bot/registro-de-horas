@@ -297,11 +297,11 @@ check("K. libera as pendentes mais novas; concluídas fora da lista", () => {
   assert.equal(next.find((c) => c.id === 4)!.status, "pendente", "outro déficit intacto");
 });
 
-/* ── L. UI: botão no card / compensações / registros ─────── */
-check("L. Realocar excedente aparece em Registros, Compensações e painel; modal montado", () => {
-  assert.ok(dayCardSrc.includes("onAllocateExcess"));
-  assert.ok(dayCardSrc.includes("Realocar excedente"));
-  assert.ok(registrosSrc.includes("AllocateExcessModal"));
+/* ── L. UI: Compensações/painel preservam; Registros (3E.2) sem o botão ── */
+check("L. (3E.2) Realocar excedente segue em Compensações e painel; fora do card Registros", () => {
+  assert.ok(!dayCardSrc.includes("onAllocateExcess"), "card sem callback legado (3E.2)");
+  assert.ok(!dayCardSrc.includes("Realocar excedente"), "CTA legado fora do card (3E.2)");
+  assert.ok(!registrosSrc.includes("AllocateExcessModal"), "Registros não monta o modal legado (3E.2)");
   assert.ok(compensacoesSrc.includes("Realocar excedente"));
   assert.ok(compensacoesSrc.includes("AllocateExcessModal"));
   assert.ok(panelSrc.includes("setAllocateDate(d.date)"));

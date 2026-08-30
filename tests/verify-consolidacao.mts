@@ -251,17 +251,19 @@ check("K. preview do modal não exige plannedToRelease > 0", () => {
   assert.ok(allocSrc.includes("Sem programação depois:"));
 });
 
-/* ── L. Registros: status recolhido + fontes só concluídas ──── */
-check("L. day-card: −15 factual + ✓/Parcial/Em aberto; Como foi quitado ignora planejado", () => {
-  assert.ok(dayCardSrc.includes("✓ Déficit quitado"));
-  assert.ok(dayCardSrc.includes("Parcial · restam"));
-  assert.ok(dayCardSrc.includes("Em aberto ·"));
-  assert.ok(dayCardSrc.includes("Situação do déficit"));
-  assert.ok(dayCardSrc.includes("Como foi quitado"));
-  assert.ok(dayCardSrc.includes('c.status === "concluida"'), "fontes só das concluídas");
-  // Nomenclatura unificada: "Como foi quitado" usa quitacaoLine
-  // (hora extra regular / EXCEDENTE DO LIMITE DIÁRIO [10+]).
-  assert.ok(dayCardSrc.includes("quitacaoLine"));
+/* ── L. Registros (3E.2): o card NÃO exibe mais bloco de situação/quitação ──
+ * O bloco "Situação do déficit" / "Como foi quitado" foi retirado da
+ * experiência principal (spec §3/§4). A leitura do card agora é apenas
+ * trabalhado + saldo regular; o motor legado de quitação (debt.ts) continua
+ * coberto pelos checks de engine abaixo (M/N). */
+check("L. day-card (3E.2): sem 'Situação do déficit'/'Como foi quitado' — só saldo regular", () => {
+  assert.ok(!dayCardSrc.includes("Situação do déficit"));
+  assert.ok(!dayCardSrc.includes("Como foi quitado"));
+  assert.ok(!dayCardSrc.includes("✓ Déficit quitado"));
+  assert.ok(!dayCardSrc.includes("Parcial · restam"));
+  assert.ok(!dayCardSrc.includes("Em aberto ·"));
+  assert.ok(!dayCardSrc.includes("quitacaoLine"), "lista de quitação saiu do card");
+  assert.ok(dayCardSrc.includes("Saldo regular"), "card continua mostrando o saldo regular");
 });
 
 /* ── M. 21/08 seed: 15 quitados = 5 regular + 10 especial ───── */
@@ -324,10 +326,10 @@ check("O. specialExcessStatusOf: livre / programado / parcial / tratado", () => 
   assert.ok(compsSrc.includes("Excedente do limite diário realocado"));
 });
 
-/* ── P. Motivo sempre disponível; destino realizado vs programado ─ */
-check("P. Registrar/Alterar motivo mesmo tratado; destinos realizados ≠ programados", () => {
-  assert.ok(dayCardSrc.includes("{!creditView?.reason && onRegisterReason && ("));
-  assert.ok(dayCardSrc.includes("{creditView?.reason && onRegisterReason && ("));
+/* ── P. (3E.2) card sem motivo; página de compensações preserva ─ */
+check("P. (3E.2) card sem fluxo de motivo; compensações preserva realizado ≠ programado", () => {
+  assert.ok(!dayCardSrc.includes("onRegisterReason"), "card sem fluxo de motivo (3E.2)");
+  assert.ok(!dayCardSrc.includes("Registrar motivo"), "botão de motivo fora do card (3E.2)");
   assert.ok(compsSrc.includes("{!v.reason && ("));
   assert.ok(compsSrc.includes("{v.reason && ("));
   assert.ok(compsSrc.includes("Realizado:"));

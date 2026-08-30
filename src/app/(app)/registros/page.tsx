@@ -5,7 +5,6 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Ban, ChevronLeft, ChevronRight, Clock3, Search, X } from "lucide-react";
 import { actions, getAppData, settingsOf, useAppData, useIsClient, useIsStoreReady } from "@/lib/store";
 import {
-  computeDay,
   formatDateShortBR,
   formatMinutes,
   FUTURE_DATE_ERROR,
@@ -29,13 +28,12 @@ import {
   getPointPeriod,
   getPreviousPointPeriod,
   periodLabel,
-  sameAnnualCycle,
   type PointPeriod,
 } from "@/lib/periods";
-import { acordoViewOf, buildDebtDays, checkSourceOverflow, extraCapacityForDate } from "@/lib/debt";
-import { compensarObligationOnDate, isAbonadoDay } from "@/lib/compensar";
+import { buildDebtDays, checkSourceOverflow } from "@/lib/debt";
+import { isAbonadoDay } from "@/lib/compensar";
 import { dayBalanceContribution, effectiveFaltas, faltaOnDate, faltaStatusOf } from "@/lib/faltas";
-import { dayCreditView, excessReasonOnDate, hasEligibleSpecialExcessInCycle, shouldPromptExcessReason } from "@/lib/hour-bank";
+import { dayCreditView } from "@/lib/hour-bank";
 import { isHistoricalEmptyDate, isMissingExpectedRecord, registrosTimelineDates } from "@/lib/missing-records";
 import {
   dayMatchesSituations,
@@ -47,13 +45,11 @@ import {
 
 import { buildSpecialExcessBank, type SpecialExcessBankSummary } from "@/lib/special-excess-bank";
 import { buildSpecialExcessDayView } from "@/lib/special-excess-day-view";
-import type { CompKind, WorkSettings } from "@/lib/types";
+import type { WorkSettings } from "@/lib/types";
 import { DayCard } from "@/components/day-card";
 import { ManualEntryModal, type ManualPairData } from "@/components/manual-entry-modal";
 import { FaltaModal } from "@/components/falta-modal";
 import { FillDayRecordsModal } from "@/components/fill-day-records-modal";
-import { ExcessReasonModal } from "@/components/excess-reason-modal";
-import { AllocateExcessModal } from "@/components/allocate-excess-modal";
 import { SpecialExcessUseModal } from "@/components/special-excess-use-modal";
 import { DaySituationChips, DaySituationFilter } from "@/components/day-situation-filter";
 import { Button, Card, EmptyState, Skeleton } from "@/components/ui";
@@ -111,9 +107,6 @@ function RegistrosBody() {
   const [queryDraft, setQueryDraft] = useState({ from: "", to: "" });
   const [manualOpen, setManualOpen] = useState(false);
   const [faltaOpen, setFaltaOpen] = useState(false);
-  const [reasonDate, setReasonDate] = useState<string | null>(null);
-  const [allocateDate, setAllocateDate] = useState<string | null>(null);
-  const [allocateFromDeficit, setAllocateFromDeficit] = useState<{ date: string; kind?: CompKind } | null>(null);
   const [faltaInitialDate, setFaltaInitialDate] = useState<string | null>(null);
   const [fillDate, setFillDate] = useState<string | null>(null);
   const [completeDate, setCompleteDate] = useState<string | null>(null);
@@ -136,13 +129,6 @@ function RegistrosBody() {
   const nowMinutes = nowMinutesLocal();
 
   const range = query ?? period;
-  const cycleHasSpecial = useMemo(
-    () =>
-      hasEligibleSpecialExcessInCycle(
-        entries, compensations, absences, companyCalendars, settings, excessReasons, todayStr,
-      ),
-    [entries, compensations, absences, companyCalendars, settings, excessReasons, todayStr],
-  );
 
   // NOVO [10+] (Etapa 3E): banco 3C por ciclo presente no intervalo (uma vez
   // por ciclo, reutilizado por todos os dias do ciclo). Fonte de saldo/lotes.
@@ -359,32 +345,6 @@ function RegistrosBody() {
 
   /* ── Handlers (preservam comportamento validado) ── */
 
-  const snapshotDay = (date: string) => {
-    const snap = getAppData();
-    return computeDay(
-      snap.entries.filter((e) => e.date === date),
-      settingsOf(snap.user),
-    );
-  };
-
-  const promptExcessReasonIfNeeded = (date: string, before: { excessMinutes: number; open: boolean }) => {
-    const snap = getAppData();
-    const after = computeDay(
-      snap.entries.filter((e) => e.date === date),
-      settingsOf(snap.user),
-    );
-    if (
-      shouldPromptExcessReason({
-        beforeExcessMinutes: before.excessMinutes,
-        beforeOpen: before.open,
-        after,
-        hasReason: !!excessReasonOnDate(snap.excessReasons, date),
-      })
-    ) {
-      setReasonDate(date);
-    }
-  };
-
   const reconcileDay = (date: string) => {
     const snap = getAppData();
     const s = settingsOf(snap.user);
@@ -411,26 +371,22 @@ function RegistrosBody() {
       return;
     }
     if (!resolveFaltaConflict(p.date)) return;
-    const before = snapshotDay(p.date);
     const res = actions.addEntry(p);
     if (!res.ok) {
       toast.show(res.error ?? FUTURE_DATE_ERROR, "error");
       return;
     }
-    promptExcessReasonIfNeeded(p.date, before);
     reconcileDay(p.date);
   };
 
   const updateEntry = async (id: number, patch: { time?: string; type?: EntryType; note?: string | null; date?: string }) => {
     const target = entries.find((e) => e.id === id);
-    const before = target ? snapshotDay(target.date) : { excessMinutes: 0, open: false };
     const res = actions.updateEntry(id, patch);
     if (!res.ok) {
       toast.show(res.error ?? "Não foi possível editar o registro.", "error");
       return;
     }
     if (target) {
-      promptExcessReasonIfNeeded(target.date, before);
       reconcileDay(target.date);
     }
   };
@@ -455,46 +411,6 @@ function RegistrosBody() {
     }
     toast.show("Compensação concluída!");
   };
-
-  /** Atalhos de compensação por dia (déficit comum / acordo), via funções centrais. */
-  const shortcutsByDate = useMemo(() => {
-    // Idem: a mesma resolução central do card/resumo. Em folga com trabalho
-    // (Trabalho em folga) o ajustedDeficit central é 0 → nenhum banner
-    // "Déficit pendente" / botão "Quitar com hora extra" é exibido.
-    const debts = buildDebtDays(entries, compensations, settings, range, absences, companyCalendars, effectiveFaltaList, todayStr);
-    const map = new Map<
-      string,
-      {
-        deficitRemaining: number;
-        acordoMinutes: number;
-        acordoCompensated: number;
-        acordoPlanned: number;
-        acordoRemaining: number;
-        canCompensate: boolean;
-      }
-    >();
-    for (const dd of debts) {
-      const cur = map.get(dd.date) ?? {
-        deficitRemaining: 0,
-        acordoMinutes: 0,
-        acordoCompensated: 0,
-        acordoPlanned: 0,
-        acordoRemaining: 0,
-        canCompensate: sameAnnualCycle(dd.date, todayStr),
-      };
-      if (dd.kind === "deficit") cur.deficitRemaining = dd.remainingMinutes;
-      if (dd.kind === "acordo") {
-        // Valores vindos da função central acordoViewOf (sem recalcular aqui)
-        const acordo = acordoViewOf(dd);
-        cur.acordoMinutes = acordo.originalMinutes;
-        cur.acordoCompensated = acordo.compensatedMinutes;
-        cur.acordoPlanned = acordo.plannedMinutes;
-        cur.acordoRemaining = acordo.remainingMinutes;
-      }
-      map.set(dd.date, cur);
-    }
-    return map;
-  }, [entries, compensations, absences, companyCalendars, effectiveFaltaList, settings, range, todayStr]);
 
   /** Registrar falta (modal) — validação central no store. */
   const registerFalta = async (date: string) => {
@@ -536,16 +452,6 @@ function RegistrosBody() {
     return true;
   };
 
-  const createComp = async (payload: { sourceDate: string; targetDate: string; minutes: number; note: string; kind?: CompKind }) => {
-    const res = actions.addComp({ ...payload, note: payload.note || null, kind: payload.kind ?? "excedente" });
-    if (!res.ok) throw new Error(res.error); // modal exibe a mensagem e permanece aberto
-  };
-
-  const capComp = async (date: string, kind: CompKind, maxMinutes: number) => {
-    actions.capCompensationsForSource(date, kind, maxMinutes);
-    toast.show("Compensação ajustada para manter consistência.");
-  };
-
   const addManualPair = async (data: ManualPairData) => {
     // §4/§7: data futura → bloquear ANTES de tratar qualquer conflito com falta
     if (isFutureDate(data.date)) {
@@ -553,7 +459,6 @@ function RegistrosBody() {
       return;
     }
     if (!resolveFaltaConflict(data.date)) return;
-    const before = snapshotDay(data.date);
     const r1 = actions.addEntry({ date: data.date, time: data.entrada, type: "entrada", note: data.note || null, source: "manual" });
     if (!r1.ok) {
       toast.show(r1.error ?? FUTURE_DATE_ERROR, "error");
@@ -564,7 +469,6 @@ function RegistrosBody() {
       toast.show(r2.error ?? FUTURE_DATE_ERROR, "error");
       return;
     }
-    promptExcessReasonIfNeeded(data.date, before);
     reconcileDay(data.date);
     toast.show("Lançamento manual registrado!");
   };
@@ -793,7 +697,6 @@ function RegistrosBody() {
               key={date}
               result={displayDay}
               settings={settings}
-              compsForDate={compensations.filter((c) => c.targetDate === date)}
               allComps={compensations}
               nowMinutes={nowMinutes}
               isToday={date === todayStr}
@@ -814,38 +717,11 @@ function RegistrosBody() {
               onFillDayRecords={missingExpected || historicalEmpty ? () => setFillDate(date) : undefined}
               effectiveExpected={balanceView.effectiveExpected}
               balanceView={balanceView}
-              shortcuts={shortcutsByDate.get(date)}
-              getCapacity={(targetDate) =>
-                extraCapacityForDate(targetDate, entries, compensations, settings, { companyCalendars })
-              }
               onAddEntry={addEntry}
               onUpdateEntry={updateEntry}
               onDeleteEntry={deleteEntry}
               onCompleteComp={completeComp}
-              onCreateComp={createComp}
-              onCapComp={capComp}
               onRemoveFalta={removeFalta}
-              creditView={dayCreditView(date, entries, compensations, absences, companyCalendars, settings, excessReasons)}
-              onRegisterReason={(d) => setReasonDate(d)}
-              onAllocateExcess={(d) => setAllocateDate(d)}
-              onUseAvailableExcess={(d, kind) => setAllocateFromDeficit({ date: d, kind })}
-              hasAvailableSpecialExcess={cycleHasSpecial}
-              compensarHint={(() => {
-                const obl = compensarObligationOnDate(
-                  date, entries, compensations, absences, companyCalendars, settings, todayStr,
-                );
-                return obl
-                  ? {
-                      label: obl.originLabel,
-                      originalMinutes: obl.originalMinutes,
-                      effectiveObligationMinutes: obl.effectiveObligationMinutes,
-                      completedMinutes: obl.completedMinutes,
-                      plannedMinutes: obl.plannedMinutes,
-                      openMinutes: obl.openMinutes,
-                      compKind: obl.compKind,
-                    }
-                  : null;
-              })()}
               abonadoHint={(() => {
                 const a = isAbonadoDay(date, absences, companyCalendars);
                 return a.abonado ? { label: a.label ?? "Dia abonado" } : null;
@@ -887,56 +763,9 @@ function RegistrosBody() {
             setFillDate(null);
             toast.show("Registros do dia salvos!");
             if (d) {
-              promptExcessReasonIfNeeded(d, { excessMinutes: 0, open: false });
               reconcileDay(d);
             }
           }}
-        />
-      )}
-      {reasonDate &&
-        (() => {
-          const reasonDay = computeDay(
-            entries.filter((e) => e.date === reasonDate),
-            settings,
-          );
-          return (
-            <ExcessReasonModal
-              open
-              onClose={() => setReasonDate(null)}
-              date={reasonDate}
-              workedMinutes={reasonDay.workedMinutes}
-              excessMinutes={reasonDay.excessMinutes}
-              existing={excessReasonOnDate(excessReasons, reasonDate)}
-            />
-          );
-        })()}
-      {allocateDate && (
-        <AllocateExcessModal
-          open
-          onClose={() => setAllocateDate(null)}
-          excessDate={allocateDate}
-          entries={entries}
-          compensations={compensations}
-          absences={absences}
-          companyCalendars={companyCalendars}
-          faltas={faltas}
-          excessReasons={excessReasons}
-          settings={settings}
-        />
-      )}
-      {allocateFromDeficit && (
-        <AllocateExcessModal
-          open
-          onClose={() => setAllocateFromDeficit(null)}
-          deficitDate={allocateFromDeficit.date}
-          deficitKind={allocateFromDeficit.kind}
-          entries={entries}
-          compensations={compensations}
-          absences={absences}
-          companyCalendars={companyCalendars}
-          faltas={faltas}
-          excessReasons={excessReasons}
-          settings={settings}
         />
       )}
       <FaltaModal

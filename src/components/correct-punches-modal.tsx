@@ -127,6 +127,7 @@ export function CorrectPunchesModal({ open, onClose, date, entries }: Props) {
           <p className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400">Adicionar batida</p>
           <div className="mt-2 flex flex-wrap items-end gap-2">
             <Input label="Horário" type="time" className="w-32" value={time} onChange={(e) => setTime(e.target.value)} />
+            <Input label="Observação (opcional)" className="min-w-[160px] flex-1" value={note} onChange={(e) => setNote(e.target.value)} />
             <Button size="sm" loading={busy} onClick={addOne}>
               <Plus size={13} /> {suggested ? `Adicionar ${suggested === "entrada" ? "entrada" : "saída"}` : "Adicionar"}
             </Button>

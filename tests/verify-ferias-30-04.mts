@@ -236,17 +236,13 @@ check("P.11. acordo parcial a compensar 13–17 em 11/08 sem batidas: acordo 4h 
   assert.equal(onDay.find((d) => d.kind === "acordo")?.debtMinutes, 240);
   assert.equal(onDay.find((d) => d.kind === "deficit")?.debtMinutes, 240);
   assert.equal(onDay.reduce((s, d) => s + d.debtMinutes, 0), 480, "4+4 — nunca 8h única");
-  // E: correção VISUAL — o atalho de déficit do day-card não é mais suprimido
-  // pela presença do acordo (a guarda acordoMinutes === 0 foi removida).
+  // 3E.2: os atalhos legados de dívida (acordo/déficit + "Programar hora extra")
+  // saíram completamente do card — o que o visual guarda agora é apenas a
+  // apresentação factual (trabalhado/saldo); a separação engine 4+4 (nunca
+  // 8h única) segue assercionada acima.
   const src = readFileSync(new URL("../src/components/day-card.tsx", import.meta.url), "utf8");
-  assert.ok(
-    src.includes("!futureDay && shortcuts?.canCompensate && deficitOpen > 0"),
-    "atalho de déficit renderiza mesmo com acordo no dia (factual em aberto)",
-  );
-  assert.ok(
-    !src.includes("canCompensate && shortcuts.acordoMinutes === 0"),
-    "a guarda que escondia o déficit quando há acordo foi removida",
-  );
+  assert.ok(!src.includes("Programar hora extra"), "sem atalhos de dívida no card (3E.2)");
+  assert.ok(!src.includes("shortcuts?.canCompensate"), "sem guardas legadas de acordo no card (3E.2)");
 });
 
 console.log(`\n✅ ${passed} verificações passaram: P.1 P.2 P.3 P.4 P.5 P.6 P.7 P.8 P.9 P.10 P.11`);
