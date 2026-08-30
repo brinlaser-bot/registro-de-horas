@@ -9,8 +9,10 @@
 //
 // A jornada factual não é reescrita por compensação posterior: um dia
 // 7h30/base8 continua −30min mesmo quando o déficit é depois coberto.
-// "Déficit aberto" (quitação/consumo) é da Etapa 2B — esta base NÃO
-// enxerga compensações, banco de horas, parcelas nem [10+] operacional.
+//
+// Etapa 2B (neste arquivo): cobertura NATURAL do déficit pelo banco
+// regular (derivação — sem store, sem settlement, [10+] fora), com
+// fechamento anual (30/04) absoluto entre ciclos.
 //
 // NÃO recria elegibilidade: cada dia passa por buildResumoDayRow (a
 // MESMA fonte do Resumo) e a apuração consome balanceContribution
@@ -20,7 +22,7 @@
 // histórico anterior a controlStartDate, folga sem trabalho) e o [10+]
 // nunca chega ao saldo regular (teto do ponto oficial — Etapa 1).
 // ─────────────────────────────────────────────────────────────
-import { listDaysBetween } from "./periods";
+import { getAnnualPointCycle, listDaysBetween } from "./periods";
 import { buildResumoDayRow, type ResumoDayRow } from "./resumo-days";
 import type { Absence } from "./absences";
 import type { CompanyCalendars } from "./company-calendar";
@@ -95,4 +97,103 @@ export function summarizeRegularFacts(input: RegularFactsRangeInput): RegularFac
     generatedDeficitMinutes,
     netBalanceMinutes: generatedCreditMinutes - generatedDeficitMinutes,
   };
+}
+
+/* ── Etapa 2B: cobertura NATURAL do déficit pelo banco regular ───
+ * Créditos e débitos regulares pertencem ao MESMO banco regular, então
+ * a cobertura é consequência matemática do saldo factual — derivação,
+ * nunca um settlement/parcela/transferência gravada no store.
+ *
+ * Fechamento anual (30/04) é ABSOLUTO: créditos de um ciclo não cobrem
+ * déficit de outro. Intervalos que cruzam o fechamento são segmentados
+ * por ciclo anual (getAnnualPointCycle/annualCycleBounds — helper
+ * existente) e a cobertura é calculada CICLO A CICLO antes de agregar.
+ *
+ * Fora do escopo (Etapa 2C): [10+] e settlements/alocações.
+ */
+
+/** Cobertura regular factual de um escopo (derivação — sem estado). */
+export interface RegularCoverage {
+  /** Crédito regular factual gerado (min). */
+  generatedCreditMinutes: number;
+  /** Déficit factual gerado — histórico, nunca reescrito (min). */
+  generatedDeficitMinutes: number;
+  /** Déficit naturalmente coberto pelo banco regular (min). */
+  coveredByRegularMinutes: number;
+  /** Déficit sem cobertura regular (min). */
+  uncoveredByRegularMinutes: number;
+  /** Saldo regular factual líquido (min) = crédito − déficit. */
+  netBalanceMinutes: number;
+}
+
+/** Cobertura apurada em UM segmento de ciclo anual. */
+export interface CycleRegularCoverage extends RegularCoverage {
+  /** Ciclo anual do segmento, ex.: "2025/2026". */
+  cycle: string;
+}
+
+/**
+ * Segmente um intervalo em blocos contíguos de UM ciclo anual.
+ * Reutiliza getAnnualPointCycle (fonte do fechamento em 30/04).
+ */
+function cycleSegments(range: { from: string; to: string }): Array<{ cycle: string; from: string; to: string }> {
+  const segments: Array<{ cycle: string; from: string; to: string }> = [];
+  for (const date of listDaysBetween(range.from, range.to)) {
+    const cycle = getAnnualPointCycle(date);
+    const last = segments[segments.length - 1];
+    if (last && last.cycle === cycle) last.to = date;
+    else segments.push({ cycle, from: date, to: date });
+  }
+  return segments;
+}
+
+/**
+ * Cobertura regular CICLO A CICLO dentro do escopo. Para cada segmento
+ * de ciclo anual: apura os fatos (summarizeRegularFacts — mesma fonte
+ * do Resumo) e calcula covered = min(crédito, déficit) /
+ * uncovered = max(déficit − crédito, 0). Nenhum crédito cruza ciclo.
+ */
+export function regularCoverageByCycle(input: RegularFactsRangeInput): CycleRegularCoverage[] {
+  return cycleSegments({ from: input.from, to: input.to }).map((seg) => {
+    const facts = summarizeRegularFacts({ ...input, from: seg.from, to: seg.to });
+    return {
+      cycle: seg.cycle,
+      ...facts,
+      coveredByRegularMinutes: Math.min(
+        facts.generatedCreditMinutes,
+        facts.generatedDeficitMinutes,
+      ),
+      uncoveredByRegularMinutes: Math.max(
+        facts.generatedDeficitMinutes - facts.generatedCreditMinutes,
+        0,
+      ),
+    };
+  });
+}
+
+/**
+ * COBERTURA REGULAR AGREGADA do escopo: soma das coberturas por ciclo
+ * (o fechamento anual é aplicado ANTES da agregação).
+ *
+ * Invariantes: covered ≤ déficit; covered ≤ crédito;
+ * uncovered = déficit − covered; num único ciclo, crédito ≥ déficit ⇒
+ * uncovered = 0.
+ */
+export function summarizeRegularCoverage(input: RegularFactsRangeInput): RegularCoverage {
+  return regularCoverageByCycle(input).reduce(
+    (acc, c) => ({
+      generatedCreditMinutes: acc.generatedCreditMinutes + c.generatedCreditMinutes,
+      generatedDeficitMinutes: acc.generatedDeficitMinutes + c.generatedDeficitMinutes,
+      coveredByRegularMinutes: acc.coveredByRegularMinutes + c.coveredByRegularMinutes,
+      uncoveredByRegularMinutes: acc.uncoveredByRegularMinutes + c.uncoveredByRegularMinutes,
+      netBalanceMinutes: acc.netBalanceMinutes + c.netBalanceMinutes,
+    }),
+    {
+      generatedCreditMinutes: 0,
+      generatedDeficitMinutes: 0,
+      coveredByRegularMinutes: 0,
+      uncoveredByRegularMinutes: 0,
+      netBalanceMinutes: 0,
+    },
+  );
 }
