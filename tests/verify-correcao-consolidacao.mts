@@ -94,8 +94,9 @@ check("A. 07/09 08:00–10:00 em 25/08: sem déficit, crédito, totais nem saldo
     { from: "2026-08-21", to: "2026-09-20" }, seed.absences, seed.companyCalendars, seed.faltas, TODAY,
   );
   assert.equal(seedDebts.find((d) => d.date === "2026-09-07"), undefined);
-  assert.ok(resumoSrc.includes("Jornada não iniciada"));
-  assert.ok(resumoSrc.includes("Registro futuro"));
+  const resumoDays = srcOf("src/lib/resumo-days.ts");
+  assert.ok(resumoDays.includes("Jornada não iniciada"));
+  assert.ok(resumoDays.includes("Registro futuro"));
   assert.ok(pageSrc.includes("date <= todayStr && day.entries.length > 0"));
 });
 

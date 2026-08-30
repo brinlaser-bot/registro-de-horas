@@ -16,6 +16,8 @@ export type ResumoTableStatus =
   | "ferias"
   | "afastamento"
   | "in-progress"
+  | "inconsistent"
+  | "incomplete"
   | "excess"
   | "deficit"
   | "ok";
@@ -60,6 +62,8 @@ export function resumoTableStatus(p: {
   if (missingExpected) return "empty";
   if (faltaStatus === "efetiva") return "falta";
   if (absence) return absence.kind === "ferias" ? "ferias" : "afastamento";
+  if (day.entries.length > 0 && !day.consistent) return "inconsistent";
+  if (date < today && day.financialPending && day.entries.length > 0) return "incomplete";
   if (day.open) return "in-progress";
   if (day.excessMinutes > 0) return "excess";
   if (isAbaixoDaBase({ date, today, view, missingExpected })) return "deficit";
@@ -124,13 +128,26 @@ export function isQuietResumoDay(d: ResumoDayRow): boolean {
 
 /** Rótulo da coluna Evento — mesma ordem da tabela do Resumo. */
 export function resumoEventKind(d: ResumoDayRow): string {
+  if (d.status === "inconsistent") return "Registro inconsistente";
+  if (d.status === "incomplete") return "Registro incompleto";
   if (d.eventLabel) return d.eventLabel;
-  if (d.status === "excess") return "Acima do limite";
-  if (d.status === "deficit") return "Abaixo da base";
+  if (d.status === "excess") return "Acima do limite [10+]";
+  if (d.status === "deficit") return "Jornada abaixo do previsto";
   if (d.status === "idle") return "Jornada não iniciada";
   if (d.status === "future") return "Registro futuro";
   if (d.status === "in-progress") return "Em andamento";
   if (d.status === "ok") return "Ok";
   if (d.missingExpected) return "Sem registro";
   return "—";
+}
+
+/** Financeiro do dia não é definitivo — apresentar "—", nunca 0min artificial. */
+export function resumoFinancialFrozen(d: ResumoDayRow): boolean {
+  return (
+    d.status === "inconsistent" ||
+    d.status === "incomplete" ||
+    d.status === "idle" ||
+    d.status === "future" ||
+    d.status === "empty"
+  );
 }

@@ -107,17 +107,17 @@ check("6. hoje incompleto não vira Abaixo da base prematuramente", () => {
   const weekdayToday = "2026-08-28";
   const idle = row(weekdayToday, { today: weekdayToday, start: "2026-08-01" });
   assert.equal(resumoEventKind(idle), "Jornada não iniciada");
-  assert.notEqual(resumoEventKind(idle), "Abaixo da base");
+  assert.notEqual(resumoEventKind(idle), "Jornada abaixo do previsto");
   const open = row(weekdayToday, {
     today: weekdayToday,
     start: "2026-08-01",
     entries: [punch(1, weekdayToday, "08:00", "entrada")],
   });
-  assert.notEqual(resumoEventKind(open), "Abaixo da base");
+  assert.notEqual(resumoEventKind(open), "Jornada abaixo do previsto");
   assert.equal(open.status, "in-progress");
 });
 
-check("7. registro completo 7h30/base 8h => Abaixo da base", () => {
+check("7. registro completo 7h30/base 8h => Jornada abaixo do previsto", () => {
   const date = "2026-08-21";
   const entries = [
     punch(1, date, "08:00", "entrada"), punch(2, date, "12:00", "saida"),
@@ -126,7 +126,7 @@ check("7. registro completo 7h30/base 8h => Abaixo da base", () => {
   const d = row(date, { entries, start: "2026-08-01" });
   assert.equal(d.workedMinutes, 450);
   assert.equal(d.expectedMinutes, 480);
-  assert.equal(resumoEventKind(d), "Abaixo da base");
+  assert.equal(resumoEventKind(d), "Jornada abaixo do previsto");
   assert.equal(d.status, "deficit");
   assert.ok(situationsOfDay(date, TODAY, entries, [], undefined, S).includes("abaixo-base"));
 });
@@ -142,7 +142,7 @@ check("9. períodos históricos antes do início não ficam cheios de Abaixo da 
   const days = listDaysBetween(HIST.from, HIST.to)
     .map((date) => row(date))
     .filter(isQuietResumoDay);
-  const abaixo = days.filter((d) => resumoEventKind(d) === "Abaixo da base");
+  const abaixo = days.filter((d) => resumoEventKind(d) === "Jornada abaixo do previsto");
   assert.equal(abaixo.length, 0);
   const weekdays = days.filter((d) => !d.eventLabel);
   assert.ok(weekdays.length > 0);

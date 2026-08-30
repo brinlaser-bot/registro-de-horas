@@ -214,7 +214,6 @@ check("19. Resumo do período possui Ver mais detalhes do período", () => {
 
 check("20. detalhes expandidos mostram os indicadores", () => {
   const r = srcOf("src/app/(app)/resumo/page.tsx");
-  assert.ok(r.includes("Horas trabalhadas"));
   assert.ok(r.includes("Acordo a compensar"));
   assert.ok(r.includes("Registros pendentes"));
   assert.ok(r.includes("O saldo pode sofrer alteração após a correção dos registros pendentes."));
@@ -285,15 +284,17 @@ check("27. Ver mais detalhes do período expande", () => {
   assert.ok(r.includes("{detailsOpen && ("));
 });
 
-check("28. painel expandido contém os 15 indicadores", () => {
+check("28. painel expandido contém as 3 colunas temáticas", () => {
   const r = srcOf("src/app/(app)/resumo/page.tsx");
   for (const label of [
-    "Dias trabalhados", "Horas trabalhadas", "No ponto", "Saldo", "Excedentes",
-    "Déficit", "Horas compensadas", "Compensações pendentes", "Férias", "Saúde",
-    "Dispensados", "Faltas", "Faltas previstas", "Acordo a compensar", "Registros pendentes",
+    "Jornada e saldo", "Compensações", "Ausências e abonos",
+    "No ponto", "Déficit do período", "Horas compensadas", "Compensações pendentes",
+    "Férias", "Saúde", "Dispensados", "Faltas", "Faltas previstas", "Acordo a compensar",
   ]) {
     assert.ok(r.includes(`label="${label}"`) || r.includes(`"${label}"`), label);
   }
+  assert.ok(!r.includes('label="Dias trabalhados"'));
+  assert.ok(!r.includes('label="Horas trabalhadas"'));
 });
 
 check("29. clicar novamente recolhe", () => {

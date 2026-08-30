@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { BarChart3, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Download } from "lucide-react";
 import { settingsOf, useAppData, useIsClient } from "@/lib/store";
@@ -18,7 +18,13 @@ import {
 import { pendingPunchDates } from "@/lib/pending-punches";
 import { buildDebtDays } from "@/lib/debt";
 import { specialExcessBook } from "@/lib/hour-bank";
-import { buildResumoDayRow, isQuietResumoDay } from "@/lib/resumo-days";
+import {
+  buildResumoDayRow,
+  isQuietResumoDay,
+  resumoEventKind,
+  resumoFinancialFrozen,
+  type ResumoDayRow,
+} from "@/lib/resumo-days";
 import { Badge, Button, Card, EmptyState, Skeleton, StatCard } from "@/components/ui";
 import { StackedPeriodChart } from "@/components/stacked-period-chart";
 
@@ -230,10 +236,17 @@ export default function ResumoPage() {
           tone={totals.balanceTotal > 0 ? "emerald" : totals.balanceTotal < 0 ? "rose" : "slate"}
         />
         <StatCard
-          label="Excedente do período"
-          value={formatMinutes(totals.excessTotal)}
-          sub={`limite de ${formatMinutes(settings.maxDailyMinutes)}/dia`}
-          tone={totals.excessTotal > 0 ? "amber" : "slate"}
+          label="Excedente do período [10+]"
+          value={formatMinutes(periodExcessBook.original)}
+          sub={
+            <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+              <span>Realocado {formatMinutes(periodExcessBook.realized)}</span>
+              <span className="text-slate-300">·</span>
+              <span>A realocar {formatMinutes(Math.max(0, periodExcessBook.original - periodExcessBook.realized))}</span>
+            </span>
+          }
+          tone={periodExcessBook.original > 0 ? "violet" : "slate"}
+          icon={<BarChart3 size={16} />}
         />
       </div>
 
@@ -248,41 +261,26 @@ export default function ResumoPage() {
           {detailsOpen ? <ChevronUp size={18} className="shrink-0 text-slate-500" /> : <ChevronDown size={18} className="shrink-0 text-slate-500" />}
         </button>
         {detailsOpen && (
-          <div className="mt-3 grid grid-cols-2 gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600 sm:grid-cols-3 lg:grid-cols-5">
-            <Detail label="Dias trabalhados" value={String(detailStats.workedDays)} />
-            <Detail label="Horas trabalhadas" value={formatMinutes(detailStats.workedMinutes)} />
-            <Detail label="No ponto" value={formatMinutes(detailStats.registrableMinutes)} />
-            <Detail
-              label="Saldo"
-              value={`${detailStats.balanceMinutes >= 0 ? "+" : ""}${formatMinutes(detailStats.balanceMinutes)}`}
-              tone={detailStats.balanceMinutes >= 0 ? "text-emerald-600" : "text-rose-600"}
-            />
-            <Detail label="Excedentes" value={formatMinutes(detailStats.excessMinutes)} />
-            <Detail label="Déficit" value={formatMinutes(detailStats.deficitMinutes)} />
-            <Detail label="Horas compensadas" value={formatMinutes(detailStats.compensatedMinutes)} />
-            <Detail label="Compensações pendentes" value={formatMinutes(detailStats.pendingCompMinutes)} />
-            <Detail label="Férias" value={String(detailStats.vacationDays)} />
-            <Detail label="Saúde" value={String(detailStats.healthDays)} />
-            <Detail label="Dispensados" value={String(detailStats.waivedDays)} />
-            <Detail label="Faltas" value={String(detailStats.faltaDays)} />
-            <Detail label="Faltas previstas" value={String(detailStats.faltaPrevistaDays)} />
-            <Detail
-              label="Acordo a compensar"
-              value={`${formatMinutes(detailStats.acordoTotal)} (feito ${formatMinutes(detailStats.acordoDone)} · falta ${formatMinutes(detailStats.acordoPending)})`}
-            />
-            <Detail label="Registros pendentes" value={String(detailStats.pendingPunches)} tone="text-amber-700" />
-            <Detail label="Dias sem registro" value={String(detailStats.missingRecords)} tone="text-amber-700" />
-            <div className="col-span-2 sm:col-span-3 lg:col-span-5 mt-1 border-t border-slate-200 pt-2">
-              <p className="mb-1.5 text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
-                Gestão de excedentes do período
-              </p>
-              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                <Detail label="Excedente do período" value={formatMinutes(periodExcessBook.original)} />
-                <Detail label="Já realocado do excedente gerado no período" value={formatMinutes(periodExcessBook.realized)} />
-                <Detail label="Ainda a realocar do excedente gerado no período" value={formatMinutes(periodExcessBook.free)} />
-                <Detail label="Déficit do período" value={formatMinutes(detailStats.deficitMinutes)} />
-              </div>
-            </div>
+          <div className="mt-3 grid gap-4 rounded-2xl border border-slate-200 bg-white px-4 py-4 text-sm text-slate-600 sm:grid-cols-3">
+            <DetailColumn title="Jornada e saldo">
+              <DetailRow label="No ponto" value={formatMinutes(detailStats.registrableMinutes)} />
+              <DetailRow label="Déficit do período" value={formatMinutes(detailStats.deficitMinutes)} />
+            </DetailColumn>
+            <DetailColumn title="Compensações">
+              <DetailRow label="Horas compensadas" value={formatMinutes(detailStats.compensatedMinutes)} />
+              <DetailRow label="Compensações pendentes" value={formatMinutes(detailStats.pendingCompMinutes)} />
+              <DetailRow
+                label="Acordo a compensar"
+                value={`${formatMinutes(detailStats.acordoTotal)} (feito ${formatMinutes(detailStats.acordoDone)} · falta ${formatMinutes(detailStats.acordoPending)})`}
+              />
+            </DetailColumn>
+            <DetailColumn title="Ausências e abonos">
+              <DetailRow label="Férias" value={String(detailStats.vacationDays)} />
+              <DetailRow label="Saúde" value={String(detailStats.healthDays)} />
+              <DetailRow label="Dispensados" value={String(detailStats.waivedDays)} />
+              <DetailRow label="Faltas" value={String(detailStats.faltaDays)} />
+              <DetailRow label="Faltas previstas" value={String(detailStats.faltaPrevistaDays)} />
+            </DetailColumn>
           </div>
         )}
       </div>
@@ -332,49 +330,31 @@ export default function ResumoPage() {
                       </span>
                     </td>
                     <td className="py-2.5 pr-3">
-                      {d.eventLabel ? (
-                        <Badge tone={d.eventLabel === "Falta" ? "rose" : "sky"}>{d.eventLabel}</Badge>
-                      ) : d.status === "excess" ? (
-                        <Badge tone="rose">Acima do limite</Badge>
-                      ) : d.status === "deficit" ? (
-                        <Badge tone="amber">Abaixo da base</Badge>
-                      ) : d.status === "idle" ? (
-                        <Badge tone="slate">Jornada não iniciada</Badge>
-                      ) : d.status === "future" ? (
-                        <Badge tone="slate">Registro futuro</Badge>
-                      ) : d.status === "in-progress" ? (
-                        <Badge tone="indigo">Em andamento</Badge>
-                      ) : d.status === "ok" ? (
-                        <Badge tone="emerald">Ok</Badge>
-                      ) : d.missingExpected ? (
-                        <Badge tone="amber">Sem registro</Badge>
-                      ) : (
-                        <span className="text-xs text-slate-300">—</span>
-                      )}
+                      <ResumoEventBadge day={d} />
                     </td>
                     <td className="py-2.5 pr-3 text-right font-bold tabular-nums text-slate-900">
-                      {d.workedMinutes > 0 ? formatMinutes(d.workedMinutes) : "—"}
+                      {resumoFinancialFrozen(d) || d.workedMinutes <= 0 ? "—" : formatMinutes(d.workedMinutes)}
                     </td>
                     <td className="py-2.5 pr-3 text-right tabular-nums text-slate-400">
                       {formatMinutes(d.expectedMinutes)}
                     </td>
                     <td
                       className={`py-2.5 pr-3 text-right font-bold tabular-nums ${
-                        d.balanceMinutes > 0
-                          ? "text-emerald-600"
-                          : d.balanceMinutes < 0
-                            ? "text-rose-600"
-                            : "text-slate-400"
+                        resumoFinancialFrozen(d)
+                          ? "text-slate-400"
+                          : d.balanceMinutes > 0
+                            ? "text-emerald-600"
+                            : d.balanceMinutes < 0
+                              ? "text-rose-600"
+                              : "text-slate-400"
                       }`}
                     >
-                      {d.faltaStatus === "prevista" || d.status === "idle" || d.status === "future" || d.status === "empty"
+                      {resumoFinancialFrozen(d) || d.faltaStatus === "prevista" || !(d.entryCount > 0 || d.eventLabel)
                         ? "—"
-                        : d.entryCount > 0 || d.eventLabel
-                          ? `${d.balanceMinutes >= 0 ? "+" : ""}${formatMinutes(d.balanceMinutes)}`
-                          : "—"}
+                        : `${d.balanceMinutes >= 0 ? "+" : ""}${formatMinutes(d.balanceMinutes)}`}
                     </td>
                     <td className="py-2.5 pr-3 text-right font-semibold tabular-nums text-indigo-600">
-                      {d.entryCount > 0 ? formatMinutes(d.registrableMinutes) : "—"}
+                      {resumoFinancialFrozen(d) || d.entryCount <= 0 ? "—" : formatMinutes(d.registrableMinutes)}
                     </td>
                   </tr>
                 ))}
@@ -409,11 +389,42 @@ export default function ResumoPage() {
   );
 }
 
-function Detail({ label, value, tone }: { label: string; value: string; tone?: string }) {
+function ResumoEventBadge({ day }: { day: ResumoDayRow }) {
+  const kind = resumoEventKind(day);
+  if (kind === "—") return <span className="text-xs text-slate-300">—</span>;
+  const tone =
+    kind === "Sem registro" || kind === "Registro inconsistente" || kind === "Registro incompleto"
+      ? "amber"
+      : kind === "Jornada abaixo do previsto"
+        ? "rose"
+        : kind === "Acima do limite [10+]"
+          ? "violet"
+          : kind === "Folga"
+            ? "sky"
+            : kind === "Ok"
+              ? "emerald"
+              : kind === "Em andamento"
+                ? "indigo"
+                : kind === "Falta"
+                  ? "rose"
+                  : "sky";
+  return <Badge tone={tone}>{kind}</Badge>;
+}
+
+function DetailColumn({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <div className="rounded-lg bg-slate-50 px-2.5 py-1.5 ring-1 ring-inset ring-slate-200">
-      <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">{label}</p>
-      <p className={`font-extrabold tabular-nums ${tone ?? "text-slate-800"}`}>{value}</p>
+    <section>
+      <h3 className="mb-2 text-[10px] font-extrabold uppercase tracking-wider text-slate-400">{title}</h3>
+      <dl className="space-y-1.5">{children}</dl>
+    </section>
+  );
+}
+
+function DetailRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-baseline justify-between gap-3">
+      <dt className="text-xs text-slate-500">{label}</dt>
+      <dd className="text-sm font-extrabold tabular-nums text-slate-800">{value}</dd>
     </div>
   );
 }

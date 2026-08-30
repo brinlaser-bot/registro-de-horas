@@ -114,7 +114,7 @@ export function Select({ label, hint, className = "", id, children, ...rest }: S
 
 /* ── Badge ──────────────────────────────────────────────── */
 
-type BadgeTone = "emerald" | "rose" | "amber" | "slate" | "indigo" | "sky";
+type BadgeTone = "emerald" | "rose" | "amber" | "slate" | "indigo" | "sky" | "violet";
 
 const badgeTones: Record<BadgeTone, string> = {
   emerald: "bg-emerald-50 text-emerald-700 ring-emerald-600/20",
@@ -123,6 +123,7 @@ const badgeTones: Record<BadgeTone, string> = {
   slate: "bg-slate-100 text-slate-600 ring-slate-500/20",
   indigo: "bg-indigo-50 text-indigo-700 ring-indigo-600/20",
   sky: "bg-sky-50 text-sky-700 ring-sky-600/20",
+  violet: "bg-violet-50 text-violet-700 ring-violet-600/20",
 };
 
 export function Badge({ tone = "slate", children, className = "" }: { tone?: BadgeTone; children: ReactNode; className?: string }) {
@@ -319,7 +320,7 @@ export function StatCard({
   label: string;
   value: ReactNode;
   sub?: ReactNode;
-  tone?: "emerald" | "rose" | "amber" | "slate" | "indigo";
+  tone?: "emerald" | "rose" | "amber" | "slate" | "indigo" | "violet";
   icon?: ReactNode;
   onClick?: () => void;
   /** Menor padding vertical e gap interno — ícone e número permanecem iguais. */
@@ -330,6 +331,7 @@ export function StatCard({
     rose: "text-rose-600",
     amber: "text-amber-600",
     indigo: "text-indigo-600",
+    violet: "text-violet-700",
     slate: "text-slate-900",
   };
   const iconTones: Record<string, string> = {
@@ -337,6 +339,7 @@ export function StatCard({
     rose: "bg-rose-50 text-rose-600 ring-rose-600/10",
     amber: "bg-amber-50 text-amber-600 ring-amber-600/10",
     indigo: "bg-indigo-50 text-indigo-600 ring-indigo-600/10",
+    violet: "bg-violet-50 text-violet-700 ring-violet-600/10",
     slate: "bg-slate-100 text-slate-600 ring-slate-500/10",
   };
   return (

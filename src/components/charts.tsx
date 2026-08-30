@@ -343,15 +343,24 @@ export function StackedBarsChart({
                       : "Sem registro realizado"}
                   </span>
                 ) : (
-                  <span className="mt-0.5 block text-slate-300">
-                    Trabalhado: {formatMinutes(d.workedMinutes)}
-                  </span>
-                )}
-                {d.regularBalance !== undefined && d.tooltipTone !== "idle" && d.tooltipTone !== "future" && (
-                  <span className="block text-slate-300">
-                    Saldo regular: {d.regularBalance >= 0 ? "+" : ""}
-                    {formatMinutes(d.regularBalance)}
-                  </span>
+                  <>
+                    <span className="mt-0.5 block text-slate-300">
+                      Trabalhado: {formatMinutes(d.workedMinutes)}
+                    </span>
+                    <span className="block text-slate-300">
+                      No ponto: {formatMinutes(Math.min(d.workedMinutes, cap))}
+                    </span>
+                    {d.extra > 0 && (
+                      <span className="block text-amber-200">
+                        Extra regular: +{formatMinutes(d.extra)}
+                      </span>
+                    )}
+                    {d.excess > 0 && (
+                      <span className="block text-violet-200">
+                        Excedente [10+]: {formatMinutes(d.excess)}
+                      </span>
+                    )}
+                  </>
                 )}
                 {(d.compensatedConcluded ?? 0) > 0 && (
                   <span className="block text-slate-300">

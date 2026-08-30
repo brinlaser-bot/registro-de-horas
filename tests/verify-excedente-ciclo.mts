@@ -240,11 +240,11 @@ check("23. novo ciclo começa zerado em relação ao ciclo anterior", () => {
   assert.equal(b.days.length, 0);
 });
 
-check("24. Gestão de excedentes do período aparece em Ver mais detalhes", () => {
+check("24. Excedente [10+] do período aparece no card principal", () => {
   const r = srcOf("src/app/(app)/resumo/page.tsx");
-  assert.ok(r.includes("Gestão de excedentes do período"));
-  assert.ok(r.includes("Já realocado do excedente gerado no período"));
-  assert.ok(r.includes("Ainda a realocar do excedente gerado no período"));
+  assert.ok(r.includes("Excedente do período [10+]"));
+  assert.ok(r.includes("Realocado {formatMinutes(periodExcessBook.realized)}"));
+  assert.ok(r.includes("A realocar {formatMinutes(Math.max(0, periodExcessBook.original - periodExcessBook.realized))}"));
   assert.ok(r.includes("{detailsOpen && ("));
 });
 
@@ -266,9 +266,9 @@ check("26. Já realocado refere-se ao excedente originado no período", () => {
   assert.equal(d24!.realized, 25);
 });
 
-check("27. Ainda a realocar refere-se ao excedente originado no período", () => {
+check("27. A realocar refere-se ao excedente originado no período ainda não realizado", () => {
   const r = srcOf("src/app/(app)/resumo/page.tsx");
-  assert.ok(r.includes("periodExcessBook.free"));
+  assert.ok(r.includes("periodExcessBook.original - periodExcessBook.realized"));
   const periodBook = book(PERIOD);
   assert.equal(periodBook.free, pending(PERIOD).reduce((s, d) => s + d.free, 0));
 });

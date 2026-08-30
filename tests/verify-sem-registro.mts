@@ -211,10 +211,11 @@ check("21. resolver último item limpa ?semRegistro=1", () => {
   assert.ok(reg.includes('router.replace("/registros")'));
 });
 
-check("22. Ver mais detalhes do período contém Dias sem registro", () => {
+check("22. alerta de Dias sem registro permanece no Resumo", () => {
   const r = srcOf("src/app/(app)/resumo/page.tsx");
-  assert.ok(r.includes('label="Dias sem registro"'));
+  assert.ok(r.includes("Dias sem registro: {detailStats.missingRecords}"));
   assert.ok(r.includes("detailStats.missingRecords"));
+  assert.ok(!r.includes('label="Dias sem registro"'));
 });
 
 check("23. /resumo possui CTA Ver dias sem registro quando count > 0", () => {
