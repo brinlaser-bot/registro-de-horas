@@ -1,0 +1,98 @@
+// ─────────────────────────────────────────────────────────────
+// BASE FACTUAL DO SALDO REGULAR (Etapa 2A) — fonte central.
+//
+// Apura, dentro de um escopo de datas, SOMENTE fatos realmente
+// realizados:
+//   1. crédito regular factual positivo gerado;
+//   2. déficit factual gerado;
+//   3. saldo regular factual líquido (= crédito − déficit).
+//
+// A jornada factual não é reescrita por compensação posterior: um dia
+// 7h30/base8 continua −30min mesmo quando o déficit é depois coberto.
+// "Déficit aberto" (quitação/consumo) é da Etapa 2B — esta base NÃO
+// enxerga compensações, banco de horas, parcelas nem [10+] operacional.
+//
+// NÃO recria elegibilidade: cada dia passa por buildResumoDayRow (a
+// MESMA fonte do Resumo) e a apuração consome balanceContribution
+// (dayBalanceContribution) — o mesmo valor que o Resumo soma como
+// "Saldo do período". Todo o masking de dia sem fato realizado já vive
+// lá (Sem registro, incompleto, inconsistente, futuro, falta prevista,
+// histórico anterior a controlStartDate, folga sem trabalho) e o [10+]
+// nunca chega ao saldo regular (teto do ponto oficial — Etapa 1).
+// ─────────────────────────────────────────────────────────────
+import { listDaysBetween } from "./periods";
+import { buildResumoDayRow, type ResumoDayRow } from "./resumo-days";
+import type { Absence } from "./absences";
+import type { CompanyCalendars } from "./company-calendar";
+import type { Falta, TimeEntry, WorkSettings } from "./types";
+
+/** Fatos regulares apurados em um escopo de datas (somente realizado). */
+export interface RegularFacts {
+  /** Crédito regular factual positivo gerado (min). */
+  generatedCreditMinutes: number;
+  /** Déficit factual gerado (min) — sempre >= 0. */
+  generatedDeficitMinutes: number;
+  /** Saldo regular factual líquido (min) = crédito − déficit. */
+  netBalanceMinutes: number;
+}
+
+/** Escopo + contexto dos dias — mesmos insumos do Resumo. */
+export interface RegularFactsRangeInput {
+  from: string; // YYYY-MM-DD (inclusivo)
+  to: string; // YYYY-MM-DD (inclusivo)
+  /** Corte temporal (hoje). Injetável — testes usam data fixa. */
+  today: string;
+  entries: TimeEntry[];
+  absences: Absence[];
+  calendars: CompanyCalendars | undefined;
+  settings: WorkSettings;
+  faltas: Falta[];
+  controlStartDate?: string | null;
+}
+
+/**
+ * Saldo regular factual de UM dia — MESMA fonte do Resumo: a
+ * contribuição da linha (balanceContribution), que já aplica todo o
+ * masking de dias sem fato realizado. Dia sem fato contribui 0 —
+ * nunca "0h trabalhado − base".
+ */
+export function dayRegularFactBalance(row: ResumoDayRow): number {
+  return row.balanceContribution;
+}
+
+/**
+ * APURAÇÃO FACTUAL do escopo: decompõe os saldos regulares diários
+ * (fonte do Resumo) em crédito positivo gerado e déficit gerado.
+ *
+ * Invariante: netBalanceMinutes = generatedCreditMinutes −
+ * generatedDeficitMinutes.
+ *
+ * Fora do escopo de propósito: [10+] (livre/programado/realocado),
+ * settlements/alocações e compensação (consumo, quitação, parcelas,
+ * prioridade de banco).
+ */
+export function summarizeRegularFacts(input: RegularFactsRangeInput): RegularFacts {
+  let generatedCreditMinutes = 0;
+  let generatedDeficitMinutes = 0;
+  for (const date of listDaysBetween(input.from, input.to)) {
+    const balance = dayRegularFactBalance(
+      buildResumoDayRow({
+        date,
+        today: input.today,
+        entries: input.entries,
+        absences: input.absences,
+        calendars: input.calendars,
+        settings: input.settings,
+        faltas: input.faltas,
+        controlStartDate: input.controlStartDate,
+      }),
+    );
+    if (balance > 0) generatedCreditMinutes += balance;
+    else if (balance < 0) generatedDeficitMinutes += -balance;
+  }
+  return {
+    generatedCreditMinutes,
+    generatedDeficitMinutes,
+    netBalanceMinutes: generatedCreditMinutes - generatedDeficitMinutes,
+  };
+}
