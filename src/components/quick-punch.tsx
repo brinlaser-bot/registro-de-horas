@@ -272,7 +272,7 @@ export function QuickPunch({
           </Button>
         </div>
         {correctOpen && (
-          <CorrectPunchesModal open onClose={() => setCorrectOpen(false)} date={todayStr} entries={today.entries} />
+          <CorrectPunchesModal open mode="correct" onClose={() => setCorrectOpen(false)} date={todayStr} entries={today.entries} />
         )}
       </div>
     );
@@ -445,7 +445,7 @@ export function QuickPunch({
 
       {/* §8 Modal de edição — tipo FIXO (no título); edita Horário + Observação. */}
       {correctOpen && (
-        <CorrectPunchesModal open onClose={() => setCorrectOpen(false)} date={todayStr} entries={today.entries} />
+        <CorrectPunchesModal open mode="correct" onClose={() => setCorrectOpen(false)} date={todayStr} entries={today.entries} />
       )}
       <Modal
         open={editing !== null}

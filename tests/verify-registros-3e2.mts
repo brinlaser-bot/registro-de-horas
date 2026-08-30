@@ -30,6 +30,21 @@
  *   X  o modal resolve o incompleto: a MESMA chamada do modal completa o 27/08
  *   Y  o gate não introduz action/fluxo legado novo
  *
+ *   C1  dia inválido: conteúdo expandido = card de correção (gate invalidStructure)
+ *   C2  batidas permanecem intactas nos dados (card de correção é só visual)
+ *   C3  modal modo 'correct': título/subtexto de correção preservados
+ *   C4  modal modo 'add': título 'Adicionar batida' + subtexto curto
+ *   C5  banner verde genérico só no modo 'correct'; feedback específico preservado
+ *   C6  batidas existentes visíveis nos dois modos (sem versão reduzida)
+ *   C7  inferência intacta: 08E/12S/13E + 17:00 → 'saida' (motor)
+ *   C8  fluxo completo incompleto → correção → card volta ao normal automaticamente
+ *   C9  dia deficit válido (26/08): card normal — déficit ≠ registro inválido
+ *   C10 'Adicionar batida' → MESMO modal em modo 'add' (1 instância no card)
+ *   C11 inferência intacta: dia válido (26/08) + 17:00 → 'entrada' (motor)
+ *   C12 nenhuma action duplicada no modal (addEntry/addEntries/deleteEntry = 1x)
+ *   C13 sem estado persistido de 'modo correção' (gate derivado, 1 state novo)
+ *   C14 cabeçalho/badge 'Pendente' do dia inválido preservado
+ *
  * Executar: npx tsx tests/verify-registros-3e2.mts
  */
 import assert from "node:assert/strict";
@@ -44,6 +59,7 @@ import { projectRealizedDayOfficial } from "../src/lib/official-projection.ts";
 import { buildSeedData } from "../src/lib/seed-data.ts";
 import { actions, getAppData, settingsOf } from "../src/lib/store.ts";
 import { computeDay } from "../src/lib/time.ts";
+import type { TimeEntryLike } from "../src/lib/time.ts";
 import { isIncompletePastPunch } from "../src/lib/compensar.ts";
 import { suggestedPunchTypeAt } from "../src/lib/punches.ts";
 
@@ -108,9 +124,9 @@ check("G. sem formulário inline de adição no card (showAdd removido)", () => 
 
 check("H. 'Adicionar batida' abre o MESMO modal existente (CorrectPunchesModal)", () => {
   assert.ok(dayCard.includes("Adicionar batida"));
-  // botões existentes "Corrigir registros" (2) + novo "Adicionar batida" (1)
-  const opens = (dayCard.match(/setCorrectOpen\(true\)/g) ?? []).length;
-  assert.ok(opens >= 3, `esperava >= 3 setCorrectOpen(true), veio ${opens}`);
+  // CTAs de correção nos banners (2, modo "correct") + botão "Adicionar batida" (1, modo "add")
+  const opens = (dayCard.match(/setPunchModal\("(correct|add)"\)/g) ?? []).length;
+  assert.ok(opens >= 3, `esperava >= 3 setPunchModal(...), veio ${opens}`);
   assert.ok(dayCard.includes("<CorrectPunchesModal"));
 });
 
@@ -385,10 +401,10 @@ check("V. dia incompleto/inconsistente: única ação operacional = 'Corrigir re
   const inconsistentAt = dayCard.indexOf("{inconsistent && (");
   const incompleteBanner = dayCard.slice(dayCard.indexOf("{incompletePast && ("), inconsistentAt);
   assert.ok(incompleteBanner.includes("Corrigir registros"), "banner incompleto → Corrigir registros");
-  assert.ok(incompleteBanner.includes("setCorrectOpen(true)"), "banner incompleto abre o modal existente");
+  assert.ok(incompleteBanner.includes('setPunchModal("correct")'), "banner incompleto abre o modal (modo correct)");
   const inconsistentBanner = dayCard.slice(inconsistentAt, dayCard.indexOf("{specialExcess && ("));
   assert.ok(inconsistentBanner.includes("Corrigir registros"), "banner inconsistente → Corrigir registros");
-  assert.ok(inconsistentBanner.includes("setCorrectOpen(true)"), "banner inconsistente abre o modal existente");
+  assert.ok(inconsistentBanner.includes('setPunchModal("correct")'), "banner inconsistente abre o modal (modo correct)");
 });
 
 check("W. dia deficit válido (26/08) e dia ok (25/08): gate não afeta (sem regressão)", () => {
@@ -442,4 +458,172 @@ check("Y. gate não introduz action/fluxo legado novo", () => {
   assert.ok(!dayCard.includes('from "@/lib/debt"'), "import legado debt");
 });
 
-console.log(`\n${passed}/27 verificações 3E.2 passaram.`);
+/* ────────────────────────────────────────────────────────────────────────
+ * C1–C14. CORREÇÃO FINAL DE UX: card de correção + modal com dois contextos
+ * ──────────────────────────────────────────────────────────────────────── */
+
+const quickSrcFinal = src("src/components/quick-punch.tsx");
+
+check("C1. dia inválido: conteúdo expandido = card de correção (gate invalidStructure)", () => {
+  assert.ok(dayCard.includes("const invalidStructure = incompletePast || inconsistent;"), "gate estrutural no day-card");
+  const tern = dayCard.indexOf("{invalidStructure ? (");
+  const elseAt = dayCard.indexOf(") : (", tern);
+  assert.ok(tern > -1 && elseAt > tern, "ternário correção/normal na seção expandida");
+  const corr = dayCard.slice(tern, elseAt);
+  const normal = dayCard.slice(elseAt);
+  // branch de correção: somente banners + CTA
+  assert.ok(corr.includes("Registro incompleto") && corr.includes("Registro inconsistente"), "banners na branch de correção");
+  assert.equal((corr.match(/Corrigir registros/g) ?? []).length, 2, "um CTA por banner");
+  for (const hidden of ["Trabalhado", "d.segments.map", "No ponto", "Adicionar batida", "Registrar intervalo", "separado no banco [10+]", "<SmartExit"]) {
+    assert.ok(!corr.includes(hidden), `branch de correção NÃO contém: ${hidden}`);
+  }
+  // branch normal: layout completo preservado
+  for (const keep of ["Trabalhado", "d.segments.map", "No ponto", "Adicionar batida", "Registrar intervalo", "<SmartExit"]) {
+    assert.ok(normal.includes(keep), `branch normal PRESERVA: ${keep}`);
+  }
+});
+
+check("C2. batidas permanecem intactas nos dados (card de correção é só visual)", () => {
+  actions.replaceAll({
+    user: seed.user,
+    entries: seed.entries,
+    compensations: seed.compensations,
+    absences: seed.absences,
+    companyCalendars: seed.companyCalendars,
+    faltas: seed.faltas,
+    excessReasons: seed.excessReasons,
+    specialExcessUses: seed.specialExcessUses,
+  });
+  const e27 = getAppData().entries.filter((e) => e.date === "2026-08-27");
+  assert.deepEqual(
+    e27.map((e) => [e.time, e.type]),
+    [["08:00", "entrada"], ["12:00", "saida"], ["13:00", "entrada"]],
+    "as 3 batidas originais do 27/08 seguem nos dados"
+  );
+  const tern = dayCard.indexOf("{invalidStructure ? (");
+  const corr = dayCard.slice(tern, dayCard.indexOf(") : (", tern));
+  assert.ok(!/actions\./.test(corr), "branch de correção não chama nenhuma action do store");
+});
+
+check("C3. modal modo 'correct': título e subtexto de correção preservados", () => {
+  assert.ok(correctModal.includes('title={mode === "correct" ? "Corrigir registros" : "Adicionar batida"}'), "título condicional por mode");
+  assert.ok(correctModal.includes("Edite, adicione ou exclua batidas para corrigir o registro deste dia."), "subtexto de correção preservado");
+});
+
+check("C4. modal modo 'add': título 'Adicionar batida' + subtexto curto sem linguagem de correção", () => {
+  assert.ok(correctModal.includes("Adicione uma nova batida a este dia."), "subtexto curto de adição");
+  const at = correctModal.indexOf("Adicione uma nova batida a este dia.");
+  const ctx = correctModal.slice(at, at + 120);
+  assert.ok(!/corrigir/i.test(ctx), "subtexto 'add' sem linguagem de 'corrigir'");
+});
+
+check("C5. banner verde genérico só no modo 'correct'; feedback específico preservado", () => {
+  const green = correctModal.indexOf("Sequência válida. O saldo deste dia será recalculado.");
+  assert.ok(green > -1, "banner verde preservado");
+  const guard = correctModal.indexOf('{mode === "correct" &&');
+  assert.ok(guard > -1, "guard do modo 'correct' presente");
+  const end = correctModal.indexOf(") : null)}", green);
+  assert.ok(end > green, "bloco de banners fechado");
+  const region = correctModal.slice(guard, end);
+  assert.ok(region.includes("Sequência válida"), "banner verde dentro do guard do modo correct");
+  assert.ok(!region.includes("analysis.sorted"), "listagem de batidas fora do bloco de banners");
+  assert.ok(correctModal.includes("Para manter a sequência correta"), "hint específico de inferência preservado nos dois modos");
+});
+
+check("C6. batidas existentes visíveis nos DOIS modos (sem versão reduzida)", () => {
+  assert.ok(correctModal.includes("analysis.sorted.map"), "listagem de batidas existente");
+  assert.ok(correctModal.includes('aria-label="Excluir"'), "exclusão preservada");
+  assert.ok(correctModal.includes("Registrar intervalo"), "intervalo preservado");
+  assert.ok(correctModal.includes('label="Observação (opcional)"'), "observação preservada");
+  assert.ok(correctModal.includes('label="Horário"'), "horário preservado");
+  // 'mode' só atua em 3 pontos: título, subtexto e guard do banner
+  const modeCount = (correctModal.match(/mode === /g) ?? []).length;
+  assert.equal(modeCount, 3, `esperava 3 usos de 'mode' (título/subtexto/banner), veio ${modeCount}`);
+});
+
+check("C7. inferência intacta: 08E/12S/13E + 17:00 → 'saida' (motor)", () => {
+  const e27: TimeEntryLike[] = [
+    { id: 1, date: "2026-08-27", time: "08:00", type: "entrada", note: null },
+    { id: 2, date: "2026-08-27", time: "12:00", type: "saida", note: null },
+    { id: 3, date: "2026-08-27", time: "13:00", type: "entrada", note: null },
+  ];
+  assert.equal(suggestedPunchTypeAt(e27, "17:00"), "saida", "dia incompleto infere SAÍDA");
+  assert.equal(suggestedPunchTypeAt([], "08:00"), "entrada", "primeira batida do dia infere ENTRADA");
+});
+
+check("C8. fluxo completo: correção completa o 27/08 e o card volta ao normal automaticamente", () => {
+  actions.replaceAll({
+    user: seed.user,
+    entries: seed.entries,
+    compensations: seed.compensations,
+    absences: seed.absences,
+    companyCalendars: seed.companyCalendars,
+    faltas: seed.faltas,
+    excessReasons: seed.excessReasons,
+    specialExcessUses: seed.specialExcessUses,
+  });
+  const e27 = getAppData().entries.filter((e) => e.date === "2026-08-27");
+  const type = suggestedPunchTypeAt(e27, "17:00");
+  assert.equal(type, "saida");
+  const res = actions.addEntry({ date: "2026-08-27", time: "17:00", type, note: null, source: "manual" });
+  assert.ok(res.ok, `adição falhou: ${res.error}`);
+  const day = computeDay(getAppData().entries.filter((e) => e.date === "2026-08-27"), settings);
+  assert.equal(day.consistent, true);
+  assert.equal(day.open, false);
+  assert.equal(day.workedMinutes, 480, "8h após a correção");
+  // gate liberado: invalidStructure === false → layout normal volta, sem estado persistido
+  const invalidStructure = isIncompletePastPunch("2026-08-27", day.open, ASOF) || (!day.consistent && day.workedMinutes > 0);
+  assert.equal(invalidStructure, false, "card volta automaticamente ao layout normal");
+});
+
+check("C9. dia deficit válido (26/08): card normal — déficit abaixo da base ≠ registro inválido", () => {
+  const e26 = getAppData().entries.filter((e) => e.date === "2026-08-26");
+  assert.equal(e26.length, 4, "batidas do 26/08 intactas");
+  const day = computeDay(e26, settings);
+  assert.equal(day.consistent, true, "26/08 consistente");
+  assert.equal(day.open, false, "26/08 encerrado");
+  const invalidStructure = isIncompletePastPunch("2026-08-26", day.open, ASOF) || (!day.consistent && e26.length > 0);
+  assert.equal(invalidStructure, false, "déficit abaixo da base NÃO é erro estrutural");
+});
+
+check("C10. 'Adicionar batida' (dia válido) → MESMO modal em modo 'add'; 1 instância; quick-punch ok", () => {
+  assert.ok(dayCard.includes('onClick={() => setPunchModal("add")}'), "botão de adição abre com intenção 'add'");
+  assert.equal((dayCard.match(/<CorrectPunchesModal/g) ?? []).length, 1, "UM único modal no day-card");
+  assert.ok(dayCard.includes("mode={punchModal}"), "mesma instância recebe o mode do caller");
+  assert.equal((quickSrcFinal.match(/<CorrectPunchesModal/g) ?? []).length, 2, "ponto rápido reaproveita o mesmo modal");
+  assert.ok(quickSrcFinal.includes('mode="correct"'), "ponto rápido mantém modo 'correct' (botão de correção)");
+});
+
+check("C11. inferência intacta: dia válido (26/08) + 17:00 → 'entrada' (motor)", () => {
+  const e26 = getAppData().entries.filter((e) => e.date === "2026-08-26");
+  assert.equal(suggestedPunchTypeAt(e26, "17:00"), "entrada", "dia encerrado + 17:00 infere ENTRADA");
+  assert.ok(correctModal.includes('Adicionar ${suggested === "entrada" ? "entrada" : "saída"}'), "rótulo do botão segue a inferência");
+});
+
+check("C12. nenhuma action duplicada no modal; sem motor financeiro novo na UI de batidas", () => {
+  assert.equal((correctModal.match(/actions\.addEntry\(/g) ?? []).length, 1, "addEntry única");
+  assert.equal((correctModal.match(/actions\.addEntries\(/g) ?? []).length, 1, "addEntries (intervalo) única");
+  assert.equal((correctModal.match(/actions\.deleteEntry\(/g) ?? []).length, 1, "deleteEntry única");
+  for (const f of [dayCard, correctModal]) {
+    assert.ok(!f.includes('from "@/lib/official-projection"'), "sem import de projeção na UI de batidas");
+    assert.ok(!f.includes('from "@/lib/special-excess-bank"'), "sem import de banco na UI de batidas");
+    assert.ok(!f.includes('from "@/lib/hour-bank"') && !f.includes('from "@/lib/debt"'), "sem motor legado novo");
+  }
+});
+
+check("C13. sem estado persistido de 'modo correção': gate derivado, 1 único state novo", () => {
+  assert.ok(dayCard.includes('useState<"correct" | "add" | null>(null)'), "state de intenção do modal");
+  assert.ok(!dayCard.includes("correctOpen"), "state antigo removido");
+  assert.ok(!dayCard.includes("correctMode") && !dayCard.includes("correctionMode"), "sem state extra de modo");
+  assert.ok(dayCard.includes("const invalidStructure = incompletePast || inconsistent;"), "gate derivado dos dados (recomputado por render)");
+});
+
+check("C14. cabeçalho do dia inválido preservado (badge/status 'Pendente')", () => {
+  const headEnd = dayCard.indexOf("{expanded && (");
+  assert.ok(headEnd > -1);
+  const head = dayCard.slice(0, headEnd);
+  assert.ok(head.includes("Pendente"), "badge 'Pendente' vive no header (fora do gate)");
+  assert.ok(head.includes("Registro incompleto") || head.includes("incompleto"), "estado do dia visível no header");
+});
+
+console.log(`\n${passed}/41 verificações 3E.2 passaram.`);

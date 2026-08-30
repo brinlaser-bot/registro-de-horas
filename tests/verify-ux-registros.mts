@@ -49,7 +49,7 @@ check("A. Registros/DayCard não renderiza atalhos de ponto", () => {
 
 check("B. Registro manual continua no card e abre o MESMO modal de sequência (3E.2)", () => {
   assert.ok(dayCardSrc.includes("Adicionar batida"), "rótulo de inclusão");
-  assert.ok(dayCardSrc.includes("setCorrectOpen(true)"), "botão abre o modal de sequência do dia");
+  assert.ok(dayCardSrc.includes('setPunchModal("add")'), "botão abre o modal de sequência do dia (modo add)");
   assert.ok(dayCardSrc.includes("CorrectPunchesModal"), "reaproveita o modal moderno existente");
   assert.ok(!dayCardSrc.includes("showAdd"), "formulário inline removido");
   // as regras existentes (tipo inferido pela sequência, origem manual,

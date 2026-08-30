@@ -183,7 +183,10 @@ export function DayCard({
   const [busy, setBusy] = useState(false);
   const [busyFalta, setBusyFalta] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<TimeEntryLike | null>(null);
-  const [correctOpen, setCorrectOpen] = useState(false);
+  // O modal de batidas abre com intenção explícita do caller: "correct"
+  // (banners de dia incompleto/inconsistente) ou "add" (botão "Adicionar
+  // batida" de dia estruturalmente válido). Mesmo modal, mesma lógica.
+  const [punchModal, setPunchModal] = useState<"correct" | "add" | null>(null);
   const [showInterval, setShowInterval] = useState(false);
   const [intOut, setIntOut] = useState("");
   const [intIn, setIntIn] = useState("");
@@ -200,6 +203,10 @@ export function DayCard({
   const incompletePast = isIncompletePastPunch(d.date, d.open, todayString());
   const punchPending = d.financialPending;
   const inconsistent = !d.consistent && d.entries.length > 0;
+  // Dia estruturalmente inválido → conteúdo expandido em modo de correção
+  // (só banner + CTA de correção). Sem estado persistido: o status estrutural
+  // controla a troca automaticamente.
+  const invalidStructure = incompletePast || inconsistent;
   const noFacts = d.empty && !falta && !absence;
 
   const startEdit = (e: TimeEntryLike) => {
@@ -348,6 +355,33 @@ export function DayCard({
 
       {expanded && (
         <div className="border-t border-slate-100 px-5 py-4">
+          {/* Dia estruturalmente inválido (incompleto/inconsistente) → CARD DE
+              CORREÇÃO: somente banner + CTA de correção. As batidas seguem nos
+              dados (e no modal); o layout normal volta automaticamente quando
+              o dia volta a ser válido — sem estado persistido. */}
+          {invalidStructure ? (
+            <>
+              {incompletePast && (
+                <div className="mb-3 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2.5 text-xs font-medium text-amber-800">
+                  <p className="font-extrabold uppercase tracking-wide">Registro incompleto</p>
+                  <p className="mt-0.5">Há uma entrada sem a saída correspondente. Corrija as batidas para finalizar o registro.</p>
+                  <Button size="sm" className="mt-2" onClick={() => setPunchModal("correct")}>
+                    <Wrench size={13} /> Corrigir registros
+                  </Button>
+                </div>
+              )}
+              {inconsistent && (
+                <div className="mb-3 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2.5 text-xs font-medium text-amber-800">
+                  <p className="font-extrabold uppercase tracking-wide">Registro inconsistente</p>
+                  <p className="mt-0.5">A sequência de registros deste dia não está correta. Corrija as batidas para finalizar o registro.</p>
+                  <Button size="sm" className="mt-2" onClick={() => setPunchModal("correct")}>
+                    <Wrench size={13} /> Corrigir registros
+                  </Button>
+                </div>
+              )}
+            </>
+          ) : (
+            <>
           {/* Assistente de saída (somente para o dia em andamento; nunca no futuro) */}
           {d.open && isToday && !punchPending && (
             <div className="mb-4">
@@ -400,25 +434,6 @@ export function DayCard({
               )}
             </div>
           )}
-          {incompletePast && (
-            <div className="mb-3 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2.5 text-xs font-medium text-amber-800">
-              <p className="font-extrabold uppercase tracking-wide">Registro incompleto</p>
-              <p className="mt-0.5">Há uma entrada sem a saída correspondente. Corrija as batidas para finalizar o registro.</p>
-              <Button size="sm" className="mt-2" onClick={() => setCorrectOpen(true)}>
-                <Wrench size={13} /> Corrigir registros
-              </Button>
-            </div>
-          )}
-          {inconsistent && (
-            <div className="mb-3 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2.5 text-xs font-medium text-amber-800">
-              <p className="font-extrabold uppercase tracking-wide">Registro inconsistente</p>
-              <p className="mt-0.5">A sequência de registros deste dia não está correta. Corrija as batidas para finalizar o registro.</p>
-              <Button size="sm" className="mt-2" onClick={() => setCorrectOpen(true)}>
-                <Wrench size={13} /> Corrigir registros
-              </Button>
-            </div>
-          )}
-
           {workedInAbonoMinutes != null && workedInAbonoMinutes > 0 && (
             <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-900">
               <p className="font-bold">Trabalho registrado na janela abonada</p>
@@ -652,7 +667,7 @@ export function DayCard({
           <div className="mt-3 flex min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
             {!futureDay && !abonoDay && (
               <button
-                onClick={() => setCorrectOpen(true)}
+                onClick={() => setPunchModal("add")}
                 className="inline-flex w-auto items-center justify-center gap-1.5 rounded-lg border border-dashed border-slate-300 px-2.5 py-1.5 text-xs font-bold text-slate-500 transition-colors hover:border-emerald-400 hover:text-emerald-600 cursor-pointer"
               >
                 <Plus size={14} /> Adicionar batida
@@ -696,6 +711,8 @@ export function DayCard({
               separado no banco [10+].
             </p>
           )}
+            </>
+          )}
         </div>
       )}
 
@@ -735,10 +752,11 @@ export function DayCard({
           if (id != null) void onDeleteEntry(id);
         }}
       />
-      {correctOpen && (
+      {punchModal && (
         <CorrectPunchesModal
           open
-          onClose={() => setCorrectOpen(false)}
+          mode={punchModal}
+          onClose={() => setPunchModal(null)}
           date={d.date}
           entries={d.entries}
         />
