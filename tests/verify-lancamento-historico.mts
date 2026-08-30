@@ -121,7 +121,9 @@ check("F. UI: histórico usa modal moderno, sem Registrar falta, sem Adicionar b
   assert.ok(page.includes("historicalEmpty={historicalEmpty}"));
   assert.ok(page.includes("missingExpected || historicalEmpty"));
   assert.ok(card.includes("historicalEmpty && !missingExpected"));
-  assert.ok(card.includes("!missingExpected && !historicalEmpty && ("));
+  // 3E.2: o bloco de adição também fica atrás do gate estrutural
+  // (incompleto/inconsistente corrigem primeiro via "Corrigir registros")
+  assert.ok(card.includes("!missingExpected && !historicalEmpty && !incompletePast && !inconsistent && ("));
   const hist = card.slice(card.indexOf("{historicalEmpty && !missingExpected && ("), card.indexOf("{incompletePast && ("));
   assert.ok(hist.includes("Preencher registros do dia"));
   assert.ok(!hist.includes("Registrar falta"));

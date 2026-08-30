@@ -639,12 +639,16 @@ export function DayCard({
             )}
           </div>
 
-          {/* Registro manual — NUNCA em data futura, Abono, Sem registro ou
-              histórico vazio (esses usam o modal de preenchimento atômico).
+          {/* Registro manual — NUNCA em data futura, Abono, Sem registro,
+              histórico vazio ou dia incompleto/inconsistente.
+              Dia incompleto/inconsistente: a ÚNICA ação operacional do card é
+              o CTA de correção dos alertas (mesmo modal, CorrectPunchesModal) —
+              o usuário corrige primeiro; quando o dia volta a ser válido, estas
+              ações reaparecem conforme as regras existentes.
               "Adicionar batida" abre o MESMO modal de sequência do dia
               (CorrectPunchesModal) — batida única, com tipo inferido pela
               sequência e observação opcional. Nenhum formulário inline. */}
-          {!missingExpected && !historicalEmpty && (
+          {!missingExpected && !historicalEmpty && !incompletePast && !inconsistent && (
           <div className="mt-3 flex min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
             {!futureDay && !abonoDay && (
               <button

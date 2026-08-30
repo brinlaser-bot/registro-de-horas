@@ -25,6 +25,10 @@
  *   S  cancelamento devolve o saldo ao banco [10+] (ação 3D real)
  *   T  nenhuma action legada de compensação no novo fluxo visual (day-card/modal/summary)
  *   U  seed 4.0 atual é suficiente para o roteiro manual
+ *   V  dia incompleto/inconsistente: única ação operacional = "Corrigir registros"
+ *   W  dia deficit válido (26/08) e dia ok (25/08) não sofrem regressão do gate
+ *   X  o modal resolve o incompleto: a MESMA chamada do modal completa o 27/08
+ *   Y  o gate não introduz action/fluxo legado novo
  *
  * Executar: npx tsx tests/verify-registros-3e2.mts
  */
@@ -39,6 +43,9 @@ import { buildSpecialExcessDayView } from "../src/lib/special-excess-day-view.ts
 import { projectRealizedDayOfficial } from "../src/lib/official-projection.ts";
 import { buildSeedData } from "../src/lib/seed-data.ts";
 import { actions, getAppData, settingsOf } from "../src/lib/store.ts";
+import { computeDay } from "../src/lib/time.ts";
+import { isIncompletePastPunch } from "../src/lib/compensar.ts";
+import { suggestedPunchTypeAt } from "../src/lib/punches.ts";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const src = (p: string) => readFileSync(join(root, p), "utf8");
@@ -108,28 +115,32 @@ check("H. 'Adicionar batida' abre o MESMO modal existente (CorrectPunchesModal)"
 });
 
 /**
- * I/J. O botão "Adicionar batida" vive no bloco do dia com registros
- * (`!missingExpected && !historicalEmpty`) e é gateado SOMENTE por
- * `!futureDay && !abonoDay` — registro incompleto (27/08) e dia com déficit
- * (24/08/26/08) seguem o MESMO caminho, sem condição de deficit/incompleto.
+ * I/J/V. O botão "Adicionar batida" vive no bloco do dia com registros,
+ * gateado por `!missingExpected && !historicalEmpty && !incompletePast && !inconsistent`
+ * (e internamente por `!futureDay && !abonoDay`). Dia incompleto/inconsistente:
+ * única ação operacional = "Corrigir registros". Dia deficit VÁLIDO (24/08/26/08):
+ * o gate é apenas estrutural — a ação é preservada.
  */
 const addBtnSegment = (() => {
-  const start = dayCard.indexOf("{!missingExpected && !historicalEmpty && (");
+  const start = dayCard.indexOf(
+    "{!missingExpected && !historicalEmpty && !incompletePast && !inconsistent && (",
+  );
   const btn = dayCard.indexOf("Adicionar batida", start);
   assert.ok(start > 0 && btn > start, "bloco do card com registros não encontrado");
   return dayCard.slice(start, btn);
 })();
 
-check("I. registro incompleto (27/08): MESMO caminho de modal, sem gate especial", () => {
-  assert.ok(!/incomplete/i.test(addBtnSegment));
-  assert.ok(!/inconsistent/i.test(addBtnSegment));
+check("I. registro incompleto (27/08): ações de adição ocultas — só 'Corrigir registros'", () => {
+  // regra V: dia incompleto esconde o bloco de adição (única ação = Corrigir registros,
+  // que abre o MESMO modal — asserção do banner no check V)
+  assert.ok(addBtnSegment.includes("!incompletePast"), "gate de incompleto esconde as ações de adição");
   assert.ok(!/punchPending/.test(addBtnSegment));
 });
 
-check("J. dia com déficit (24/08/26/08): MESMO caminho de modal, sem gate de deficit", () => {
-  assert.ok(!/deficit/i.test(addBtnSegment));
-  assert.ok(!/specialExcess/.test(addBtnSegment));
-  assert.ok(!/shortcuts/i.test(addBtnSegment));
+check("J. dia com déficit válido (24/08/26/08): 'Adicionar batida' preservada (gate só estrutural)", () => {
+  assert.ok(!/deficit/i.test(addBtnSegment), "gate não referencia deficit");
+  assert.ok(!/specialExcess/.test(addBtnSegment), "gate não referencia [10+]");
+  assert.ok(!/shortcuts/i.test(addBtnSegment), "gate não referencia acordos legados");
   // a página não monta nenhum modal extra para esses dias: só o do próprio card
   assert.ok(!page.includes("initialPunchDate"));
 });
@@ -357,4 +368,78 @@ check("U. seed 4.0 cobre o roteiro manual (27/08, 24/08, 26/08, 28/08, banco 130
   assert.equal(bank.availableMinutes, 130);
 });
 
-console.log(`\n${passed}/23 verificações 3E.2 passaram.`);
+/* ── V–Y: gate visual — dia incompleto/inconsistente só corrige ── */
+
+/** Condição do bloco de ações de adição do card (Adicionar batida / Registrar intervalo). */
+const addGate = (() => {
+  const start = dayCard.indexOf("{!missingExpected && !historicalEmpty &&");
+  assert.ok(start > 0, "bloco de ações de adição do card não encontrado");
+  return dayCard.slice(start, start + 110);
+})();
+
+check("V. dia incompleto/inconsistente: única ação operacional = 'Corrigir registros'", () => {
+  // o bloco inteiro (Adicionar batida + Registrar intervalo) fica atrás do gate
+  assert.ok(addGate.includes("!incompletePast"), "gate de dia incompleto nas ações de adição");
+  assert.ok(addGate.includes("!inconsistent"), "gate de dia inconsistente nas ações de adição");
+  // cada estado oferece 'Corrigir registros' no banner (caminho operacional único)
+  const inconsistentAt = dayCard.indexOf("{inconsistent && (");
+  const incompleteBanner = dayCard.slice(dayCard.indexOf("{incompletePast && ("), inconsistentAt);
+  assert.ok(incompleteBanner.includes("Corrigir registros"), "banner incompleto → Corrigir registros");
+  assert.ok(incompleteBanner.includes("setCorrectOpen(true)"), "banner incompleto abre o modal existente");
+  const inconsistentBanner = dayCard.slice(inconsistentAt, dayCard.indexOf("{specialExcess && ("));
+  assert.ok(inconsistentBanner.includes("Corrigir registros"), "banner inconsistente → Corrigir registros");
+  assert.ok(inconsistentBanner.includes("setCorrectOpen(true)"), "banner inconsistente abre o modal existente");
+});
+
+check("W. dia deficit válido (26/08) e dia ok (25/08): gate não afeta (sem regressão)", () => {
+  // o gate referencia apenas estados estruturais — nunca deficit/saldo
+  assert.ok(!/deficit/i.test(addGate), "gate não referencia deficit");
+  assert.ok(!/balance/i.test(addGate), "gate não referencia saldo");
+  // engine real com o seed 4.0:
+  const day26 = computeDay(seed.entries.filter((e) => e.date === "2026-08-26"), settings);
+  assert.ok(day26.balanceMinutes < 0, "26/08 é deficit válido");
+  assert.equal(day26.open, false, "26/08 encerrado");
+  assert.equal(day26.consistent, true, "26/08 consistente");
+  assert.equal(isIncompletePastPunch("2026-08-26", day26.open, ASOF), false, "26/08 não é incompleto");
+  const day25 = computeDay(seed.entries.filter((e) => e.date === "2026-08-25"), settings);
+  assert.equal(day25.balanceMinutes, 0, "25/08 ok");
+  assert.equal(day25.open, false, "25/08 encerrado");
+  assert.equal(day25.consistent, true, "25/08 consistente");
+  assert.equal(isIncompletePastPunch("2026-08-25", day25.open, ASOF), false, "25/08 não é incompleto");
+  // → !incompletePast && !inconsistent passam → ações normais permanecem
+});
+
+check("X. modal resolve o incompleto: a MESMA chamada do modal completa o 27/08", () => {
+  actions.replaceAll({
+    user: seed.user,
+    entries: seed.entries,
+    compensations: seed.compensations,
+    absences: seed.absences,
+    companyCalendars: seed.companyCalendars,
+    faltas: seed.faltas,
+    excessReasons: seed.excessReasons,
+    specialExcessUses: seed.specialExcessUses,
+  });
+  const e27 = getAppData().entries.filter((e) => e.date === "2026-08-27");
+  // o modal infere o tipo pela sequência (suggestedPunchTypeAt) e chama actions.addEntry
+  const type = suggestedPunchTypeAt(e27, "17:00");
+  assert.equal(type, "saida", "sequência 08E/12S/13E infere SAÍDA às 17:00");
+  const res = actions.addEntry({ date: "2026-08-27", time: "17:00", type, note: null, source: "manual" });
+  assert.ok(res.ok, `adição falhou: ${res.error}`);
+  const day = computeDay(getAppData().entries.filter((e) => e.date === "2026-08-27"), settings);
+  assert.equal(day.consistent, true, "dia consistente após a correção");
+  assert.equal(day.open, false, "dia encerrado após a correção");
+  assert.equal(day.workedMinutes, 480, "8h após a correção");
+  // gate liberado: o dia voltou a ser válido → ações normais reaparecem
+  assert.equal(isIncompletePastPunch("2026-08-27", day.open, ASOF), false);
+});
+
+check("Y. gate não introduz action/fluxo legado novo", () => {
+  for (const s of LEGACY_FORBIDDEN_IN_DAY_CARD) {
+    assert.ok(!dayCard.includes(s), `day-card contém '${s}'`);
+  }
+  assert.ok(!dayCard.includes('from "@/lib/hour-bank"'), "import legado hour-bank");
+  assert.ok(!dayCard.includes('from "@/lib/debt"'), "import legado debt");
+});
+
+console.log(`\n${passed}/27 verificações 3E.2 passaram.`);
