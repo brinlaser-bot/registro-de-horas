@@ -176,11 +176,13 @@ interface Props {
   abonoParcial?: { abonoStart: string; abonoEnd: string; expectedRegular: number } | null;
   /** Dia passado com jornada efetiva e zero batidas/justificativa — pendência operacional. */
   missingExpected?: boolean;
+  /** Dia vazio anterior ao início do controle: lançamento histórico, sem pendência. */
+  historicalEmpty?: boolean;
   /** Dia vazio sem alerta (folga, futuro, hoje não iniciado): card compacto. */
   compact?: boolean;
   /** Abre o fluxo existente de registrar falta (card Sem registro). */
   onRegisterFalta?: () => void;
-  /** Abre o modal atômico Preencher registros do dia (card Sem registro). */
+  /** Abre o modal atômico Preencher registros do dia (Sem registro ou histórico). */
   onFillDayRecords?: () => void;
 }
 
@@ -215,6 +217,7 @@ export function DayCard({
   workedInAbonoMinutes,
   abonoParcial,
   missingExpected,
+  historicalEmpty,
   compact,
   onRegisterFalta,
   onFillDayRecords,
@@ -562,6 +565,16 @@ export function DayCard({
                   </Button>
                 )}
               </div>
+            </div>
+          )}
+          {historicalEmpty && !missingExpected && (
+            <div className="mb-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs font-medium text-slate-600">
+              <p>Dia anterior ao início do controle. Você pode lançar a jornada historicamente.</p>
+              {onFillDayRecords && (
+                <Button size="sm" className="mt-2" onClick={onFillDayRecords}>
+                  Preencher registros do dia
+                </Button>
+              )}
             </div>
           )}
           {incompletePast && (
@@ -1116,8 +1129,8 @@ export function DayCard({
             )}
           </div>
 
-          {/* Registro manual — NUNCA em data futura, Abono, nem Sem registro (usa o modal atômico). */}
-          {!missingExpected && (
+          {/* Registro manual — NUNCA em data futura, Abono, Sem registro ou histórico vazio (usa o modal atômico). */}
+          {!missingExpected && !historicalEmpty && (
           <div className="mt-3 flex min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
             {!futureDay && !abonoDay && (showAdd ? (
               <div className="flex w-full min-w-0 flex-wrap items-end gap-2 rounded-xl border border-dashed border-slate-300 bg-white p-3">

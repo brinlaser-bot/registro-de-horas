@@ -46,6 +46,21 @@ export function isMissingExpectedRecord(
   return true;
 }
 
+/**
+ * Dia ANTERIOR ao início do controle e já passado.
+ * Não é Sem registro (não cobra justificativa). Continua podendo receber
+ * lançamento histórico. Ausente/inválida → nunca histórico-neutro por esta via.
+ */
+export function isHistoricalEmptyDate(
+  date: string,
+  today: string,
+  controlStartDate?: string | null,
+): boolean {
+  if (!date || date >= today) return false;
+  if (!controlStartDate || !/^\d{4}-\d{2}-\d{2}$/.test(controlStartDate)) return false;
+  return date < controlStartDate;
+}
+
 /** Datas do intervalo classificadas como Sem registro (ordem cronológica). */
 export function missingExpectedRecordDates(
   range: { from: string; to: string },

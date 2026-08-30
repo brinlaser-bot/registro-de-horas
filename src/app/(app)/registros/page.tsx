@@ -36,7 +36,7 @@ import { acordoViewOf, buildDebtDays, checkSourceOverflow, extraCapacityForDate 
 import { compensarObligationOnDate, isAbonadoDay } from "@/lib/compensar";
 import { dayBalanceContribution, effectiveFaltas, faltaOnDate, faltaStatusOf } from "@/lib/faltas";
 import { dayCreditView, excessReasonOnDate, hasEligibleSpecialExcessInCycle, shouldPromptExcessReason } from "@/lib/hour-bank";
-import { isMissingExpectedRecord, registrosTimelineDates } from "@/lib/missing-records";
+import { isHistoricalEmptyDate, isMissingExpectedRecord, registrosTimelineDates } from "@/lib/missing-records";
 import {
   dayMatchesSituations,
   parseSituationParam,
@@ -162,6 +162,7 @@ function RegistrosBody() {
         });
         const empty = cctx.ctx.day.empty;
         const noFacts = empty && !falta && !cctx.ctx.absence;
+        const historicalEmpty = noFacts && isHistoricalEmptyDate(date, todayStr, user.controlStartDate);
         const compact =
           empty &&
           !missingExpected &&
@@ -202,6 +203,7 @@ function RegistrosBody() {
             missingExpected || noFacts || date > todayStr || faltaStatus === "prevista" ? 0 : companyDeficitContribution(cctx),
           absence: absenceOnDate(absences, date),
           missingExpected,
+          historicalEmpty,
           compact,
           creditView,
           situations,
@@ -744,7 +746,7 @@ function RegistrosBody() {
         />
       ) : (
         <div className={missingOnly || pendingOnly ? "space-y-4" : "space-y-2"}>
-          {listedDays.map(({ date, balanceView, displayDay, absence, calendarLabel, falta, workedInAbonoMinutes, abonoParcial, missingExpected, compact }) => (
+          {listedDays.map(({ date, balanceView, displayDay, absence, calendarLabel, falta, workedInAbonoMinutes, abonoParcial, missingExpected, historicalEmpty, compact }) => (
             <DayCard
               key={date}
               result={displayDay}
@@ -757,6 +759,7 @@ function RegistrosBody() {
               calendarLabel={calendarLabel}
               falta={falta}
               missingExpected={missingExpected}
+              historicalEmpty={historicalEmpty}
               compact={compact}
               onRegisterFalta={
                 missingExpected
@@ -766,7 +769,7 @@ function RegistrosBody() {
                     }
                   : undefined
               }
-              onFillDayRecords={missingExpected ? () => setFillDate(date) : undefined}
+              onFillDayRecords={missingExpected || historicalEmpty ? () => setFillDate(date) : undefined}
               effectiveExpected={balanceView.effectiveExpected}
               balanceView={balanceView}
               shortcuts={shortcutsByDate.get(date)}
