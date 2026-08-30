@@ -1,4 +1,4 @@
-import { computeDay, expectedMinutesOf, formatMinutes, parseDate, toMinutes, type WorkSettings } from "./time";
+import { computeDay, expectedMinutesOf, formatMinutes, parseDate, regularBalanceMinutes, toMinutes, type WorkSettings } from "./time";
 import { absenceLabel, dayContext, regularBalanceContribution, type Absence, type DayBalanceView, type DayContext } from "./absences";
 import { annualCycleBounds, getAnnualPointCycle } from "./periods";
 import type { Compensation, DayResult, TimeEntry } from "./types";
@@ -424,14 +424,17 @@ export function companyDayContext(
     const abonoPartial = calendarEntry.tratamento === "ABONADO_PARCIAL";
     const abonoStart = calendarEntry.abonoStart ?? "08:00";
     const abonoEnd = calendarEntry.abonoEnd ?? "12:00";
+    // CAP OFICIAL: só o que entra no ponto (min(worked, limite diário)) gera
+    // saldo regular; o excedente acima do limite é [10+] separado.
+    const workedCap = Math.min(worked, settings.maxDailyMinutes);
     const workedInAbono = abonoPartial ? minutesInWindow(day.segments, abonoStart, abonoEnd) : 0;
-    const workedRegular = abonoPartial ? Math.max(0, worked - workedInAbono) : worked;
+    const workedRegular = abonoPartial ? Math.max(0, workedCap - Math.min(workedInAbono, workedCap)) : workedCap;
     const cargaConsiderada = Math.min(workedRegular, expectedRegular) + abonadasMinutes;
     // COMPENSAR: trabalho no próprio dia reduz a OBRIGAÇÃO, não gera crédito
     // até ultrapassar o original. Déficit comum = 0 (a dívida é a obrigação).
     const compensarSurplus =
-      calendarEntry.tratamento === "COMPENSAR" ? Math.max(0, worked - calendarioACompensar) : null;
-    const regularBalance = compensarSurplus ?? (workedRegular - expectedRegular);
+      calendarEntry.tratamento === "COMPENSAR" ? Math.max(0, workedCap - calendarioACompensar) : null;
+    const regularBalance = compensarSurplus ?? regularBalanceMinutes(workedRegular, expectedRegular, settings.maxDailyMinutes);
     const isHoliday = calendarEntry.categoria.includes("Feriado") || calendarEntry.categoria.includes("Aniversário") || calendarEntry.descricao.toLowerCase().includes("natal");
     const marker = abonoPartial
       ? "abono-parcial"
@@ -473,7 +476,9 @@ export function companyDayContext(
     const freeze = day.financialPending;
     const hasPunches = day.entries.length > 0;
     const type: CompanyDayType = hasPunches ? "trabalho-folga" : "folga";
-    const credit = freeze ? 0 : worked;
+    // Folga: base 0, todo o trabalho vira crédito regular — até o teto do
+    // ponto oficial (min(worked, limite diário)); o excedente é [10+] separado.
+    const credit = freeze ? 0 : Math.min(worked, settings.maxDailyMinutes);
     return {
       ctx: baseCtx,
       label: hasPunches ? "Trabalho em folga" : "Folga",

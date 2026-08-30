@@ -3,7 +3,7 @@
 // Store client-side com persistência em localStorage.
 // Uso pessoal: todos os dados ficam apenas no navegador.
 import { useEffect, useState, useSyncExternalStore } from "react";
-import { computeDay, formatMinutes, FUTURE_DATE_ERROR, insertPunchError, isFutureDate, todayString, type EntryType } from "./time";
+import { computeDay, formatMinutes, FUTURE_DATE_ERROR, insertPunchError, isFutureDate, regularBalanceMinutes, todayString, type EntryType } from "./time";
 import { applyControlStartMigration } from "./control-start";
 import { applyDemoIdentityMigration, buildSeedData, createEmptyState, withPreservedIdentity } from "./seed-data";
 import { absencesEqual, compsEqual, entriesEqual, excessReasonsEqual, mergeByIdAndContent } from "./backup";
@@ -1058,21 +1058,28 @@ export const actions = {
       const unmarkedUsed = targetComps
         .filter((c) => c.portion !== "especial")
         .reduce((s, c) => s + c.minutes, 0);
-      const usedTarget = markedSpecial + unmarkedUsed;
+      // capacityTotal = hora extra REGULAR do dia (trabalhado até o teto − base),
+      // sem o [10+]. A reserva especial (>10h) é somada separadamente na
+      // capacidade livre — o [10+] NÃO entra no crédito regular.
       const capacityTotal = actualExtraForDate(p.targetDate, d.entries, settingsOf(d.user), {
         companyCalendars: d.companyCalendars,
       });
-      if (p.minutes > Math.max(0, capacityTotal - usedTarget)) {
-        result = {
-          ok: false,
-          code: "over-capacity",
-          error: `Este dia tem apenas ${formatMinutes(Math.max(0, capacityTotal - usedTarget))} de crédito livre.`,
-        };
-        return d;
-      }
       const targetBase = companyDayContext(p.targetDate, d.entries, d.absences, d.companyCalendars, settingsOf(d.user)).effectiveExpected;
       const regularExtra = Math.min(capacityTotal, Math.max(0, settingsOf(d.user).maxDailyMinutes - targetBase));
       const freeRegular = Math.max(0, regularExtra - Math.min(unmarkedUsed, regularExtra));
+      const usedSpecialViaSource = allocatedForSource(d.compensations, p.targetDate, "excedente");
+      const freeSpecial = Math.max(
+        0,
+        targetDay.excessMinutes - markedSpecial - Math.max(0, unmarkedUsed - regularExtra) - usedSpecialViaSource,
+      );
+      if (p.minutes > freeRegular + freeSpecial) {
+        result = {
+          ok: false,
+          code: "over-capacity",
+          error: `Este dia tem apenas ${formatMinutes(freeRegular + freeSpecial)} de crédito livre.`,
+        };
+        return d;
+      }
       // Divisão exata: a parte até o crédito regular livre é "regular"; o que
       // passar consome a RESERVA ESPECIAL (>10h) — §10.1 exige MOTIVO.
       const regularPart = Math.min(p.minutes, freeRegular);
@@ -1083,11 +1090,6 @@ export const actions = {
           result = { ok: false, code: "invalid", error: gate.error };
           return d;
         }
-        const usedSpecialViaSource = allocatedForSource(d.compensations, p.targetDate, "excedente");
-        const freeSpecial = Math.max(
-          0,
-          targetDay.excessMinutes - markedSpecial - Math.max(0, unmarkedUsed - regularExtra) - usedSpecialViaSource,
-        );
         if (especialPart > freeSpecial) {
           result = {
             ok: false,
@@ -1526,7 +1528,12 @@ export function enrichComp(
       ? { workedMinutes: src.workedMinutes, excessMinutes: src.excessMinutes }
       : null,
     targetDay: tgt
-      ? { workedMinutes: tgt.workedMinutes, balanceMinutes: tgt.balanceMinutes }
+      ? {
+          workedMinutes: tgt.workedMinutes,
+          // Saldo regular pelo PONTO OFICIAL (min(worked, limite) − base);
+          // o [10+] não entra no saldo do dia de destino.
+          balanceMinutes: regularBalanceMinutes(tgt.workedMinutes, tgt.expectedMinutes, settings.maxDailyMinutes),
+        }
       : null,
   };
 }

@@ -6,7 +6,7 @@
 //  - acordado-compensar → horas viram pendência "Acordo a compensar"
 //    (não são déficit comum), compensáveis com hora extra no mesmo ciclo.
 // ─────────────────────────────────────────────────────────────
-import { computeDay, expectedMinutesOf, toMinutes } from "./time";
+import { computeDay, expectedMinutesOf, regularBalanceMinutes, toMinutes } from "./time";
 import { annualCycleClose, annualCycleBounds, getAnnualPointCycle, nextCycleStart, sameAnnualCycle } from "./periods";
 import type { DayResult, Falta, TimeEntry, WorkSettings } from "./types";
 
@@ -147,7 +147,7 @@ export function dayContext(
     return {
       day,
       effectiveExpected: expected,
-      adjustedBalance: freeze ? 0 : day.workedMinutes - expected,
+      adjustedBalance: freeze ? 0 : regularBalanceMinutes(day.workedMinutes, expected, settings.maxDailyMinutes),
       adjustedDeficit: freeze || day.open ? 0 : Math.max(0, expected - day.workedMinutes),
       acordoMinutes: 0,
       justifiedMinutes: 0,
@@ -157,22 +157,29 @@ export function dayContext(
 
   const justified = absenceJustifiedMinutes(absence, settings);
   const workedInsideAbsence = workedWithinAbsence(day, absence, settings);
-  const regularWorked = Math.max(0, day.workedMinutes - workedInsideAbsence);
+  // CAP OFICIAL: o que conta como horas regulares do dia é o que entra no
+  // ponto oficial (min(trabalhado, limite diário)); o excedente acima do
+  // limite diário é [10+] separado e nunca vira saldo regular.
+  const noPonto = Math.min(day.workedMinutes, settings.maxDailyMinutes);
+  const insideNoPonto = Math.min(workedInsideAbsence, noPonto);
+  const regularNoPonto = Math.max(0, noPonto - insideNoPonto);
   const regularExpected = Math.max(0, expected - justified);
 
   if (absence.kind === "acordado" && absence.treatment === "compensar") {
-    // original IMUTÁVEL = horas justificadas do acordo. Trabalho no próprio
-    // dia reduz a obrigação efetiva (ver compensarObligationOnDate); só o
-    // que ultrapassar o original vira crédito regular. Não é déficit comum.
+    // original IMUTÁVEL = horas justificadas do acordo. Trabalho DENTRO da
+    // janela da ausência quita a obrigação do acordo; só o que ultrapassar o
+    // original vira crédito regular (teto do ponto oficial). Não é déficit comum.
     const acordoOriginal = justified;
-    const surplus = Math.max(0, day.workedMinutes - acordoOriginal);
+    const surplus = Math.max(0, insideNoPonto - acordoOriginal);
     const freeze = day.financialPending;
     return {
       day,
       absence,
       effectiveExpected: regularExpected,
-      adjustedBalance: freeze ? 0 : surplus + (regularWorked - regularExpected),
-      adjustedDeficit: freeze || day.open ? 0 : Math.max(0, regularExpected - regularWorked),
+      adjustedBalance: freeze
+        ? 0
+        : surplus + regularBalanceMinutes(regularNoPonto, regularExpected, settings.maxDailyMinutes),
+      adjustedDeficit: freeze || day.open ? 0 : Math.max(0, regularExpected - regularNoPonto),
       acordoMinutes: acordoOriginal,
       justifiedMinutes: justified,
       isVacation: false,
@@ -187,8 +194,8 @@ export function dayContext(
     day,
     absence,
     effectiveExpected: regularExpected,
-    adjustedBalance: freeze ? 0 : regularWorked - regularExpected,
-    adjustedDeficit: freeze || day.open ? 0 : Math.max(0, regularExpected - regularWorked),
+    adjustedBalance: freeze ? 0 : regularBalanceMinutes(regularNoPonto, regularExpected, settings.maxDailyMinutes),
+    adjustedDeficit: freeze || day.open ? 0 : Math.max(0, regularExpected - regularNoPonto),
     acordoMinutes: 0,
     justifiedMinutes: justified,
     isVacation: absence.kind === "ferias" && justified >= expected,

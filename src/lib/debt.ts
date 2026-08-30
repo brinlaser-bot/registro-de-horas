@@ -1,5 +1,5 @@
 // Matemática de dívida de horas: abatimento fracionado + sugestões inteligentes.
-import { computeDay, expectedMinutesOf, formatDateBR, formatMinutes, isRealizedDate, nowMinutesLocal, todayString } from "./time";
+import { computeDay, expectedMinutesOf, formatDateBR, formatMinutes, isRealizedDate, nowMinutesLocal, regularBalanceMinutes, todayString } from "./time";
 import { type Absence } from "./absences";
 import { calendarCycleOf, companyDayContext, type CompanyCalendars } from "./company-calendar";
 import { compensarObligationOnDate } from "./compensar";
@@ -263,7 +263,8 @@ export function suggestTargets(
     // Capacidade livre = déficit do dia pela RESOLUÇÃO CENTRAL menos o que já
     // está comprometido. Folga/abonado/fim de semana têm déficit 0 e nunca
     // entram como sugestão de destino (sem "8h − trabalhado").
-    const deficit = companyDayContext(date, entries, [], companyCalendars ?? [], settings).adjustedDeficit;
+    const cctx = companyDayContext(date, entries, [], companyCalendars ?? [], settings);
+    const deficit = cctx.adjustedDeficit;
     const used = appliedOnDate(comps, date);
     const free = deficit - used;
     if (free <= 0) continue;
@@ -271,7 +272,8 @@ export function suggestTargets(
     out.push({
       date,
       workedMinutes: day.workedMinutes,
-      balanceMinutes: day.balanceMinutes,
+      // Saldo pelo ponto oficial (derivado) — nunca o fato bruto com [10+].
+      balanceMinutes: cctx.adjustedBalance,
       isToday: date === today,
     });
   }
@@ -492,7 +494,10 @@ export function actualExtraForDate(
   );
   if (obl) return day.empty || day.open ? 0 : obl.surplusMinutes;
   const base = effectiveBaseForDate(date, entries, settings, opts?.companyCalendars);
-  return Math.max(0, day.workedMinutes - base);
+  // Hora extra REAL = o que entra no ponto oficial (min(trabalhado, limite))
+  // menos a base efetiva. O excedente acima do limite é [10+] separado e não
+  // pode ser usado como hora extra regular.
+  return Math.max(0, regularBalanceMinutes(day.workedMinutes, base, settings.maxDailyMinutes));
 }
 
 export interface CompletionCheck {

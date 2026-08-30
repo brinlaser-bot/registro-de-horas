@@ -1,4 +1,4 @@
-import { computeDay, type WorkSettings } from "@/lib/time";
+import { computeDay, regularBalanceMinutes, type WorkSettings } from "@/lib/time";
 import type { CompStatus, Compensation, CompWithDays, TimeEntry } from "@/lib/types";
 
 function normalizeStatus(status: Compensation["status"]): CompStatus {
@@ -38,7 +38,9 @@ export function enrichCompensations(
       targetDay: targetDay
         ? {
             workedMinutes: targetDay.workedMinutes,
-            balanceMinutes: targetDay.balanceMinutes,
+            // Saldo regular pelo PONTO OFICIAL (min(worked, limite) − base);
+            // o [10+] não entra no saldo do dia de destino.
+            balanceMinutes: regularBalanceMinutes(targetDay.workedMinutes, targetDay.expectedMinutes, settings.maxDailyMinutes),
           }
         : null,
     } satisfies CompWithDays;

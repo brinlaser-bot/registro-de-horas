@@ -505,3 +505,24 @@ export function stackedSegments(
     excess: Math.max(0, workedMinutes - cap),
   };
 }
+
+/**
+ * SALDO REGULAR OFICIAL de um dia — FONTE ÚNICA do cálculo derivado.
+ *
+ * O ponto oficial só aceita até o limite diário: horas acima disso são
+ * EXCEDENTE [10+] (separado, em day.excessMinutes) e NUNCA entram no saldo
+ * regular. Por isso o saldo regular é
+ *
+ *     noPonto − baseEfetiva  =  min(trabalhadoReal, limiteDiário) − base
+ *
+ * e NÃO `trabalhadoReal − base` (que vazaria o [10+] para o saldo regular).
+ * Pode ser negativo (déficit do dia). Todo saldo derivado (dayContext,
+ * companyDayContext, debt, enriquecimentos/APIs) deve passar por aqui.
+ */
+export function regularBalanceMinutes(
+  workedMinutes: number,
+  baseMinutes: number,
+  maxDailyMinutes: number,
+): number {
+  return Math.min(workedMinutes, maxDailyMinutes) - baseMinutes;
+}

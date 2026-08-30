@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { enrichCompensations } from "@/lib/compensations";
+import { companyDayContext } from "@/lib/company-calendar";
 import { getAppData, settingsOf } from "@/lib/store";
 import {
   addDays,
@@ -9,6 +10,7 @@ import {
   nowMinutesLocal,
   todayString,
 } from "@/lib/time";
+import type { TimeEntry } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -31,24 +33,30 @@ export async function GET(req: NextRequest) {
     byDate.set(row.date, [...(byDate.get(row.date) ?? []), row]);
   }
 
+  // Saldo regular SEMPRE pela resolução central (dayContext/companyDayContext):
+  // no ponto (min(worked, limite)) − base efetiva. O [10+] não entra no saldo.
+  const centralDay = (date: string, entries: TimeEntry[]) => {
+    const result = computeDay(entries, settings);
+    const cctx = companyDayContext(date, entries, data.absences, data.companyCalendars, settings);
+    return {
+      date,
+      workedMinutes: result.workedMinutes,
+      expectedMinutes: cctx.effectiveExpected,
+      balanceMinutes: cctx.adjustedBalance,
+      excessMinutes: result.excessMinutes,
+      registrableMinutes: result.registrableMinutes,
+      status: result.status,
+      open: result.open,
+      entryCount: result.entries.length,
+    };
+  };
+
   const monthDays = [...byDate.entries()]
-    .map(([date, entries]) => {
-      const result = computeDay(entries, settings);
-      return {
-        date,
-        workedMinutes: result.workedMinutes,
-        expectedMinutes: result.expectedMinutes,
-        balanceMinutes: result.balanceMinutes,
-        excessMinutes: result.excessMinutes,
-        registrableMinutes: result.registrableMinutes,
-        status: result.status,
-        open: result.open,
-        entryCount: result.entries.length,
-      };
-    })
+    .map(([date, entries]) => centralDay(date, entries))
     .sort((a, b) => a.date.localeCompare(b.date));
 
   const todayResult = computeDay(byDate.get(today) ?? [], settings, nowMinutesLocal());
+  const todayCentral = companyDayContext(today, byDate.get(today) ?? [], data.absences, data.companyCalendars, settings);
 
   const recentByDate = new Map<string, typeof recentRows>();
   for (const row of recentRows) {
@@ -58,18 +66,7 @@ export async function GET(req: NextRequest) {
   const recent = [];
   for (let i = 13; i >= 0; i--) {
     const date = addDays(today, -i);
-    const result = computeDay(recentByDate.get(date) ?? [], settings);
-    recent.push({
-      date,
-      workedMinutes: result.workedMinutes,
-      expectedMinutes: result.expectedMinutes,
-      balanceMinutes: result.balanceMinutes,
-      excessMinutes: result.excessMinutes,
-      registrableMinutes: result.registrableMinutes,
-      status: result.status,
-      open: result.open,
-      entryCount: result.entries.length,
-    });
+    recent.push(centralDay(date, recentByDate.get(date) ?? []));
   }
 
   const monthTotals = monthDays.reduce(
@@ -88,7 +85,7 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json({
     month,
-    today: todayResult,
+    today: { ...todayResult, expectedMinutes: todayCentral.effectiveExpected, balanceMinutes: todayCentral.adjustedBalance },
     todayStr: today,
     monthDays,
     monthTotals,
