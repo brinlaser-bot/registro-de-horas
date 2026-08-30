@@ -14,6 +14,12 @@
 // regular (derivação — sem store, sem settlement, [10+] fora), com
 // fechamento anual (30/04) absoluto entre ciclos.
 //
+// Etapa 2C (neste arquivo): DÉFICIT ABERTO operacional = déficit
+// factual − settlements [10+] REALIZADOS (ledger de compensações,
+// somente porção especial concluída, por vínculo de origem) e, só
+// depois, cobertura natural pelo regular restante. Ordem fixa para
+// evitar dupla quitação. Também é derivação — sem estado novo.
+//
 // NÃO recria elegibilidade: cada dia passa por buildResumoDayRow (a
 // MESMA fonte do Resumo) e a apuração consome balanceContribution
 // (dayBalanceContribution) — o mesmo valor que o Resumo soma como
@@ -26,7 +32,7 @@ import { getAnnualPointCycle, listDaysBetween } from "./periods";
 import { buildResumoDayRow, type ResumoDayRow } from "./resumo-days";
 import type { Absence } from "./absences";
 import type { CompanyCalendars } from "./company-calendar";
-import type { Falta, TimeEntry, WorkSettings } from "./types";
+import type { Compensation, Falta, TimeEntry, WorkSettings } from "./types";
 
 /** Fatos regulares apurados em um escopo de datas (somente realizado). */
 export interface RegularFacts {
@@ -62,6 +68,36 @@ export function dayRegularFactBalance(row: ResumoDayRow): number {
   return row.balanceContribution;
 }
 
+/** Fato regular de UM dia do escopo (crédito/déficit já separados). */
+interface DayRegularFact {
+  date: string;
+  creditMinutes: number;
+  deficitMinutes: number;
+}
+
+/**
+ * Fatos regulares dia a dia do intervalo — única varredura usada pela
+ * Etapa 2A (totais) e pela 2C (por dia, para o vínculo dos settlements).
+ * Cada dia passa por buildResumoDayRow (fonte do Resumo).
+ */
+function dayFactsForRange(input: RegularFactsRangeInput, from: string, to: string): DayRegularFact[] {
+  return listDaysBetween(from, to).map((date) => {
+    const balance = dayRegularFactBalance(
+      buildResumoDayRow({
+        date,
+        today: input.today,
+        entries: input.entries,
+        absences: input.absences,
+        calendars: input.calendars,
+        settings: input.settings,
+        faltas: input.faltas,
+        controlStartDate: input.controlStartDate,
+      }),
+    );
+    return { date, creditMinutes: Math.max(0, balance), deficitMinutes: Math.max(0, -balance) };
+  });
+}
+
 /**
  * APURAÇÃO FACTUAL do escopo: decompõe os saldos regulares diários
  * (fonte do Resumo) em crédito positivo gerado e déficit gerado.
@@ -76,21 +112,9 @@ export function dayRegularFactBalance(row: ResumoDayRow): number {
 export function summarizeRegularFacts(input: RegularFactsRangeInput): RegularFacts {
   let generatedCreditMinutes = 0;
   let generatedDeficitMinutes = 0;
-  for (const date of listDaysBetween(input.from, input.to)) {
-    const balance = dayRegularFactBalance(
-      buildResumoDayRow({
-        date,
-        today: input.today,
-        entries: input.entries,
-        absences: input.absences,
-        calendars: input.calendars,
-        settings: input.settings,
-        faltas: input.faltas,
-        controlStartDate: input.controlStartDate,
-      }),
-    );
-    if (balance > 0) generatedCreditMinutes += balance;
-    else if (balance < 0) generatedDeficitMinutes += -balance;
+  for (const day of dayFactsForRange(input, input.from, input.to)) {
+    generatedCreditMinutes += day.creditMinutes;
+    generatedDeficitMinutes += day.deficitMinutes;
   }
   return {
     generatedCreditMinutes,
@@ -193,6 +217,154 @@ export function summarizeRegularCoverage(input: RegularFactsRangeInput): Regular
       generatedDeficitMinutes: 0,
       coveredByRegularMinutes: 0,
       uncoveredByRegularMinutes: 0,
+      netBalanceMinutes: 0,
+    },
+  );
+}
+
+/* ── Etapa 2C: DÉFICIT ABERTO após settlements [10+] realizados ──
+ * Ordem fixa por ciclo anual (evita dupla quitação):
+ *   1. déficit factual (Etapa 2A);
+ *   2. settlements [10+] REALIZADOS aplicados a essa dívida;
+ *   3. restante após settlement;
+ *   4. cobertura natural pelo banco regular (Etapa 2B) — só do restante;
+ *   5. déficit aberto = restante − crédito regular (nunca negativo).
+ *
+ * Fonte dos settlements: o ledger existente (compensações —
+ * hour-bank.ts). "Realizado" = status "concluida"; "pendente" é
+ * PROGRAMADO (não quita); "cancelada" é ignorada. A porção "especial"
+ * marca o consumo da reserva acima de 10h (mesma semântica escrita por
+ * allocateSpecialExcess/useRealizedCredit no store) e o vínculo com o
+ * déficit é o sourceDate (dia da dívida) — settlement nunca é
+ * aplicado globalmente, nem revalidado/reescrito aqui.
+ *
+ * [10+] livre ou programado NÃO reduz o déficit aberto.
+ * Fechamento anual (30/04) segue absoluto: tudo por segmento de ciclo.
+ */
+
+/** Escopo da apuração de déficit aberto — 2A/2B + ledger de compensações. */
+export interface OpenDeficitInput extends RegularFactsRangeInput {
+  /** Ledger de compensações (LEITURA — fonte existente, sem alteração). */
+  compensations: Compensation[];
+}
+
+/** Déficit aberto apurado (derivação — sem estado). */
+export interface OpenDeficitSummary {
+  /** Déficit factual gerado — histórico, nunca reescrito (min). */
+  generatedDeficitMinutes: number;
+  /** Settlement [10+] realizado efetivamente considerado (min, ≤ déficit). */
+  settledByExcessMinutes: number;
+  /** Soma BRUTA dos settlements [10+] realizados no escopo (sem teto).
+   *  raw > settledByExcess ⇒ inconsistência de ledger detectável. */
+  rawSettledExcessMinutes: number;
+  /** Déficit coberto pelo banco regular APÓS os settlements (min). */
+  coveredByRegularMinutes: number;
+  /** Déficit aberto: após settlements [10+] + cobertura regular (min). */
+  openDeficitMinutes: number;
+  /** Crédito regular factual gerado (min) — contexto do banco regular. */
+  generatedCreditMinutes: number;
+  /** Saldo regular factual líquido (min) = crédito − déficit (inalterado). */
+  netBalanceMinutes: number;
+}
+
+/** Déficit aberto apurado em UM segmento de ciclo anual. */
+export interface CycleOpenDeficit extends OpenDeficitSummary {
+  /** Ciclo anual do segmento, ex.: "2025/2026". */
+  cycle: string;
+}
+
+/**
+ * Settlement [10+] REALIZADO aplicado à dívida de `deficitDate`:
+ * parcela do ledger com kind=deficit (déficit de jornada — o vínculo),
+ * portion="especial" (consumiu a reserva acima de 10h) e status
+ * "concluida" (realizado — pendente é programado, cancelada ignora).
+ * Mesmos critérios que o ledger especial (hour-bank.ts) usa para
+ * contabilizar "realizado" e o destino quitado (realizedTo).
+ */
+function isRealizedExcessDeficitSettlement(c: Compensation, deficitDate: string): boolean {
+  return (
+    (c.kind ?? "excedente") === "deficit" &&
+    c.portion === "especial" &&
+    c.status === "concluida" &&
+    c.sourceDate === deficitDate
+  );
+}
+
+/** Soma BRUTA (sem teto) dos settlements [10+] realizados de um dia. */
+function settledExcessRawForDate(compensations: Compensation[], deficitDate: string): number {
+  return compensations
+    .filter((c) => isRealizedExcessDeficitSettlement(c, deficitDate))
+    .reduce((s, c) => s + c.minutes, 0);
+}
+
+/**
+ * Déficit aberto CICLO A CICLO: para cada segmento de ciclo anual,
+ * por dia: déficit factual (2A) e settlement realizado vinculado
+ * (sourceDate = dia), com teto DIÁRIO no déficit do próprio dia
+ * (proteção contra ledger inconsistente — nunca negativo). Depois:
+ * restante → cobertura regular (2B) → aberto.
+ */
+export function openDeficitByCycle(input: OpenDeficitInput): CycleOpenDeficit[] {
+  return cycleSegments({ from: input.from, to: input.to }).map((seg) => {
+    let generatedCreditMinutes = 0;
+    let generatedDeficitMinutes = 0;
+    let settledByExcessMinutes = 0;
+    let rawSettledExcessMinutes = 0;
+    for (const day of dayFactsForRange(input, seg.from, seg.to)) {
+      generatedCreditMinutes += day.creditMinutes;
+      generatedDeficitMinutes += day.deficitMinutes;
+      const raw = settledExcessRawForDate(input.compensations, day.date);
+      rawSettledExcessMinutes += raw;
+      // Teto diário: settlement não pode exceder a dívida factual do dia.
+      settledByExcessMinutes += Math.min(raw, day.deficitMinutes);
+    }
+    const remainingAfterSettlements = Math.max(
+      generatedDeficitMinutes - settledByExcessMinutes,
+      0,
+    );
+    const coveredByRegularMinutes = Math.min(
+      generatedCreditMinutes,
+      remainingAfterSettlements,
+    );
+    return {
+      cycle: seg.cycle,
+      generatedDeficitMinutes,
+      settledByExcessMinutes,
+      rawSettledExcessMinutes,
+      coveredByRegularMinutes,
+      openDeficitMinutes: Math.max(remainingAfterSettlements - generatedCreditMinutes, 0),
+      generatedCreditMinutes,
+      netBalanceMinutes: generatedCreditMinutes - generatedDeficitMinutes,
+    };
+  });
+}
+
+/**
+ * DÉFICIT ABERTO AGREGADO do escopo: soma dos ciclos (fechamento anual
+ * aplicado ANTES da agregação).
+ *
+ * Invariantes: settled ≤ déficit; covered ≤ restante após settlement;
+ * settled + covered ≤ déficit; aberto = déficit − settled − covered
+ * (nunca negativo); líquido = crédito − déficit (fatos intocados).
+ */
+export function summarizeOpenDeficit(input: OpenDeficitInput): OpenDeficitSummary {
+  return openDeficitByCycle(input).reduce(
+    (acc, c) => ({
+      generatedDeficitMinutes: acc.generatedDeficitMinutes + c.generatedDeficitMinutes,
+      settledByExcessMinutes: acc.settledByExcessMinutes + c.settledByExcessMinutes,
+      rawSettledExcessMinutes: acc.rawSettledExcessMinutes + c.rawSettledExcessMinutes,
+      coveredByRegularMinutes: acc.coveredByRegularMinutes + c.coveredByRegularMinutes,
+      openDeficitMinutes: acc.openDeficitMinutes + c.openDeficitMinutes,
+      generatedCreditMinutes: acc.generatedCreditMinutes + c.generatedCreditMinutes,
+      netBalanceMinutes: acc.netBalanceMinutes + c.netBalanceMinutes,
+    }),
+    {
+      generatedDeficitMinutes: 0,
+      settledByExcessMinutes: 0,
+      rawSettledExcessMinutes: 0,
+      coveredByRegularMinutes: 0,
+      openDeficitMinutes: 0,
+      generatedCreditMinutes: 0,
       netBalanceMinutes: 0,
     },
   );
