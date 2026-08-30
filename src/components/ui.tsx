@@ -345,20 +345,34 @@ export function StatCard({
   return (
     <div
       onClick={onClick}
-      className={`rounded-2xl border border-slate-200 bg-white shadow-sm ${
+      className={`flex h-full flex-col justify-center rounded-2xl border border-slate-200 bg-white shadow-sm ${
         compact ? "px-3 py-2.5" : "p-4"
       } ${onClick ? "cursor-pointer transition-shadow hover:shadow-md" : ""}`}
     >
       <div className="flex items-start justify-between gap-2">
-        <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">{label}</p>
-        {icon && (
+        <p
+          className={`min-w-0 text-[11px] font-bold uppercase tracking-wider text-slate-400 ${
+            compact ? "leading-4" : "min-h-8 leading-4"
+          }`}
+        >
+          {label}
+        </p>
+        {icon ? (
           <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-xl ring-1 ring-inset ${iconTones[tone]}`}>
             {icon}
           </span>
+        ) : (
+          <span className="h-8 w-8 shrink-0" aria-hidden />
         )}
       </div>
-      <p className={`${compact ? "mt-0.5" : "mt-1.5"} text-2xl font-extrabold tabular-nums tracking-tight ${tones[tone]}`}>{value}</p>
-      {sub && <div className={`${compact ? "mt-0.5" : "mt-1"} text-xs text-slate-500`}>{sub}</div>}
+      <p className={`${compact ? "mt-0.5" : "mt-2"} text-2xl font-extrabold tabular-nums leading-none tracking-tight ${tones[tone]}`}>
+        {value}
+      </p>
+      {sub ? (
+        <div className={`${compact ? "mt-0.5" : "mt-1.5"} min-h-4 text-xs leading-4 text-slate-500`}>{sub}</div>
+      ) : compact ? null : (
+        <div className="mt-1.5 min-h-4" aria-hidden />
+      )}
     </div>
   );
 }

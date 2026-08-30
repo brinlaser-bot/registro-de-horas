@@ -309,7 +309,7 @@ export function StackedBarsChart({
               ) : (
                 <div className="flex w-full max-w-[22px] flex-col justify-end overflow-hidden rounded-t-[3px]">
                   {d.excess > 0 && (
-                    <div className="w-full bg-rose-500" style={{ height: `${pct(d.excess) * (height / 100)}px` }} />
+                    <div className="w-full bg-violet-500" style={{ height: `${pct(d.excess) * (height / 100)}px` }} />
                   )}
                   {d.extra > 0 && (
                     <div className="w-full bg-amber-400" style={{ height: `${pct(d.extra) * (height / 100)}px` }} />
@@ -414,7 +414,7 @@ export function StackedBarsChart({
           <span className="h-2.5 w-2.5 rounded-sm bg-amber-400" /> Extra no ponto ({formatMinutes(expected)}→{formatMinutes(cap)})
         </span>
         <span className="inline-flex items-center gap-1.5">
-          <span className="h-2.5 w-2.5 rounded-sm bg-rose-500" /> Excedente do limite diário
+          <span className="h-2.5 w-2.5 rounded-sm bg-violet-500" /> Excedente do limite diário
         </span>
         <span className="inline-flex items-center gap-1.5">
           <span

@@ -78,14 +78,15 @@ check("2. Todos os dias mostra linha do tempo normal", () => {
 check("3. Abaixo da base retorna somente dias correspondentes", () => {
   const dates = filterDatesBySituation(registrosTimelineDates(PERIOD), ["abaixo-base"], classify);
   assert.ok(dates.includes("2026-08-21"));
+  assert.ok(dates.includes("2026-08-26"), "7h30 do seed é abaixo da base");
   assert.ok(!dates.includes("2026-08-24"));
-  assert.ok(!dates.includes("2026-08-26"), "Sem registro não é abaixo da base");
-  assert.ok(!dates.includes("2026-08-28"), "hoje vazio não é abaixo da base");
+  assert.ok(!dates.includes("2026-08-27"), "Sem registro não é abaixo da base");
+  assert.ok(!dates.includes("2026-08-28"), "11h30 não é abaixo da base");
   assert.ok(classify("2026-08-21").includes("abaixo-base"));
   const incomplete = [
-    punch(1, "2026-08-26", "08:00", "entrada"),
+    punch(1, "2026-08-27", "08:00", "entrada"),
   ];
-  assert.ok(!classify("2026-08-26", { entries: incomplete }).includes("abaixo-base"));
+  assert.ok(!classify("2026-08-27", { entries: incomplete }).includes("abaixo-base"));
 });
 
 check("4. Hora extra regular retorna dia > base e <=10h", () => {
@@ -113,9 +114,9 @@ check("6. Trabalho em folga retorna dias correspondentes", () => {
 });
 
 check("7. Falta retorna faltas", () => {
-  const faltas: Falta[] = [{ id: 1, date: "2026-08-26", createdAt: 1 }];
-  assert.ok(classify("2026-08-26", { faltas }).includes("falta"));
-  assert.ok(!classify("2026-08-26", { faltas }).includes("falta-prevista"));
+  const faltas: Falta[] = [{ id: 1, date: "2026-08-27", createdAt: 1 }];
+  assert.ok(classify("2026-08-27", { faltas }).includes("falta"));
+  assert.ok(!classify("2026-08-27", { faltas }).includes("falta-prevista"));
 });
 
 check("8. Falta prevista retorna faltas previstas", () => {
@@ -125,18 +126,18 @@ check("8. Falta prevista retorna faltas previstas", () => {
 
 check("9. Férias retorna férias", () => {
   const absences: Absence[] = [{
-    id: 9, kind: "ferias", startDate: "2026-08-26", endDate: "2026-08-26",
+    id: 9, kind: "ferias", startDate: "2026-08-27", endDate: "2026-08-27",
     duration: "integral", createdAt: 1,
   }];
-  assert.ok(classify("2026-08-26", { absences }).includes("ferias"));
+  assert.ok(classify("2026-08-27", { absences }).includes("ferias"));
 });
 
 check("10. Saúde/afastamento retorna situação correspondente", () => {
   const absences: Absence[] = [{
-    id: 9, kind: "saude", startDate: "2026-08-26", endDate: "2026-08-26",
+    id: 9, kind: "saude", startDate: "2026-08-27", endDate: "2026-08-27",
     duration: "integral", createdAt: 1,
   }];
-  assert.ok(classify("2026-08-26", { absences }).includes("saude"));
+  assert.ok(classify("2026-08-27", { absences }).includes("saude"));
 });
 
 check("11. Dispensado retorna dispensados", () => {

@@ -2,6 +2,7 @@
 // Datas fixas (não relativas a "hoje"): Restaurar dados de exemplo reproduz o mesmo conjunto,
 // inclusive calendário fictício da empresa e excessReasons.
 // 3.1 adiciona 14/08 com 6 batidas (wrap/responsividade) sem alterar os cenários 3.0.
+// 26/08 7h30 e 28/08 11h30 entram na mesma bancada para inspeção visual do Resumo.
 import type { Absence } from "./absences";
 import { seedCompanyCalendars } from "./seed-calendars";
 import { todayString } from "./time";
@@ -145,6 +146,10 @@ export function buildSeedData(): AppData {
     e(93, "2026-08-23", "10:00", "saida"),
     // 24/08 11h — regular +2h, especial 1h, 25min realocados / 35min livres
     ...day(100, "2026-08-24", "20:00", "Demanda urgente de trabalho"),
+    // 26/08 7h30 — inspeção visual do Resumo (Jornada abaixo do previsto)
+    ...day(112, "2026-08-26", "16:30"),
+    // 28/08 11h30 — 10h no ponto · extra +2h · [10+] 1h30 (30min realocados neste dia)
+    ...day(116, "2026-08-28", "20:30", "Demanda urgente de trabalho"),
     // 03/09 futuro parcial 08:00–10:00 — previsto, não entra no realizado
     e(108, "2026-09-03", "08:00", "entrada"),
     e(109, "2026-09-03", "10:00", "saida"),
@@ -190,6 +195,10 @@ export function buildSeedData(): AppData {
       id: 9, sourceDate: "2026-08-06", targetDate: "2026-08-28", minutes: 60,
       status: "pendente", note: "Hora extra planejada do acordo de 06/08", kind: "acordo", createdAt: now - 4 * 86_400_000,
     },
+    {
+      id: 10, sourceDate: "2026-08-26", targetDate: "2026-08-28", minutes: 30,
+      status: "concluida", note: "Alocado excedente acima de 10h (realizado)", kind: "deficit", portion: "especial", createdAt: now + 3 * 86_400_000,
+    },
   ];
 
   const absences: Absence[] = [
@@ -211,6 +220,7 @@ export function buildSeedData(): AppData {
     { id: 1, date: "2026-08-17", reason: "demanda-urgente", customReason: null, observation: null, createdAt: now - 8 * 86_400_000, updatedAt: now - 8 * 86_400_000 },
     { id: 2, date: "2026-08-18", reason: "atendimento-evento", customReason: null, observation: null, createdAt: now - 7 * 86_400_000, updatedAt: now - 7 * 86_400_000 },
     { id: 3, date: "2026-08-24", reason: "demanda-urgente", customReason: null, observation: null, createdAt: now - 1 * 86_400_000, updatedAt: now - 1 * 86_400_000 },
+    { id: 4, date: "2026-08-28", reason: "demanda-urgente", customReason: null, observation: null, createdAt: now + 3 * 86_400_000, updatedAt: now + 3 * 86_400_000 },
   ];
 
   return {

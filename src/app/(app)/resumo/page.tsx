@@ -2,7 +2,7 @@
 
 import { useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
-import { BarChart3, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Download } from "lucide-react";
+import { BarChart3, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Clock3, Download, TriangleAlert, Wallet } from "lucide-react";
 import { settingsOf, useAppData, useIsClient } from "@/lib/store";
 import { formatMinutes, isRealizedDate, todayString, weekdayShort } from "@/lib/time";
 import { effectiveFaltas } from "@/lib/faltas";
@@ -221,32 +221,33 @@ export default function ResumoPage() {
           </Link>
         </div>
       )}
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <StatCard label="Dias com registro" value={totals.trackedDays} sub={`no período`} icon={<BarChart3 size={16} />} />
+      <div className="grid grid-cols-2 items-stretch gap-4 lg:grid-cols-4">
+        <StatCard label="Dias com registro" value={totals.trackedDays} sub={`no período`} icon={<CalendarDays size={16} />} />
         <StatCard
           label="Total trabalhado"
           value={formatMinutes(totals.workedTotal)}
           sub={`para registrar no ponto: ${formatMinutes(totals.registrableTotal)}`}
-          icon={<BarChart3 size={16} />}
+          icon={<Clock3 size={16} />}
         />
         <StatCard
           label="Saldo do período"
           value={`${totals.balanceTotal >= 0 ? "+" : ""}${formatMinutes(totals.balanceTotal)}`}
           sub={totals.balanceTotal >= 0 ? "crédito (a seu favor)" : "débito"}
           tone={totals.balanceTotal > 0 ? "emerald" : totals.balanceTotal < 0 ? "rose" : "slate"}
+          icon={<Wallet size={16} />}
         />
         <StatCard
           label="Excedente do período [10+]"
           value={formatMinutes(periodExcessBook.original)}
           sub={
-            <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-              <span>Realocado {formatMinutes(periodExcessBook.realized)}</span>
-              <span className="text-slate-300">·</span>
-              <span>A realocar {formatMinutes(Math.max(0, periodExcessBook.original - periodExcessBook.realized))}</span>
+            <span className="block truncate">
+              Realocado {formatMinutes(periodExcessBook.realized)}
+              {" · "}
+              A realocar {formatMinutes(Math.max(0, periodExcessBook.original - periodExcessBook.realized))}
             </span>
           }
           tone={periodExcessBook.original > 0 ? "violet" : "slate"}
-          icon={<BarChart3 size={16} />}
+          icon={<TriangleAlert size={16} />}
         />
       </div>
 
@@ -261,7 +262,7 @@ export default function ResumoPage() {
           {detailsOpen ? <ChevronUp size={18} className="shrink-0 text-slate-500" /> : <ChevronDown size={18} className="shrink-0 text-slate-500" />}
         </button>
         {detailsOpen && (
-          <div className="mt-3 grid gap-4 rounded-2xl border border-slate-200 bg-white px-4 py-4 text-sm text-slate-600 sm:grid-cols-3">
+          <div className="mt-3 grid gap-3 text-sm text-slate-600 sm:grid-cols-3">
             <DetailColumn title="Jornada e saldo">
               <DetailRow label="No ponto" value={formatMinutes(detailStats.registrableMinutes)} />
               <DetailRow label="Déficit do período" value={formatMinutes(detailStats.deficitMinutes)} />
@@ -413,18 +414,18 @@ function ResumoEventBadge({ day }: { day: ResumoDayRow }) {
 
 function DetailColumn({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <section>
-      <h3 className="mb-2 text-[10px] font-extrabold uppercase tracking-wider text-slate-400">{title}</h3>
-      <dl className="space-y-1.5">{children}</dl>
+    <section className="rounded-xl bg-slate-50/80 px-3.5 py-3 ring-1 ring-slate-100">
+      <h3 className="mb-3 text-[13px] font-bold text-slate-800">{title}</h3>
+      <dl className="space-y-2">{children}</dl>
     </section>
   );
 }
 
 function DetailRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-baseline justify-between gap-3">
-      <dt className="text-xs text-slate-500">{label}</dt>
-      <dd className="text-sm font-extrabold tabular-nums text-slate-800">{value}</dd>
+    <div className="flex items-baseline gap-2">
+      <dt className="min-w-0 shrink text-xs text-slate-500">{label}</dt>
+      <dd className="ml-auto max-w-[60%] text-right text-sm font-extrabold tabular-nums leading-snug text-slate-800">{value}</dd>
     </div>
   );
 }
