@@ -28,6 +28,8 @@ import { Badge, Button, ConfirmDialog, ExcessTenBadge, Input, Select } from "@/c
 import { CompensationForm, type CompFormData } from "@/components/compensation-form";
 import { CorrectPunchesModal } from "@/components/correct-punches-modal";
 import { SmartExit } from "@/components/smart-exit";
+import { SpecialExcessUseSummary } from "@/components/special-excess-use-summary";
+import type { SpecialExcessDayView } from "@/lib/special-excess-day-view";
 import { actions } from "@/lib/store";
 import { analyzePunches, suggestedPunchTypeAt } from "@/lib/punches";
 import { allocatedForSource, overflowForSource, type ExtraCapacity } from "@/lib/debt";
@@ -184,6 +186,10 @@ interface Props {
   onRegisterFalta?: () => void;
   /** Abre o modal atômico Preencher registros do dia (Sem registro ou histórico). */
   onFillDayRecords?: () => void;
+  /** NOVO [10+] (Etapa 3E): visão do dia derivada 3A/3C (null = sem bloco). */
+  specialExcess?: SpecialExcessDayView | null;
+  /** Abre o modal "Completar jornada com [10+]". */
+  onCompleteJornada?: (date: string) => void;
 }
 
 export function DayCard({
@@ -221,6 +227,8 @@ export function DayCard({
   compact,
   onRegisterFalta,
   onFillDayRecords,
+  specialExcess,
+  onCompleteJornada,
 }: Props) {
   // Regra: todos os dias iniciam RECOLHIDOS — o usuário expande apenas o dia desejado.
   const [expanded, setExpanded] = useState(false);
@@ -1025,6 +1033,19 @@ export function DayCard({
                 </Button>
               )}
               </div>
+            </div>
+          )}
+
+          {/* NOVO [10+] (Etapa 3E): bloco separado — o uso de [10+] nunca altera
+              trabalhado/saldo/batidas do card; botão, modal e projeção derivam dos
+              motores 3A/3C (specialExcess), sem regra paralela. Coexiste com os
+              atalhos legados de compensação, que seguem ativos. */}
+          {specialExcess && (
+            <div className="mt-3 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2.5">
+              <SpecialExcessUseSummary
+                view={specialExcess}
+                onOpen={specialExcess.canComplete && onCompleteJornada ? () => onCompleteJornada(d.date) : undefined}
+              />
             </div>
           )}
 

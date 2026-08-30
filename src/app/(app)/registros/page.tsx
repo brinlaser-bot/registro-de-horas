@@ -45,6 +45,8 @@ import {
   type DaySituationId,
 } from "@/lib/day-situation";
 
+import { buildSpecialExcessBank, type SpecialExcessBankSummary } from "@/lib/special-excess-bank";
+import { buildSpecialExcessDayView } from "@/lib/special-excess-day-view";
 import type { CompKind, WorkSettings } from "@/lib/types";
 import { DayCard } from "@/components/day-card";
 import { ManualEntryModal, type ManualPairData } from "@/components/manual-entry-modal";
@@ -52,6 +54,7 @@ import { FaltaModal } from "@/components/falta-modal";
 import { FillDayRecordsModal } from "@/components/fill-day-records-modal";
 import { ExcessReasonModal } from "@/components/excess-reason-modal";
 import { AllocateExcessModal } from "@/components/allocate-excess-modal";
+import { SpecialExcessUseModal } from "@/components/special-excess-use-modal";
 import { DaySituationChips, DaySituationFilter } from "@/components/day-situation-filter";
 import { Button, Card, EmptyState, Skeleton } from "@/components/ui";
 import { useToast } from "@/components/toast";
@@ -96,7 +99,7 @@ function RegistrosBody() {
   const storeReady = useIsStoreReady();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { user, entries, compensations, absences, companyCalendars, faltas, excessReasons } = useAppData();
+  const { user, entries, compensations, absences, companyCalendars, faltas, excessReasons, specialExcessUses } = useAppData();
   const todayStr = todayString();
 
   const settings: WorkSettings = settingsOf(user);
@@ -113,6 +116,7 @@ function RegistrosBody() {
   const [allocateFromDeficit, setAllocateFromDeficit] = useState<{ date: string; kind?: CompKind } | null>(null);
   const [faltaInitialDate, setFaltaInitialDate] = useState<string | null>(null);
   const [fillDate, setFillDate] = useState<string | null>(null);
+  const [completeDate, setCompleteDate] = useState<string | null>(null);
   const wantPending = searchParams.get("pendentes") === "1";
   const wantMissing = searchParams.get("semRegistro") === "1";
   const situacaoRaw = searchParams.get("situacao");
@@ -140,6 +144,29 @@ function RegistrosBody() {
     [entries, compensations, absences, companyCalendars, settings, excessReasons, todayStr],
   );
 
+  // NOVO [10+] (Etapa 3E): banco 3C por ciclo presente no intervalo (uma vez
+  // por ciclo, reutilizado por todos os dias do ciclo). Fonte de saldo/lotes.
+  const specialBankByCycle = useMemo(() => {
+    const map = new Map<string, SpecialExcessBankSummary>();
+    for (const c of new Set(registrosTimelineDates(range).map(getAnnualPointCycle))) {
+      map.set(
+        c,
+        buildSpecialExcessBank({
+          cycle: c,
+          asOfDate: todayStr,
+          entries,
+          absences,
+          calendars: companyCalendars,
+          settings,
+          faltas,
+          controlStartDate: user.controlStartDate ?? "",
+          uses: specialExcessUses ?? [],
+        }),
+      );
+    }
+    return map;
+  }, [entries, absences, companyCalendars, settings, faltas, specialExcessUses, user.controlStartDate, todayStr, range]);
+
   // Linha do tempo completa: UM card por data do intervalo, mesmo sem batidas.
   const days = useMemo(() => {
     return registrosTimelineDates(range)
@@ -151,6 +178,20 @@ function RegistrosBody() {
         const faltaStatus = falta ? faltaStatusOf(date, todayStr) : null;
         const missingExpected = isMissingExpectedRecord(date, todayStr, cctx, faltas, user.controlStartDate);
         const creditView = dayCreditView(date, entries, compensations, absences, companyCalendars, settings, excessReasons);
+        // NOVO [10+] (3E): visão do dia derivada 3A/3C (elegibilidade, saldo,
+        // usos ativos, projeção) — a UI só exibe; nenhuma regra paralela aqui.
+        const specialExcess = buildSpecialExcessDayView({
+          date,
+          asOfDate: todayStr,
+          entries,
+          absences,
+          calendars: companyCalendars,
+          settings,
+          faltas,
+          controlStartDate: user.controlStartDate ?? null,
+          uses: specialExcessUses ?? [],
+          bank: specialBankByCycle.get(getAnnualPointCycle(date)),
+        });
         const situations = situationsFromView({
           date,
           today: todayStr,
@@ -206,10 +247,11 @@ function RegistrosBody() {
           historicalEmpty,
           compact,
           creditView,
+          specialExcess,
           situations,
         };
       });
-  }, [entries, compensations, absences, companyCalendars, faltas, excessReasons, settings, range, todayStr, nowMinutes, user.controlStartDate]);
+  }, [entries, compensations, absences, companyCalendars, faltas, excessReasons, settings, range, todayStr, nowMinutes, user.controlStartDate, specialExcessUses, specialBankByCycle]);
 
   // Resumo do intervalo, AGRUPADO POR CICLO ANUAL (nunca mistura pendências)
   const summaries = useMemo(() => {
@@ -746,7 +788,7 @@ function RegistrosBody() {
         />
       ) : (
         <div className={missingOnly || pendingOnly ? "space-y-4" : "space-y-2"}>
-          {listedDays.map(({ date, balanceView, displayDay, absence, calendarLabel, falta, workedInAbonoMinutes, abonoParcial, missingExpected, historicalEmpty, compact }) => (
+          {listedDays.map(({ date, balanceView, displayDay, absence, calendarLabel, falta, workedInAbonoMinutes, abonoParcial, missingExpected, historicalEmpty, compact, specialExcess }) => (
             <DayCard
               key={date}
               result={displayDay}
@@ -810,6 +852,8 @@ function RegistrosBody() {
               })()}
               workedInAbonoMinutes={workedInAbonoMinutes}
               abonoParcial={abonoParcial}
+              specialExcess={specialExcess.eligible || specialExcess.activeUses.length > 0 ? specialExcess : null}
+              onCompleteJornada={(d) => setCompleteDate(d)}
             />
           ))}
         </div>
@@ -910,6 +954,10 @@ function RegistrosBody() {
         todayStr={todayStr}
         onSave={registerFalta}
       />
+      {/* NOVO [10+] (Etapa 3E): modal "Completar jornada com [10+]". */}
+      {completeDate && (
+        <SpecialExcessUseModal date={completeDate} onClose={() => setCompleteDate(null)} />
+      )}
     </div>
   );
 }
