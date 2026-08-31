@@ -25,6 +25,7 @@ import { buildSpecialExcessBank, type SpecialExcessBankSummary } from "./special
 import { getAnnualPointCycle, listDaysBetween, type PointPeriod } from "./periods";
 import { isRealizedDate } from "./time";
 import type { SpecialExcessUse } from "./special-excess-use";
+import type { SpecialExcessPlan } from "./special-excess-plan";
 import type { CompanyCalendars } from "./company-calendar";
 import type { Absence } from "./absences";
 import type { Falta, TimeEntry, WorkSettings } from "./types";
@@ -42,6 +43,13 @@ export interface ResumoPeriodViewInput {
   controlStartDate: string | null;
   /** Registros de uso [10+] (3B) — insumo histórico; nunca mutados. */
   uses: SpecialExcessUse[];
+  /**
+   * 4A — Planos/reservas ativas. O painel do banco exibe "Disponível":
+   * DISPONÍVEL = GERADO − UTILIZADO ATIVO − RESERVADO ATIVO. Opcional:
+   * chamadas antigas sem o campo comportam-se como antes (reserved 0).
+   * O card "[10+] gerado no período" continua geração FACTUAL (sem descontar).
+   */
+  plans?: SpecialExcessPlan[];
 }
 
 /** Linha do detalhamento diário — alimenta tabela desktop, cards mobile e CSV. */
@@ -98,7 +106,7 @@ export interface ResumoPeriodView {
 }
 
 export function buildResumoPeriodView(input: ResumoPeriodViewInput): ResumoPeriodView {
-  const { period, today, entries, absences, calendars, settings, faltas, controlStartDate, uses } = input;
+  const { period, today, entries, absences, calendars, settings, faltas, controlStartDate, uses, plans = [] } = input;
   const allDates = listDaysBetween(period.from, period.to);
 
   // 1) FATOS por dia — fonte central do Resumo (mesma da 2A/3A).
@@ -131,6 +139,7 @@ export function buildResumoPeriodView(input: ResumoPeriodViewInput): ResumoPerio
       faltas,
       controlStartDate: controlStartDate ?? "",
       uses,
+      plans, // 4A: painel "Disponível" líquida reservas ativas
     }),
   }));
   const generatedByDate = new Map<string, number>();

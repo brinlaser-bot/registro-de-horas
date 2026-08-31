@@ -754,6 +754,8 @@ function reconcileSpecialOrigins(
   const asOf = todayString();
   const settings = settingsOf(d.user);
   // Geração ATUAL por origem (mesma fonte 3C do banco — estado simulado).
+  // CLASSE B (4A.1): aqui o banco é consultado SOMENTE pela geração factual
+  // (lotes), por isso uses/plans vazios — não representa disponibilidade.
   const genByOrigin = new Map<string, number>();
   const cycles = new Set<string>([...affectedOrigins].map(getAnnualPointCycle));
   for (const cycle of cycles) {
@@ -767,6 +769,7 @@ function reconcileSpecialOrigins(
       faltas: d.faltas,
       controlStartDate: d.user.controlStartDate ?? "",
       uses: [],
+      plans: [],
     });
     for (const lot of bank.lots) genByOrigin.set(lot.originDate, lot.generatedMinutes);
   }
@@ -812,6 +815,9 @@ function reconcileSpecialOrigins(
           faltas: d.faltas,
           controlStartDate: d.user.controlStartDate ?? "",
           uses: processedFinals,
+          // 4A.1 (classe A): a recomposição FIFO é CAPACIDADE para o uso —
+          // minuto reservado por plano ativo não pode ser consumido aqui.
+          plans: (d.specialExcessPlans ?? []).filter((pl) => pl.status === "planned"),
         });
         const fifo = allocateSpecialExcessFifo({ bank, destinationDate: use.destinationDate, requestedMinutes: originalTotal });
         if (!fifo.error && fifo.allocatedMinutes > trimmedTotal) finalAllocs = fifo.allocations;
@@ -928,6 +934,9 @@ function reconcileSpecialPlanOrigins(
   const asOf = todayString();
   const settings = settingsOf(d.user);
   // Geração ATUAL por origem (mesma fonte 3C do banco — estado simulado).
+  // CLASSE B (4A.1): consulta SOMENTE a geração factual (lotes) — o lastro
+  // real de planos é composto abaixo com usos ativos (§19); disponibilidade
+  // não é representada aqui.
   const genByOrigin = new Map<string, number>();
   const cycles = new Set<string>([...affectedOrigins].map(getAnnualPointCycle));
   for (const cycle of cycles) {

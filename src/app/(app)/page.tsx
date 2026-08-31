@@ -100,7 +100,7 @@ function toSummary(d: DayResult, date?: string): DaySummary {
 export default function DashboardPage() {
   const toast = useToast();
   const mounted = useIsClient();
-  const { user, entries, compensations, absences, companyCalendars, faltas, excessReasons, specialExcessUses } = useAppData();
+  const { user, entries, compensations, absences, companyCalendars, faltas, excessReasons, specialExcessUses, specialExcessPlans } = useAppData();
   const settings = settingsOf(user);
   const todayStr = todayString();
   const period = getPointPeriod(todayStr);
@@ -651,6 +651,7 @@ export default function DashboardPage() {
         range={period}
         today={todayStr}
         specialExcessUses={specialExcessUses ?? []}
+        specialExcessPlans={specialExcessPlans ?? []}
         controlStartDate={user.controlStartDate ?? null}
         onRegisterReason={(date) => setReasonDate(date)}
       />

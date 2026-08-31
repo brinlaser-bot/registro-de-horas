@@ -32,7 +32,7 @@ function fmtSigned(v: number): string {
 
 export default function ResumoPage() {
   const mounted = useIsClient();
-  const { user, entries, compensations, absences, companyCalendars, faltas, specialExcessUses } = useAppData();
+  const { user, entries, compensations, absences, companyCalendars, faltas, specialExcessUses, specialExcessPlans } = useAppData();
   const settings = settingsOf(user);
   const todayStr = todayString();
   const currentPeriod = getPointPeriod(todayStr);
@@ -55,8 +55,9 @@ export default function ResumoPage() {
         faltas,
         controlStartDate: user.controlStartDate ?? null,
         uses: specialExcessUses ?? [],
+        plans: specialExcessPlans ?? [],
       }),
-    [entries, absences, companyCalendars, settings, faltas, period, todayStr, user.controlStartDate, specialExcessUses],
+    [entries, absences, companyCalendars, settings, faltas, period, todayStr, user.controlStartDate, specialExcessUses, specialExcessPlans],
   );
 
   // Pendências OPERACIONAIS (não representam dívida financeira) + contagens

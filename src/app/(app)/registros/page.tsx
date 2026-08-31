@@ -96,7 +96,7 @@ function RegistrosBody() {
   const storeReady = useIsStoreReady();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { user, entries, compensations, absences, companyCalendars, faltas, excessReasons, specialExcessUses } = useAppData();
+  const { user, entries, compensations, absences, companyCalendars, faltas, excessReasons, specialExcessUses, specialExcessPlans } = useAppData();
   const todayStr = todayString();
 
   const settings: WorkSettings = settingsOf(user);
@@ -148,11 +148,14 @@ function RegistrosBody() {
           faltas,
           controlStartDate: user.controlStartDate ?? "",
           uses: specialExcessUses ?? [],
+          // 4A: disponibilidade/lotes consideram reservas ativas — minuto
+          // reservado não pode parecer livre para um novo uso.
+          plans: specialExcessPlans ?? [],
         }),
       );
     }
     return map;
-  }, [entries, absences, companyCalendars, settings, faltas, specialExcessUses, user.controlStartDate, todayStr, range]);
+  }, [entries, absences, companyCalendars, settings, faltas, specialExcessUses, specialExcessPlans, user.controlStartDate, todayStr, range]);
 
   // Linha do tempo completa: UM card por data do intervalo, mesmo sem batidas.
   const days = useMemo(() => {

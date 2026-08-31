@@ -6,6 +6,7 @@ import { CalendarClock, Timer, TrendingDown, TriangleAlert, Wallet, Zap } from "
 import { hourBankSummary, excessReasonOnDate, futureCommitmentsSummary } from "@/lib/hour-bank";
 import { buildSpecialExcessBank } from "@/lib/special-excess-bank";
 import type { SpecialExcessUse } from "@/lib/special-excess-use";
+import type { SpecialExcessPlan } from "@/lib/special-excess-plan";
 import { annualCycleBounds, annualCycleClose, getAnnualPointCycle } from "@/lib/periods";
 import { computeDay, formatDateBR, formatDateShortBR, formatMinutes } from "@/lib/time";
 import type { Absence } from "@/lib/absences";
@@ -26,6 +27,8 @@ interface Props {
   today: string;
   /** 3H: usos ativos do banco [10+] (fonte canônica 3C). */
   specialExcessUses?: SpecialExcessUse[];
+  /** 4A: planos/reservas ativas — o DISPONÍVEL líquida reservas (fonte 3C). */
+  specialExcessPlans?: SpecialExcessPlan[];
   /** 3H: início do controle do usuário (insumo do banco canônico). */
   controlStartDate?: string | null;
   /** Abre o modal de motivo do excedente da data informada. */
@@ -84,6 +87,7 @@ export function HourBankCard({
   range: _periodRange,
   today,
   specialExcessUses = [],
+  specialExcessPlans = [],
   controlStartDate = null,
   onRegisterReason,
 }: Props) {
@@ -140,8 +144,9 @@ export function HourBankCard({
 
   // 3H — BANCO [10+] DO CICLO ATUAL: fonte CANÔNICA 3C (a mesma do Resumo
   // e da reconciliação 3G/3G.4 — nenhuma segunda matemática). O valor
-  // principal é o DISPONÍVEL (gerado − utilizado ativo); gerado/utilizado
-  // aparecem como informação secundária discreta.
+  // principal é o DISPONÍVEL (gerado − utilizado ativo − reservado ativo,
+  // fórmula canônica 4A); gerado/utilizado aparecem como informação
+  // secundária discreta (sem card "Reservado" nesta etapa).
   const specialBank = useMemo(
     () =>
       buildSpecialExcessBank({
@@ -154,8 +159,9 @@ export function HourBankCard({
         faltas,
         controlStartDate: controlStartDate ?? "",
         uses: specialExcessUses,
+        plans: specialExcessPlans,
       }),
-    [today, entries, absences, companyCalendars, settings, faltas, controlStartDate, specialExcessUses],
+    [today, entries, absences, companyCalendars, settings, faltas, controlStartDate, specialExcessUses, specialExcessPlans],
   );
 
   return (
@@ -204,7 +210,7 @@ export function HourBankCard({
           label="BANCO [10+] DISPONÍVEL"
           value={formatMinutes(specialBank.availableMinutes)}
           tone="bg-violet-100 text-violet-600"
-          title="Saldo [10+] do ciclo anual atual: gerado menos o utilizado ativo (a mesma fonte do Resumo)"
+          title="Saldo [10+] do ciclo anual atual: gerado menos o utilizado ativo e o reservado ativo (a mesma fonte do Resumo)"
           sub={`${formatMinutes(specialBank.generatedMinutes)} gerado · ${formatMinutes(specialBank.usedMinutes)} utilizado`}
         >
           {bank.excessWithoutReason > 0 && (

@@ -87,7 +87,7 @@ export function manualMaxForOrigin(
  *   ainda não existe fonte persistida de fechamento (limitação documentada).
  */
 export function SpecialExcessUseModal({ date, onClose }: Props) {
-  const { user, entries, absences, companyCalendars, faltas, specialExcessUses } = useAppData();
+  const { user, entries, absences, companyCalendars, faltas, specialExcessUses, specialExcessPlans } = useAppData();
   const toast = useToast();
   const todayStr = todayString();
   const settings = settingsOf(user);
@@ -104,8 +104,11 @@ export function SpecialExcessUseModal({ date, onClose }: Props) {
         faltas,
         controlStartDate: user.controlStartDate ?? null,
         uses: specialExcessUses ?? [],
+        // 4A: minuto reservado por plano ativo NÃO está disponível para um
+        // novo uso — o banco canônico líquida reservas (GERADO−USO−RESERVA).
+        plans: specialExcessPlans ?? [],
       }),
-    [date, todayStr, entries, absences, companyCalendars, settings, faltas, user.controlStartDate, specialExcessUses],
+    [date, todayStr, entries, absences, companyCalendars, settings, faltas, user.controlStartDate, specialExcessUses, specialExcessPlans],
   );
 
   const [mode, setMode] = useState<"auto" | "manual">("auto");

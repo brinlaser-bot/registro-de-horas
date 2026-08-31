@@ -22,6 +22,7 @@ import {
   type SpecialExcessOriginLot,
 } from "./special-excess-bank";
 import { specialExcessUseMinutes, type SpecialExcessUse } from "./special-excess-use";
+import type { SpecialExcessPlan } from "./special-excess-plan";
 import type { WorkSettings } from "./time";
 import type { Falta, TimeEntry } from "./types";
 
@@ -68,6 +69,14 @@ export interface SpecialExcessDayViewInput {
   faltas: Falta[];
   controlStartDate: string | null;
   uses: SpecialExcessUse[];
+  /**
+   * 4A — Planos/reservas ativas ("planned"). O day-view decide CAPACIDADE
+   * para uma nova operação de [10+] (canComplete/maxUsable/lotes do modo
+   * manual): minuto reservado NÃO está disponível — DISPONÍVEL = GERADO −
+   * UTILIZADO ATIVO − RESERVADO ATIVO. Opcional: chamadas antigas sem o
+   * campo comportam-se como antes (reserved 0).
+   */
+  plans?: SpecialExcessPlan[];
   /** Banco já computado (a página calcula uma vez por ciclo). */
   bank?: SpecialExcessBankSummary;
 }
@@ -94,6 +103,7 @@ export function buildSpecialExcessDayView(args: SpecialExcessDayViewInput): Spec
       faltas,
       controlStartDate: controlStartDate ?? "",
       uses,
+      plans: args.plans ?? [],
     });
   const bankAvailableMinutes = bank.availableMinutes;
   const projection =
