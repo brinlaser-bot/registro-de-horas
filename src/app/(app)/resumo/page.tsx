@@ -467,51 +467,120 @@ function DetailRowDesktop({ row }: { row: ResumoDetailRow }) {
   );
 }
 
-/** Card/bloco vertical compacto por dia (mobile < md) — MESMA derivação.
-    Sem scroll horizontal: grid de duas colunas com labels textuais. */
+/** Item do detalhamento diário MOBILE (< md) — 3F.1: dia RECOLHIDO por padrão.
+    Tocar no cabeçalho abre; tocar novamente fecha. O estado aberto/fechado é
+    SOMENTE local da interface (um por dia; vários dias podem ficar abertos) e
+    não é persistido. NENHUM valor é recalculado aqui: tudo vem da mesma
+    derivação 3F (ResumoDetailRow) que alimenta a tabela desktop e o CSV.
+    Estados simples (Folga / Sem registro / futuro vazio) seguem em linha
+    única compacta, sem accordion. */
 function DetailRowMobile({ row }: { row: ResumoDetailRow }) {
   const d = row.day;
   const pending = resumoDayPending(row);
   const frozen = resumoFinancialFrozen(d);
   const showProj = resumoProjectionVisible(row);
+  const [open, setOpen] = useState(false);
+
+  // Dia congelado sem pendência (Folga, Sem registro, futuro vazio, "—"):
+  // linha única compacta — sem botão, sem chevron, sem dívida inventada.
+  if (frozen && !pending) {
+    return (
+      <li className="px-1 py-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-sm font-bold text-slate-800">
+            {weekdayShort(d.date).replace(".", "")}
+            <span className="ml-1.5 font-medium text-slate-400">
+              {d.date.slice(8)}/{d.date.slice(5, 7)}
+            </span>
+          </span>
+          <ResumoEventBadge day={d} />
+        </div>
+      </li>
+    );
+  }
+
   return (
     <li className="px-1 py-2.5">
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-sm font-bold text-slate-800">
-          {weekdayShort(d.date).replace(".", "")}
-          <span className="ml-1.5 font-medium text-slate-400">
-            {d.date.slice(8)}/{d.date.slice(5, 7)}
+      {/* Cabeçalho recolhido: identifica o dia com situação + resumo compacto
+          (e [10+] gerado/usado quando houver — nada importante é escondido). */}
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls={`resumo-dia-${d.date}-conteudo`}
+        onClick={() => setOpen((v) => !v)}
+        className="flex min-h-[44px] w-full cursor-pointer items-center justify-between gap-2 rounded-xl px-1.5 py-2 text-left transition-colors hover:bg-slate-50"
+      >
+        <span className="min-w-0 flex-1">
+          <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span className="text-sm font-bold text-slate-800">
+              {weekdayShort(d.date).replace(".", "")}
+              <span className="ml-1.5 font-medium text-slate-400">
+                {d.date.slice(8)}/{d.date.slice(5, 7)}
+              </span>
+            </span>
+            <ResumoEventBadge day={d} />
           </span>
+          {pending ? (
+            <span className="mt-1 block text-xs font-semibold text-slate-500">Pendente</span>
+          ) : (
+            <span className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-sm font-extrabold tabular-nums">
+              <span className="text-slate-900">{d.workedMinutes > 0 ? formatMinutes(d.workedMinutes) : "—"}</span>
+              <span
+                className={
+                  d.balanceMinutes > 0 ? "text-emerald-600" : d.balanceMinutes < 0 ? "text-rose-600" : "text-slate-500"
+                }
+              >
+                {fmtSigned(d.balanceMinutes)}
+              </span>
+              {row.specialGenerated > 0 && (
+                <span className="text-xs font-bold text-violet-600">[10+] +{formatMinutes(row.specialGenerated)}</span>
+              )}
+              {row.specialUsed > 0 && (
+                <span className="text-xs font-bold text-slate-600">[10+] usado {formatMinutes(row.specialUsed)}</span>
+              )}
+            </span>
+          )}
         </span>
-        <ResumoEventBadge day={d} />
-      </div>
-      {pending ? (
-        <p className="mt-1.5 text-xs text-slate-500">
-          Registro pendente. Os valores financeiros serão definidos após a correção.
-        </p>
-      ) : !frozen ? (
-        <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1.5">
-          <DetailField label="Trabalhado" value={d.workedMinutes > 0 ? formatMinutes(d.workedMinutes) : "—"} />
-          <DetailField label="Jornada" value={formatMinutes(d.expectedMinutes)} className="text-slate-500" />
-          <DetailField
-            label="Saldo regular"
-            value={fmtSigned(d.balanceMinutes)}
-            className={d.balanceMinutes > 0 ? "text-emerald-600" : d.balanceMinutes < 0 ? "text-rose-600" : "text-slate-500"}
-          />
-          <DetailField label="No ponto" value={formatMinutes(d.registrableMinutes)} className="text-indigo-600" />
-          {row.specialGenerated > 0 && (
-            <DetailField label="[10+] gerado" value={`+${formatMinutes(row.specialGenerated)}`} className="text-violet-600" />
-          )}
-          {row.specialUsed > 0 && <DetailField label="[10+] usado" value={formatMinutes(row.specialUsed)} />}
-          {showProj && (
-            <DetailField
-              label="Projeção"
-              value={`${formatMinutes(row.projection.projectedWorkedMinutes)} / ${fmtSigned(row.projection.projectedBalanceMinutes)}`}
-              className="text-indigo-600"
-            />
-          )}
-        </dl>
-      ) : null}
+        <ChevronDown
+          size={18}
+          aria-hidden="true"
+          className={`shrink-0 text-slate-400 transition-transform ${open ? "rotate-180" : ""}`}
+        />
+      </button>
+      {/* Conteúdo EXPANDIDO — mesmos dados que a 3F já deriva (trabalhado,
+          jornada, saldo regular, no ponto, [10+] e projeção); dia pendente
+          mostra apenas a mensagem consolidada, sem valores inventados. */}
+      {open && (
+        <div id={`resumo-dia-${d.date}-conteudo`} className="mt-1 border-t border-slate-100 px-1.5 pt-2">
+          {pending ? (
+            <p className="text-xs text-slate-500">
+              Registro pendente. Os valores financeiros serão definidos após a correção.
+            </p>
+          ) : !frozen ? (
+            <dl className="grid grid-cols-2 gap-x-3 gap-y-1.5">
+              <DetailField label="Trabalhado" value={d.workedMinutes > 0 ? formatMinutes(d.workedMinutes) : "—"} />
+              <DetailField label="Jornada" value={formatMinutes(d.expectedMinutes)} className="text-slate-500" />
+              <DetailField
+                label="Saldo regular"
+                value={fmtSigned(d.balanceMinutes)}
+                className={d.balanceMinutes > 0 ? "text-emerald-600" : d.balanceMinutes < 0 ? "text-rose-600" : "text-slate-500"}
+              />
+              <DetailField label="No ponto" value={formatMinutes(d.registrableMinutes)} className="text-indigo-600" />
+              {row.specialGenerated > 0 && (
+                <DetailField label="[10+] gerado" value={`+${formatMinutes(row.specialGenerated)}`} className="text-violet-600" />
+              )}
+              {row.specialUsed > 0 && <DetailField label="[10+] usado" value={formatMinutes(row.specialUsed)} />}
+              {showProj && (
+                <DetailField
+                  label="Projeção"
+                  value={`${formatMinutes(row.projection.projectedWorkedMinutes)} / ${fmtSigned(row.projection.projectedBalanceMinutes)}`}
+                  className="text-indigo-600"
+                />
+              )}
+            </dl>
+          ) : null}
+        </div>
+      )}
     </li>
   );
 }
