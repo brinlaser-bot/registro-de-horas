@@ -312,20 +312,16 @@ check("TESTE 09 DE 10 — Responsividade: 2×2 no mobile, sem overflow horizonta
 });
 
 check("TESTE 10 DE 10 — Barreira de domínio: nenhum arquivo de regra/cálculo alterado", () => {
+  // 4C.1A: a barreira audita O COMMIT DA 4V (42cc14a) — a mesma garantia
+  // (4V só tocou page.tsx + testes), agora permanente e imune a mudanças
+  // legítimas de etapas posteriores na árvore de trabalho.
   let changed: string[] = [];
   try {
-    changed = execSync("git diff --name-only HEAD", { cwd: root, encoding: "utf8" })
+    changed = execSync("git show --name-only --pretty=format: 42cc14aa451aff9eee72d268f1b294b484bf2d05", { cwd: root, encoding: "utf8" })
       .split("\n")
       .map((l) => l.trim())
       .filter(Boolean);
-  } catch { /* git indisponível: ignora (árvore limpa pós-commit) */ }
-  try {
-    const untracked = execSync("git ls-files --others --exclude-standard", { cwd: root, encoding: "utf8" })
-      .split("\n")
-      .map((l) => l.trim())
-      .filter(Boolean);
-    changed = [...changed, ...untracked];
-  } catch { /* idem */ }
+  } catch { /* git indisponível: ignora */ }
   // Arquivos PROIBIDOS na 4V:
   const proibidos = changed.filter((f) =>
     f.startsWith("src/lib/") ||
@@ -345,7 +341,8 @@ check("TESTE 10 DE 10 — Barreira de domínio: nenhum arquivo de regra/cálculo
       f.startsWith("tests/");
     assert.ok(permitido, `arquivo alterado é UI/teste: ${f}`);
   }
-  assert.ok(changed.includes("src/app/(app)/page.tsx") || !changed.length, "a reforma ocorre em page.tsx (apresentação)");
+  assert.ok(changed.includes("src/app/(app)/page.tsx"), "a reforma ocorreu em page.tsx (apresentação)");
+  assert.ok(changed.length > 0, "commit 4V auditado");
 });
 
 console.log(`\n${passed}/10 verificações da Etapa 4V passaram.`);

@@ -107,6 +107,10 @@ export function ImportBackupModal({ open, onClose }: Props) {
       faltas: parsed.faltas,
       excessReasons: parsed.excessReasons,
       specialExcessUses: parsed.specialExcessUses,
+      // 4C.1A: planos/reservas [10+] participam do MESMO pipeline de
+      // importação (eram descartados aqui — causa do plano perdido no
+      // restore real). parseBackup devolve [] para backups antigos.
+      specialExcessPlans: parsed.specialExcessPlans,
     });
     setBusy(false);
     toast.show("Backup restaurado com sucesso.");
@@ -124,6 +128,9 @@ export function ImportBackupModal({ open, onClose }: Props) {
       faltas: parsed.faltas,
       excessReasons: parsed.excessReasons,
       specialExcessUses: parsed.specialExcessUses,
+      // 4C.1A: planos/reservas [10+] também na MESCLAGEM (união por id,
+      // colisão → prevalece o local — mesma política dos usos).
+      specialExcessPlans: parsed.specialExcessPlans,
     });
     setBusy(false);
     toast.show("Backup mesclado com sucesso.");
