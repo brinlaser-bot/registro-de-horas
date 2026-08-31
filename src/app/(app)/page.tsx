@@ -3,16 +3,15 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
-  ArrowLeftRight,
   Cake,
   CalendarClock,
   Clock3,
-  PlusCircle,
-  Timer,
+  TrendingUp,
   TriangleAlert,
   Wallet,
+  Zap,
 } from "lucide-react";
-import { actions, enrichComp, getAppData, settingsOf, useAppData, useIsClient } from "@/lib/store";
+import { actions, getAppData, settingsOf, useAppData, useIsClient } from "@/lib/store";
 import { useSpecialPunchActions } from "@/components/special-release-confirm";
 import {
   addDays,
@@ -28,27 +27,23 @@ import {
 } from "@/lib/time";
 import { isBirthdayToday } from "@/lib/absences";
 import { companyDayContext } from "@/lib/company-calendar";
+import { compensarObligationOnDate, isAbonadoDay } from "@/lib/compensar";
 import {
+  getAnnualPointCycle,
   getPointPeriod,
   listDaysBetween,
-  periodLabel,
-  sameAnnualCycle,
 } from "@/lib/periods";
-import { canCompleteComp, extraCapacityForDate, kindOf, usesHourExtra } from "@/lib/debt";
-import { compensarObligationOnDate, isAbonadoDay } from "@/lib/compensar";
 import { canRegisterFalta, dayBalanceContribution, faltaOnDate } from "@/lib/faltas";
 import { excessReasonOnDate, shouldPromptExcessReason } from "@/lib/hour-bank";
 import { pendingPunchDatesInCycle } from "@/lib/pending-punches";
 import { buildResumoDayRow, resumoFinancialFrozen, type ResumoDayRow } from "@/lib/resumo-days";
-import { HourBankCard } from "@/components/hour-bank-card";
+import { buildResumoPeriodView } from "@/lib/resumo-period-view";
+import { buildSpecialExcessBank } from "@/lib/special-excess-bank";
 import { ExcessReasonModal } from "@/components/excess-reason-modal";
-import type { CompKind, DayResult, DaySummary } from "@/lib/types";
+import type { DayResult, DaySummary } from "@/lib/types";
 import { Badge, Button, Card, EmptyState, ExcessTenBadge, Skeleton, StatCard } from "@/components/ui";
 import { QuickPunch } from "@/components/quick-punch";
-import { ExcessPanel } from "@/components/excess-panel";
-import { StackedPeriodChart } from "@/components/stacked-period-chart";
 import { SmartExit } from "@/components/smart-exit";
-import { CompensationForm, type CompFormData } from "@/components/compensation-form";
 import { useToast } from "@/components/toast";
 
 /**
@@ -97,6 +92,19 @@ function toSummary(d: DayResult, date?: string): DaySummary {
   };
 }
 
+/** Convenção de sinal (+30min / −1h30) — a mesma do Resumo. */
+function fmtSigned(v: number): string {
+  return `${v > 0 ? "+" : ""}${formatMinutes(v)}`;
+}
+
+/**
+ * ETAPA 4V — VISÃO GERAL como visão geral de verdade: hoje, pendências,
+ * resumo rápido (saldo regular · projeção · Banco [10+]) e dias recentes.
+ * A página apenas APRESENTA valores já derivados pelas fontes canônicas
+ * (dayBalanceContribution, buildResumoPeriodView 3A, buildSpecialExcessBank
+ * 3C) — nenhuma nova fórmula. O gerenciamento detalhado permanece nas
+ * páginas próprias (Central de Horas, Registros, Resumo).
+ */
 export default function DashboardPage() {
   const toast = useToast();
   const mounted = useIsClient();
@@ -104,17 +112,6 @@ export default function DashboardPage() {
   const settings = settingsOf(user);
   const todayStr = todayString();
   const period = getPointPeriod(todayStr);
-  const [compOpen, setCompOpen] = useState(false);
-  const [compDraft, setCompDraft] = useState<{ kind: CompKind; initial: CompFormData } | null>(null);
-  const [compPlanning, setCompPlanning] = useState<{
-    originalMinutes: number;
-    compensatedMinutes: number;
-    plannedMinutes: number;
-    openMinutes: number;
-    unplannedMinutes: number;
-  } | null>(null);
-  // §10: modal do MOTIVO do excedente (>10h) — abre automaticamente quando o
-  // dia é encerrado acima de 10h; fechar sem preencher deixa ⚠ no banco.
   const [reasonDate, setReasonDate] = useState<string | null>(null);
   const [busyFalta, setBusyFalta] = useState(false);
 
@@ -126,7 +123,7 @@ export default function DashboardPage() {
   }, []);
   const nowMinutes = nowMinutesLocal();
 
-  const { totals, today, todayCtx, recent, recentRows, pending } = useMemo(() => {
+  const { totals, today, todayCtx, recent, recentRows } = useMemo(() => {
     /* §1 SALDO DO PERÍODO: percorre TODOS os dias do período de ponto com a
      * resolução central (companyDayContext — folga/fim de semana/abonado não
      * geram déficit) e soma a CONTRIBUIÇÃO CENTRAL do dia
@@ -178,16 +175,50 @@ export default function DashboardPage() {
       });
     }
 
-    // Regra 15: pendências de ciclos encerrados NÃO aparecem como ativas no ciclo atual
-    const pend = compensations
-      .filter((c) => c.status === "pendente" && sameAnnualCycle(c.sourceDate, todayStr))
-      .map((c) => enrichComp(c, entries, settings))
-      .sort((a, b) => a.targetDate.localeCompare(b.targetDate));
+    return { totals: sum, today: todays, todayCtx: tCtx, recent: recents, recentRows };
+  }, [entries, absences, companyCalendars, faltas, settings, period, todayStr, nowMinutes, user]);
 
-    return { totals: sum, today: todays, todayCtx: tCtx, recent: recents, recentRows, pending: pend };
-  }, [entries, compensations, absences, companyCalendars, faltas, settings, period, todayStr, nowMinutes, user]);
+  /* ETAPA 4V — RESUMO RÁPIDO: nada é recalculado aqui. A projeção no ponto e
+   * o [10+] gerado no período vêm da MESMA derivação canônica do Resumo
+   * (buildResumoPeriodView — 3A/3C); o Banco [10+] disponível vem da MESMA
+   * fonte canônica 3C usada pelo Resumo e pela reconciliação 3G (a fórmula
+   * fica na lib — a página apenas apresenta o valor derivado). */
+  const resumoView = useMemo(
+    () =>
+      buildResumoPeriodView({
+        period,
+        today: todayStr,
+        entries,
+        absences,
+        calendars: companyCalendars,
+        settings,
+        faltas,
+        controlStartDate: user.controlStartDate ?? null,
+        uses: specialExcessUses ?? [],
+        plans: specialExcessPlans ?? [],
+      }),
+    [entries, absences, companyCalendars, settings, faltas, period, todayStr, user, specialExcessUses, specialExcessPlans],
+  );
+  const projection = resumoView.cards.projection;
+  const projApplied = projection.appliedSpecialMinutes;
+  const projAppliedDays = projection.days.filter((d) => d.appliedSpecialMinutes > 0).length;
 
-  const range = period;
+  const specialBank = useMemo(
+    () =>
+      buildSpecialExcessBank({
+        cycle: getAnnualPointCycle(todayStr),
+        asOfDate: todayStr,
+        entries,
+        absences,
+        calendars: companyCalendars,
+        settings,
+        faltas,
+        controlStartDate: user.controlStartDate ?? "",
+        uses: specialExcessUses ?? [],
+        plans: specialExcessPlans ?? [],
+      }),
+    [todayStr, entries, absences, companyCalendars, settings, faltas, user, specialExcessUses, specialExcessPlans],
+  );
 
   /** Falta "hoje": a jornada vem SEMPRE da resolução central (nunca 8h fixas). */
   const faltaHojeGate = useMemo(
@@ -329,25 +360,15 @@ export default function DashboardPage() {
     return res;
   };
 
-  const completeComp = async (id: number) => {
-    const res = actions.completeComp(id);
-    if (!res.ok) {
-      toast.show(res.error ?? "Não foi possível concluir.", "error");
-      return;
+  /** Confirmação manual de quitação por hora extra (sem registrar saída). */
+  const confirmComps = async (compIds: number[]) => {
+    let done = 0;
+    for (const id of compIds) {
+      const res = actions.completeComp(id);
+      if (!res.ok) toast.show(res.error ?? "Não foi possível concluir.", "error");
+      else done += 1;
     }
-    toast.show("Compensação concluída. Bom descanso!");
-  };
-
-  const createComp = async (payload: CompFormData & { kind?: CompKind }) => {
-    const res = actions.addComp({
-      sourceDate: payload.sourceDate,
-      targetDate: payload.targetDate,
-      minutes: payload.minutes,
-      note: payload.note || null,
-      kind: payload.kind ?? "excedente",
-    });
-    if (!res.ok) throw new Error(res.error); // modal exibe a mensagem e permanece aberto
-    setCompOpen(false);
+    if (done > 0) toast.show("Quitação confirmada — déficit abatido!");
   };
 
   /** Saída em 1 clique: registra a saída (hora atual) e quita compensações de saída antecipada. */
@@ -376,17 +397,6 @@ export default function DashboardPage() {
     );
   };
 
-  /** Confirmação manual de quitação por hora extra (sem registrar saída). */
-  const confirmComps = async (compIds: number[]) => {
-    let done = 0;
-    for (const id of compIds) {
-      const res = actions.completeComp(id);
-      if (!res.ok) toast.show(res.error ?? "Não foi possível concluir.", "error");
-      else done += 1;
-    }
-    if (done > 0) toast.show("Quitação confirmada — déficit abatido!");
-  };
-
   if (!mounted) {
     return (
       <div className="flex flex-col gap-4 lg:gap-5">
@@ -397,10 +407,7 @@ export default function DashboardPage() {
           </div>
           <Skeleton className="h-52" />
         </div>
-        <div className="grid gap-4 lg:grid-cols-2 lg:gap-5">
-          <Skeleton className="h-64" />
-          <Skeleton className="h-64" />
-        </div>
+        <Skeleton className="h-64" />
       </div>
     );
   }
@@ -416,9 +423,6 @@ export default function DashboardPage() {
     !todayCtx.ctx.absence &&
     todayCtx.effectiveExpected > 0;
   const balanceTone = totals.balanceTotal > 0 ? "emerald" : totals.balanceTotal < 0 ? "rose" : "slate";
-  const excessTone = totals.excessTotal > 0 ? "rose" : "slate";
-  const todayStatusTone =
-    t.status === "excess" ? "rose" : t.status === "deficit" ? "amber" : t.status === "in-progress" ? "indigo" : "slate";
   const firstName = user.name.split(" ")[0];
   /* Banner de aniversário: SOMENTE VISUAL (data local dia+mês) — nunca entra
    * em jornada, saldo, déficit ou qualquer cálculo central. */
@@ -446,339 +450,171 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* Bloco reordenável: no mobile o Registro de hoje sobe (bater o ponto
-          sem rolagem); no desktop a ordem clássica é preservada
-          (saudação → 4 cards → Registro de hoje). */}
-      <div className="flex flex-col gap-3 lg:gap-4">
-        {/* Cabeçalho */}
-        <div className="order-1 flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
-          <div className="min-w-0 flex-1">
-            <h2 className="text-xl font-extrabold tracking-tight text-slate-900">
-              Olá, {user.name}! 👋
-            </h2>
-            <p className="mt-0.5 text-sm text-slate-500">
-              {faltaHoje
-                ? "Falta registrada para hoje."
-                : todayCtx.type === "folga"
-                  ? "Folga hoje. Se você registrar trabalho, as horas serão contabilizadas como trabalho em folga."
-                  : todayCtx.type === "trabalho-folga"
-                    ? "Trabalho em folga registrado hoje."
-                    : !t.consistent && t.entries.length > 0
-                      ? "Registro inconsistente — corrija as batidas de hoje."
-                    : t.empty
-                      ? "Você ainda não bateu o ponto hoje. Registre sua entrada abaixo."
-                      : t.open
-                        ? "Seu ponto de hoje está em andamento."
-                        : "Seu ponto de hoje está fechado."}
-            </p>
-          </div>
-          <Link href="/registros" className="shrink-0">
-            <Button variant="secondary">
-              <CalendarClock size={15} /> Ver registros
-            </Button>
-          </Link>
+      {/* Cabeçalho */}
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
+        <div className="min-w-0 flex-1">
+          <h2 className="text-xl font-extrabold tracking-tight text-slate-900">
+            Olá, {user.name}! 👋
+          </h2>
+          <p className="mt-0.5 text-sm text-slate-500">
+            {faltaHoje
+              ? "Falta registrada para hoje."
+              : todayCtx.type === "folga"
+                ? "Folga hoje. Se você registrar trabalho, as horas serão contabilizadas como trabalho em folga."
+                : todayCtx.type === "trabalho-folga"
+                  ? "Trabalho em folga registrado hoje."
+                  : !t.consistent && t.entries.length > 0
+                    ? "Registro inconsistente — corrija as batidas de hoje."
+                  : t.empty
+                    ? "Você ainda não bateu o ponto hoje. Registre sua entrada abaixo."
+                    : t.open
+                      ? "Seu ponto de hoje está em andamento."
+                      : "Seu ponto de hoje está fechado."}
+          </p>
         </div>
+        <Link href="/registros" className="shrink-0">
+          <Button variant="secondary">
+            <CalendarClock size={15} /> Ver registros
+          </Button>
+        </Link>
+      </div>
 
-        {/* Indicadores — 3º no mobile, 2º no desktop */}
-        <div className="order-3 grid grid-cols-2 gap-2 lg:order-2 lg:grid-cols-4 lg:gap-3">
+      {/* B. REGISTRO DE HOJE — Ponto + Assistente de jornada em UM ÚNICO card
+          (preservado integralmente pela 4V: batidas, jornada em andamento/
+          encerrada, saldo do dia, botões e ações já existentes). */}
+      <Card
+        compact
+        title="Registro de hoje"
+        /* §13 subtítulo contextual pela MESMA fonte central (companyDayContext.label):
+           "Folga a compensar — Calendário", "Feriado — …", "Abono…" etc. */
+        subtitle={todayCtx.label ?? `Jornada regular · base ${formatMinutes(todayCtx.effectiveExpected)}`}
+      >
+        {/* §9 desktop: Ponto | Assistente lado a lado · mobile: empilha
+            (Ponto sempre primeiro). items-start evita o Assistente esticar
+            e criar área vazia. Sem overflow horizontal. */}
+        <div className="grid items-start gap-4 lg:grid-cols-2 lg:gap-5">
+          <section className="min-w-0">
+            <h3 className="mb-1.5 text-[11px] font-extrabold uppercase tracking-wider text-slate-400">Ponto</h3>
+            <QuickPunch
+              embedded
+              today={t}
+              todayStr={todayStr}
+              settings={settings}
+              dayLabel={todayCtx.type === "regular" ? undefined : todayLabel}
+              onAddEntry={onAddEntry}
+              onUpdateEntry={onUpdateEntry}
+              onDeleteEntry={onDeleteEntry}
+              faltaRegistrada={!!faltaHoje}
+              jornadaMinutes={todayCtx.effectiveExpected}
+              faltaGate={faltaHojeGate}
+              onRegisterFalta={registerFaltaHoje}
+              onRemoveFalta={removeFaltaHoje}
+              idle={todayIdle}
+              compensarHint={(() => {
+                const obl = compensarObligationOnDate(
+                  todayStr, entries, compensations, absences, companyCalendars, settings, todayStr,
+                );
+                return obl ? { label: obl.originLabel, originalMinutes: obl.originalMinutes } : null;
+              })()}
+              abonadoHint={(() => {
+                const a = isAbonadoDay(todayStr, absences, companyCalendars);
+                return a.abonado ? { label: a.label ?? "Dia abonado" } : null;
+              })()}
+              workedInAbonoMinutes={todayCtx.workedInAbonoMinutes}
+            />
+          </section>
+          <section className="min-w-0 lg:border-l lg:border-slate-100 lg:pl-5">
+            <h3 className="mb-1.5 text-[11px] font-extrabold uppercase tracking-wider text-slate-400">
+              Assistente de jornada
+            </h3>
+            <SmartExit
+              embedded
+              date={todayStr}
+              day={t}
+              settings={settings}
+              comps={compensations}
+              nowMinutes={nowMinutes}
+              onSmartExit={smartExit}
+              onConfirmComps={confirmComps}
+              isToday
+              effectiveExpected={todayCtx.effectiveExpected}
+              faltaRegistrada={!!faltaHoje}
+              contextLabel={todayCtx.label}
+              punchBlocked={
+                todayCtx.marker === "abono" ||
+                todayCtx.ctx.absence?.kind === "ferias" ||
+                todayCtx.ctx.absence?.kind === "saude" ||
+                todayCtx.ctx.absence?.kind === "abono"
+              }
+            />
+          </section>
+        </div>
+      </Card>
+
+      {/* C. PENDÊNCIAS RELEVANTES — apenas o aviso já existente de registros
+          pendentes (dias que precisam de correção). Nenhuma nova lógica. */}
+      {(() => {
+        const nPending = pendingPunchDatesInCycle(entries, settings, todayStr).length;
+        if (nPending <= 0) return null;
+        return (
+          <div className="rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3">
+            <p className="text-sm font-extrabold text-amber-800">⚠ Registros pendentes: {nPending}</p>
+            <p className="mt-0.5 text-xs text-amber-700">Existem dias que precisam de correção antes do saldo ser definitivo.</p>
+            <Link href="/registros?pendentes=1">
+              <Button size="sm" className="mt-2" variant="warning">Ver pendências</Button>
+            </Link>
+          </div>
+        );
+      })()}
+
+      {/* D. RESUMO RÁPIDO — os indicadores do período em um bloco curto.
+          Fontes canônicas, nenhuma fórmula na página:
+          · Saldo regular do período → soma central (dayBalanceContribution),
+            a MESMA fonte de antes (igual ao Resumo);
+          · Projeção no ponto → buildResumoPeriodView (3A, usos ativos),
+            a MESMA fonte do Resumo;
+          · BANCO [10+] DISPONÍVEL → buildSpecialExcessBank (3C: gerado −
+            utilizado ativo − reservado ativo), a MESMA fonte do Resumo;
+          · [10+] gerado no período → factual (3F), MESMA fonte do Resumo.
+          Mobile: 2×2 · Desktop: 4 colunas. */}
+      <div>
+        <h3 className="mb-3 text-sm font-extrabold uppercase tracking-wider text-slate-400">
+          Resumo rápido
+        </h3>
+        <div className="grid grid-cols-2 items-stretch gap-2 lg:grid-cols-4 lg:gap-3">
           <StatCard
-            compact
-            label="Hoje"
-            value={formatMinutes(t.workedMinutes)}
-            sub={
-              <>
-                {/* §4 rodada HOTFIX: o card HOJE usa a MESMA base efetiva central
-                    do Registro rápido (companyDayContext.effectiveExpected — 0 em
-                    folga/feriado/"folga a compensar"). O antigo fallback
-                    `expected || jornada` engolvia base 0min (0 é falsy → 8h). */}
-                {todayCtx.type === "folga" || todayCtx.type === "trabalho-folga"
-                  ? `${todayLabel} · esperado ${formatMinutes(todayCtx.effectiveExpected)}`
-                  : `base ${formatMinutes(todayCtx.effectiveExpected)}`}
-                {todayIdle ? (
-                  <> · jornada não iniciada</>
-                ) : t.financialPending ? (
-                  <> · pendente</>
-                ) : faltaHoje ? (
-                  <>
-                    {" "}·{" "}
-                    <span className="text-rose-600">
-                      {t.balanceMinutes >= 0 ? "+" : ""}
-                      {formatMinutes(t.balanceMinutes)}
-                    </span>
-                  </>
-                ) : (
-                  <>
-                    {" "}·{" "}
-                    <span className={t.balanceMinutes >= 0 ? "text-emerald-600" : "text-rose-600"}>
-                      {t.balanceMinutes >= 0 ? "+" : ""}
-                      {formatMinutes(t.balanceMinutes)}
-                    </span>
-                  </>
-                )}
-              </>
-            }
-            tone={todayStatusTone}
-            icon={<Timer size={16} />}
-          />
-          <StatCard
-            compact
-            label="Saldo do período"
-            value={`${totals.balanceTotal >= 0 ? "+" : ""}${formatMinutes(totals.balanceTotal)}`}
-            sub={totals.balanceTotal >= 0 ? "horas a seu favor (crédito)" : "horas em débito — atenção"}
+            label="Saldo regular do período"
+            value={fmtSigned(totals.balanceTotal)}
+            sub="Saldo factual dentro do limite diário de 10h."
             tone={balanceTone}
             icon={<Wallet size={16} />}
           />
           <StatCard
-            compact
-            label="Excedente do período"
-            value={formatMinutes(totals.excessTotal)}
-            sub={<>excedente do limite diário <ExcessTenBadge /> · {totals.trackedDays} dia(s) registrados</>}
-            tone={excessTone}
-            icon={<TriangleAlert size={16} />}
+            label="Projeção no ponto"
+            value={fmtSigned(projection.projectedBalanceMinutes)}
+            sub={
+              projApplied > 0
+                ? `Inclui ${formatMinutes(projApplied)} de [10+] aplicado em ${projAppliedDays} dia(s).`
+                : "Igual ao saldo factual (sem usos [10+] ativos)."
+            }
+            tone={projection.projectedBalanceMinutes > 0 ? "indigo" : projection.projectedBalanceMinutes < 0 ? "rose" : "slate"}
+            icon={<TrendingUp size={16} />}
           />
           <StatCard
-            compact
-            label="Compensações pendentes"
-            value={pending.length}
-            sub={
-              pending.length > 0
-                ? `${formatMinutes(pending.reduce((s, c) => s + c.minutes, 0))} a compensar`
-                : "tudo em dia 🎉"
-            }
-            tone={pending.length > 0 ? "indigo" : "slate"}
-            icon={<ArrowLeftRight size={16} />}
+            label="BANCO [10+] DISPONÍVEL"
+            value={formatMinutes(specialBank.availableMinutes)}
+            sub={`${formatMinutes(specialBank.generatedMinutes)} gerado · ${formatMinutes(specialBank.usedMinutes)} utilizado${specialBank.reservedMinutes > 0 ? ` · ${formatMinutes(specialBank.reservedMinutes)} reservado` : ""}`}
+            tone={specialBank.availableMinutes > 0 ? "violet" : "slate"}
+            icon={<Zap size={16} />}
+          />
+          <StatCard
+            label="[10+] gerado no período"
+            value={formatMinutes(resumoView.cards.specialGeneratedMinutes)}
+            sub="Excedente factual acima de 10h/dia."
+            tone={resumoView.cards.specialGeneratedMinutes > 0 ? "violet" : "slate"}
+            icon={<TriangleAlert size={16} />}
           />
         </div>
-
-        {/* §7–§14 REGISTRO DE HOJE — Ponto + Assistente de jornada em UM ÚNICO
-            card. Mobile: sobe para logo após a saudação (order-2). Desktop:
-            permanece depois dos 4 indicadores (lg:order-3). Componentes
-            reutilizados no modo embutido (§7: sem duplicar lógica; §10/§11:
-            todas as funções do Registro rápido e do Smart Exit preservadas). */}
-        {(() => {
-          const nPending = pendingPunchDatesInCycle(entries, settings, todayStr).length;
-          if (nPending <= 0) return null;
-          return (
-            <div className="order-2 lg:order-3 rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3">
-              <p className="text-sm font-extrabold text-amber-800">⚠ Registros pendentes: {nPending}</p>
-              <p className="mt-0.5 text-xs text-amber-700">Existem dias que precisam de correção antes do saldo ser definitivo.</p>
-              <Link href="/registros?pendentes=1">
-                <Button size="sm" className="mt-2" variant="warning">Ver pendências</Button>
-              </Link>
-            </div>
-          );
-        })()}
-        <Card
-          compact
-          className="order-2 lg:order-3"
-          title="Registro de hoje"
-          /* §13 subtítulo contextual pela MESMA fonte central (companyDayContext.label):
-             "Folga a compensar — Calendário", "Feriado — …", "Abono…" etc. */
-          subtitle={todayCtx.label ?? `Jornada regular · base ${formatMinutes(todayCtx.effectiveExpected)}`}
-        >
-          {/* §9 desktop: Ponto | Assistente lado a lado · mobile: empilha
-              (Ponto sempre primeiro). items-start evita o Assistente esticar
-              e criar área vazia. Sem overflow horizontal. */}
-          <div className="grid items-start gap-4 lg:grid-cols-2 lg:gap-5">
-            <section className="min-w-0">
-              <h3 className="mb-1.5 text-[11px] font-extrabold uppercase tracking-wider text-slate-400">Ponto</h3>
-              <QuickPunch
-                embedded
-                today={t}
-                todayStr={todayStr}
-                settings={settings}
-                dayLabel={todayCtx.type === "regular" ? undefined : todayLabel}
-                onAddEntry={onAddEntry}
-                onUpdateEntry={onUpdateEntry}
-                onDeleteEntry={onDeleteEntry}
-                faltaRegistrada={!!faltaHoje}
-                jornadaMinutes={todayCtx.effectiveExpected}
-                faltaGate={faltaHojeGate}
-                onRegisterFalta={registerFaltaHoje}
-                onRemoveFalta={removeFaltaHoje}
-                idle={todayIdle}
-                compensarHint={(() => {
-                  const obl = compensarObligationOnDate(
-                    todayStr, entries, compensations, absences, companyCalendars, settings, todayStr,
-                  );
-                  return obl ? { label: obl.originLabel, originalMinutes: obl.originalMinutes } : null;
-                })()}
-                abonadoHint={(() => {
-                  const a = isAbonadoDay(todayStr, absences, companyCalendars);
-                  return a.abonado ? { label: a.label ?? "Dia abonado" } : null;
-                })()}
-                workedInAbonoMinutes={todayCtx.workedInAbonoMinutes}
-              />
-            </section>
-            <section className="min-w-0 lg:border-l lg:border-slate-100 lg:pl-5">
-              <h3 className="mb-1.5 text-[11px] font-extrabold uppercase tracking-wider text-slate-400">
-                Assistente de jornada
-              </h3>
-              <SmartExit
-                embedded
-                date={todayStr}
-                day={t}
-                settings={settings}
-                comps={compensations}
-                nowMinutes={nowMinutes}
-                onSmartExit={smartExit}
-                onConfirmComps={confirmComps}
-                isToday
-                effectiveExpected={todayCtx.effectiveExpected}
-                faltaRegistrada={!!faltaHoje}
-                contextLabel={todayCtx.label}
-                punchBlocked={
-                  todayCtx.marker === "abono" ||
-                  todayCtx.ctx.absence?.kind === "ferias" ||
-                  todayCtx.ctx.absence?.kind === "saude" ||
-                  todayCtx.ctx.absence?.kind === "abono"
-                }
-              />
-            </section>
-          </div>
-        </Card>
-      </div>
-
-      {/* §15 BANCO DE HORAS — mesmo conteúdo, agora DEPOIS do Registro de hoje */}
-      <HourBankCard
-        entries={entries}
-        compensations={compensations}
-        absences={absences}
-        companyCalendars={companyCalendars}
-        faltas={faltas}
-        excessReasons={excessReasons}
-        settings={settings}
-        range={period}
-        today={todayStr}
-        specialExcessUses={specialExcessUses ?? []}
-        specialExcessPlans={specialExcessPlans ?? []}
-        controlStartDate={user.controlStartDate ?? null}
-        onRegisterReason={(date) => setReasonDate(date)}
-      />
-
-      {/* Gestão de excedentes */}
-      <div>
-        <h3 className="mb-3 text-sm font-extrabold uppercase tracking-wider text-slate-400">
-          Gestão de Excedentes
-        </h3>
-        <div className="space-y-6">
-          <ExcessPanel
-            entries={entries}
-            compensations={compensations}
-            absences={absences}
-            companyCalendars={companyCalendars}
-            faltas={faltas}
-            excessReasons={excessReasons}
-            onRegisterReason={(date) => setReasonDate(date)}
-            settings={settings}
-            range={range}
-            monthLabel={periodLabel(period)}
-            onCreateComp={createComp}
-          />
-        </div>
-      </div>
-
-      <div className="grid gap-6 lg:grid-cols-2">
-        {/* Compensações pendentes */}
-        <Card
-          title="Compensações pendentes"
-          subtitle="Horas excedentes que precisam ser compensadas"
-          actions={
-            <Button size="sm" variant="subtle" onClick={() => { setCompDraft(null); setCompOpen(true); }}>
-              <PlusCircle size={13} /> Nova
-            </Button>
-          }
-        >
-          {pending.length === 0 ? (
-            <EmptyState
-              icon={<ArrowLeftRight size={24} />}
-              title="Nenhuma compensação pendente"
-              description="Quando um dia passar de 10h, crie uma compensação para o dia seguinte."
-            />
-          ) : (
-            <ul className="space-y-3">
-              {pending.map((c) => (
-                <li key={c.id} className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-100 bg-slate-50/60 p-3">
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-bold text-slate-800">
-                      Compensar {formatMinutes(c.minutes)}{" "}
-                      <span className="font-medium text-slate-400">
-                        ({kindOf(c) === "deficit"
-                          ? `hora extra de ${formatDateShortBR(c.sourceDate)}`
-                          : kindOf(c) === "acordo"
-                            ? `acordo de ${formatDateShortBR(c.sourceDate)}`
-                            : kindOf(c) === "calendario"
-                              ? `calendário de ${formatDateShortBR(c.sourceDate)}`
-                              : `excedente do limite diário de ${formatDateShortBR(c.sourceDate)}`})
-                      </span>
-                    </p>
-                    <p className="mt-0.5 text-xs text-slate-500">
-                      {c.targetDate === todayStr && (
-                        <span className="font-bold text-indigo-600">Hoje · </span>
-                      )}
-                      até {formatDateShortBR(c.targetDate)}
-                      {c.note ? ` · ${c.note}` : ""}
-                    </p>
-                  </div>
-                  <Badge
-                    tone={
-                      kindOf(c) === "deficit"
-                        ? "emerald"
-                        : kindOf(c) === "acordo"
-                          ? "indigo"
-                          : kindOf(c) === "calendario"
-                            ? "amber"
-                            : "indigo"
-                    }
-                  >
-                    {kindOf(c) === "deficit"
-                      ? "hora extra"
-                      : kindOf(c) === "acordo"
-                        ? "hora extra · acordo"
-                        : kindOf(c) === "calendario"
-                          ? "hora extra · calendário"
-                          : "sair cedo"}
-                  </Badge>
-                  {(() => {
-                    const isExtra = usesHourExtra(kindOf(c));
-                    const check = canCompleteComp(c, entries, compensations, settings, todayStr, { companyCalendars });
-                    return (
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        disabled={!check.ok}
-                        title={check.ok ? undefined : check.error}
-                        onClick={() => completeComp(c.id)}
-                      >
-                        {isExtra && check.ok ? "Confirmar quitação" : "Concluir"}
-                      </Button>
-                    );
-                  })()}
-                </li>
-              ))}
-            </ul>
-          )}
-        </Card>
-
-        {/* Barras empilhadas do período — MESMA preparação/componente do Resumo
-            (src/components/stacked-period-chart). Período de ponto ATUAL (21→20,
-            resolvido pelo helper central, com os especiais do fechamento anual). */}
-        <Card
-          title="Barras empilhadas do período"
-          subtitle="Base · extra no ponto · excedente do limite diário · horas compensadas"
-        >
-          <StackedPeriodChart
-            entries={entries}
-            compensations={compensations}
-            absences={absences}
-            companyCalendars={companyCalendars}
-            settings={settings}
-            period={period}
-            faltas={faltas}
-            today={todayStr}
-            height={150}
-          />
-        </Card>
       </div>
 
       {/* Dias recentes */}
@@ -844,24 +680,8 @@ export default function DashboardPage() {
         )}
       </Card>
 
-      <CompensationForm
-        open={compOpen}
-        onClose={() => {
-          setCompOpen(false);
-          setCompDraft(null);
-          setCompPlanning(null);
-        }}
-        kind={compDraft?.kind ?? "excedente"}
-        initial={compDraft?.initial}
-        getCapacity={(targetDate) =>
-          extraCapacityForDate(targetDate, entries, compensations, settings, { companyCalendars })
-        }
-        pendingDebtMinutes={compPlanning?.unplannedMinutes}
-        planning={compPlanning ?? undefined}
-        onSave={createComp}
-      />
-
-      {/* §10 Modal do motivo do excedente >10h */}
+      {/* §10 Modal do motivo do excedente >10h (parte do fluxo de batida do
+          Registro de hoje — preservado pela 4V). */}
       {reasonDate &&
         (() => {
           const reasonDay = computeDay(

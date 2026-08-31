@@ -89,7 +89,9 @@ check("6. termos funcionais de compensação continuam intactos", () => {
   assert.ok(page.includes("Acordos a compensar"));
   assert.ok(page.includes("Programar hora extra"));
   assert.ok(page.includes("Compensar com hora extra"));
-  assert.ok(visao.includes("Compensações pendentes"));
+  // 4V: a lista de compensações pendentes saiu da Visão Geral (reforma
+  // UI-only) — o gerenciamento permanece na Central de Horas.
+  assert.ok(!visao.includes("Compensações pendentes"), "4V: Visão Geral não lista mais compensações pendentes");
   // 3F: o bloco de compensações saiu da experiência principal do Resumo
   assert.ok(!resumo.includes("Compensações pendentes"));
   // 3E.2: o card Registros não mostra mais compensação programada (fluxo legado)

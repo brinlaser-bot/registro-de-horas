@@ -339,7 +339,11 @@ check("P. (3E.2) card sem fluxo de motivo; compensações preserva realizado ≠
 /* ── Q. Saudação com falta; card HOJE idle ──────────────────── */
 check("Q. saudação de falta e card HOJE idle = jornada não iniciada (sem −8h)", () => {
   assert.ok(pageSrc.includes("Falta registrada para hoje."));
-  assert.ok(pageSrc.includes("jornada não iniciada"));
+  // 4V: o texto "jornada não iniciada" vive no QuickPunch (StatCard HOJE
+  // removido); a página repassa a MESMA flag central de dia idle.
+  const quickSrc4v = srcOf("src/components/quick-punch.tsx");
+  assert.ok(quickSrc4v.includes("jornada não iniciada"), "QuickPunch exibe jornada não iniciada (sem −8h)");
+  assert.ok(pageSrc.includes("idle={todayIdle}"), "4V: página repassa a flag central de dia idle ao Registro de hoje");
   assert.ok(pageSrc.includes("todayIdle"));
   assert.ok(pageSrc.includes("todayCtx.type === \"regular\""));
   assert.ok(pageSrc.includes("!faltaHoje"));

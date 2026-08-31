@@ -120,8 +120,12 @@ check("TESTE 01 DE 6 — VISÃO GERAL: BANCO [10+] DISPONÍVEL = 30min (2h gerad
   assert.ok(card.includes("plans: specialExcessPlans"), "memo do card usa a fonte canônica com plans");
   assert.ok(card.includes("value={formatMinutes(specialBank.availableMinutes)}"), "principal = availableMinutes do motor");
   assert.ok(!card.includes("reservado") || !/reservado: \d/.test(card), "sem card/texto 'Reservado' novo (§4: só o número correto)");
+  // 4V: o card HourBankCard saiu da Visão Geral (reforma UI-only); a página
+  // alimenta a FONTE CANÔNICA diretamente (buildSpecialExcessBank 3C e
+  // buildResumoPeriodView 3A) — o DISPONÍVEL continua líquido de planos ativos.
   const page = src("src/app/(app)/page.tsx");
-  assert.ok(page.includes("specialExcessPlans={specialExcessPlans ?? []}"), "Visão Geral passa specialExcessPlans ao card");
+  assert.ok(page.includes("plans: specialExcessPlans ?? []"), "4V: Visão Geral passa specialExcessPlans à fonte canônica");
+  assert.ok(page.includes("buildSpecialExcessBank"), "4V: BANCO [10+] da Visão Geral usa o motor canônico 3C");
 });
 
 check("TESTE 02 DE 6 — CANCELAR O PLANO DE 1h: DISPONÍVEL VOLTA A 1h30", () => {

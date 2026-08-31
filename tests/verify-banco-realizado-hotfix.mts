@@ -161,7 +161,9 @@ check("F. card HOJE: base efetiva 0min e saldo +0min em 25/08 (mesa jornada do R
   assert.equal(cctx.effectiveExpected, 0, "base efetiva central = 0min");
   assert.equal(cctx.displayDay.expectedMinutes, 0);
   assert.equal(cctx.displayDay.balanceMinutes, 0, "saldo +0min — nunca −8h");
-  assert.match(pageSrc, /label="Hoje"[\s\S]*?todayCtx\.effectiveExpected/, "StatCard HOJE consome a base efetiva central");
+  // 4V: o StatCard "Hoje" saiu da Visão Geral; a base efetiva central segue
+  // alimentando o Registro de hoje (jornada do Registro rápido).
+  assert.ok(pageSrc.includes("jornadaMinutes={todayCtx.effectiveExpected}"), "4V: Registro de hoje consome a base efetiva central");
   assert.ok(!pageSrc.includes("expectedMinutesOf"), "fallback 8h (0 falsy) removido da causa raiz");
 });
 
@@ -180,11 +182,14 @@ check("H. Registro de hoje: ponto+assistente em UM card único, antes do Banco d
   const q = pageSrc.indexOf("<QuickPunch");
   const s = pageSrc.indexOf("<SmartExit");
   const card = pageSrc.indexOf('title="Registro de hoje"');
-  const banco = pageSrc.indexOf("<HourBankCard");
-  const stats = pageSrc.indexOf('label="Hoje"');
+  // 4V: HourBankCard e StatCard "Hoje" saíram da Visão Geral (reforma UI-only);
+  // ordem agora: saudação → Registro de hoje → Resumo rápido → Dias recentes.
+  const banco4v = pageSrc.indexOf("Resumo rápido");
+  const recentes4v = pageSrc.indexOf('title="Dias recentes"');
   assert.equal(pageSrc.indexOf("<QuickPunch", q + 1), -1, "uma única instância (§7: sem duplicar componentes)");
   assert.equal(pageSrc.indexOf("<SmartExit", s + 1), -1);
-  assert.ok(stats < card && card < q && q < s && s < banco, "indicadores → Registro de hoje → Banco de horas (§8)");
+  assert.ok(pageSrc.includes("<HourBankCard") === false, "4V: HourBankCard não renderiza mais na Visão Geral");
+  assert.ok(card < q && q < s && s < banco4v && banco4v < recentes4v, "4V: saudação → Registro de hoje → Resumo rápido → Dias recentes");
   assert.ok(pageSrc.includes(">Ponto<") || pageSrc.includes("\n              Ponto\n"), "área Ponto rotulada");
   assert.ok(pageSrc.includes("Assistente de jornada"), "área Assistente rotulada");
   assert.ok(quickSrc.includes("embedded"), "QuickPunch em modo embutido (sem Card duplo)");

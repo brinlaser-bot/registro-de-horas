@@ -228,7 +228,9 @@ check("I. card (3E.2) sem faixa legada de excedente; ExcessPanel da Visão geral
     "Visão geral sem card duplicado de acordos");
   assert.ok(!pageSrc.includes('title="Acordos a compensar"'));
   assert.ok(panelSrc.includes('title="Acordo a compensar"'), "mantém o card útil no ExcessPanel");
-  assert.ok(pageSrc.includes("acordo de ${formatDateShortBR"));
+  // 4V: a lista de compensações pendentes saiu da Visão Geral; os tipos de
+  // compensação seguem renderizados na Central de Horas.
+  assert.ok(compsSrc.includes('k === "acordo"'), "4V: tipos de compensação na Central de Horas");
 });
 
 reset([]);

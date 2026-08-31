@@ -83,12 +83,14 @@ check("B. Visão geral: bloco 'Calendário a compensar' removido do ExcessPanel;
   assert.equal(obl.reduce((s, v) => s + v.remainingMinutes, 0), 144 * 60, "obrigações íntegras (144h sem quitação; Cinzas = ABONADO_PARCIAL)");
 });
 
-/* ── C. Gráfico: Visão geral usa "Barras empilhadas do período" (mesma fonte do Resumo) ── */
+/* ── C. Gráfico: desde a 4V (reforma UI-only da Visão Geral) o gráfico
+ * detalhado NÃO é mais renderizado na Visão Geral — pertence ao Resumo do
+ * Período, que mantém o MESMO componente (requisito da 4V). ── */
 check("C. Visão geral: sem 'Últimos 14 dias'; gráfico empilhado compartilhado com dados idênticos ao Resumo", () => {
   const home = srcOf("src/app/(app)/page.tsx");
   assert.ok(!home.includes("Últimos 14 dias"), "card antigo removido");
   assert.ok(!home.includes("BarsChart"), "gráfico antigo removido");
-  assert.ok(home.includes("StackedPeriodChart"), "novo gráfico compartilhado na Visão geral");
+  assert.ok(!home.includes("StackedPeriodChart"), "4V: gráfico detalhado não renderiza mais na Visão Geral");
   const resumo = srcOf("src/app/(app)/resumo/page.tsx");
   assert.ok(resumo.includes("StackedPeriodChart"), "Resumo usa o MESMO componente");
   assert.ok(!resumo.includes("StackedBarsChart"), "preparação não está duplicada no Resumo");

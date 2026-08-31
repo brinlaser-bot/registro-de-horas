@@ -423,11 +423,16 @@ check("V. Excluir falta no banner; Assistente mostra Falta registrada (sem previ
 });
 
 /* ── W. Ordem da Visão geral preservada (desktop/mobile) ─── */
-check("W. ordem: saudação → indicadores → Registro de hoje (desktop); ponto no topo no mobile", () => {
-  assert.ok(pageSrc.includes("order-1"));
-  assert.ok(pageSrc.includes("order-2 lg:order-3"));
-  assert.ok(pageSrc.includes("order-3") && pageSrc.includes("lg:order-2"));
-  assert.ok(pageSrc.includes('title="Registro de hoje"'));
+check("W. 4V ordem: saudação → Registro de hoje → Resumo rápido → Dias recentes", () => {
+  // 4V: a página virou fluxo único (sem classes order-*); o Registro de hoje
+  // fica imediatamente após a saudação em mobile e desktop.
+  const saudacao = pageSrc.indexOf("Olá, {user.name}");
+  const registro = pageSrc.indexOf('title="Registro de hoje"');
+  const resumo = pageSrc.indexOf("Resumo rápido");
+  const recentes = pageSrc.indexOf('title="Dias recentes"');
+  assert.ok(saudacao > 0 && saudacao < registro, "saudação antes do Registro de hoje");
+  assert.ok(registro > 0 && registro < resumo, "Registro de hoje antes do Resumo rápido");
+  assert.ok(resumo > 0 && resumo < recentes, "Resumo rápido antes de Dias recentes");
 });
 
 /* ── X. Store: alocar sem alterar useRealizedCreditForDeficit ── */
