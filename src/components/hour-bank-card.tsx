@@ -2,8 +2,10 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { CalendarClock, TrendingDown, TriangleAlert, Wallet, Zap } from "lucide-react";
+import { CalendarClock, Timer, TrendingDown, TriangleAlert, Wallet, Zap } from "lucide-react";
 import { hourBankSummary, excessReasonOnDate, futureCommitmentsSummary } from "@/lib/hour-bank";
+import { buildSpecialExcessBank } from "@/lib/special-excess-bank";
+import type { SpecialExcessUse } from "@/lib/special-excess-use";
 import { annualCycleBounds, annualCycleClose, getAnnualPointCycle } from "@/lib/periods";
 import { computeDay, formatDateBR, formatDateShortBR, formatMinutes } from "@/lib/time";
 import type { Absence } from "@/lib/absences";
@@ -22,6 +24,10 @@ interface Props {
   /** Período atual do ponto (21→20). */
   range: { from: string; to: string };
   today: string;
+  /** 3H: usos ativos do banco [10+] (fonte canônica 3C). */
+  specialExcessUses?: SpecialExcessUse[];
+  /** 3H: início do controle do usuário (insumo do banco canônico). */
+  controlStartDate?: string | null;
   /** Abre o modal de motivo do excedente da data informada. */
   onRegisterReason?: (date: string) => void;
 }
@@ -32,6 +38,7 @@ function Row({
   value,
   tone,
   title,
+  sub,
   children,
 }: {
   icon: React.ReactNode;
@@ -39,6 +46,8 @@ function Row({
   value: string;
   tone: string;
   title?: string;
+  /** 3H: informação secundária discreta (ex.: gerado · utilizado). */
+  sub?: React.ReactNode;
   children?: React.ReactNode;
 }) {
   return (
@@ -51,6 +60,7 @@ function Row({
           {label}
         </p>
         <p className="text-lg font-extrabold tabular-nums text-slate-900">{value}</p>
+        {sub != null && <p className="mt-0.5 text-[11px] font-medium text-slate-500">{sub}</p>}
       </div>
       {children}
     </div>
@@ -73,6 +83,8 @@ export function HourBankCard({
   settings,
   range: _periodRange,
   today,
+  specialExcessUses = [],
+  controlStartDate = null,
   onRegisterReason,
 }: Props) {
   const [futureOpen, setFutureOpen] = useState(false);
@@ -126,6 +138,26 @@ export function HourBankCard({
   const realizedTone =
     bank.realizedBalance > 0 ? "text-emerald-600" : bank.realizedBalance < 0 ? "text-rose-600" : "text-slate-900";
 
+  // 3H — BANCO [10+] DO CICLO ATUAL: fonte CANÔNICA 3C (a mesma do Resumo
+  // e da reconciliação 3G/3G.4 — nenhuma segunda matemática). O valor
+  // principal é o DISPONÍVEL (gerado − utilizado ativo); gerado/utilizado
+  // aparecem como informação secundária discreta.
+  const specialBank = useMemo(
+    () =>
+      buildSpecialExcessBank({
+        cycle: getAnnualPointCycle(today),
+        asOfDate: today,
+        entries,
+        absences,
+        calendars: companyCalendars,
+        settings,
+        faltas,
+        controlStartDate: controlStartDate ?? "",
+        uses: specialExcessUses,
+      }),
+    [today, entries, absences, companyCalendars, settings, faltas, controlStartDate, specialExcessUses],
+  );
+
   return (
     <Card
       title="Banco de horas"
@@ -168,11 +200,12 @@ export function HourBankCard({
         />
 
         <Row
-          icon={<TriangleAlert size={17} />}
-          label="EXCEDENTE DO LIMITE DIÁRIO [10+]"
-          value={formatMinutes(bank.excessSpecialFreeTotal)}
-          tone="bg-rose-100 text-rose-600"
-          title="Reserva especial: precisa de motivo registrado antes da realocação"
+          icon={<Timer size={17} />}
+          label="BANCO [10+] DISPONÍVEL"
+          value={formatMinutes(specialBank.availableMinutes)}
+          tone="bg-violet-100 text-violet-600"
+          title="Saldo [10+] do ciclo anual atual: gerado menos o utilizado ativo (a mesma fonte do Resumo)"
+          sub={`${formatMinutes(specialBank.generatedMinutes)} gerado · ${formatMinutes(specialBank.usedMinutes)} utilizado`}
         >
           {bank.excessWithoutReason > 0 && (
             <Badge tone="amber">⚠ {formatMinutes(bank.excessWithoutReason)} sem motivo</Badge>

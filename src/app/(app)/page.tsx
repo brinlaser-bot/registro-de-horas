@@ -39,6 +39,7 @@ import { compensarObligationOnDate, isAbonadoDay } from "@/lib/compensar";
 import { canRegisterFalta, dayBalanceContribution, faltaOnDate } from "@/lib/faltas";
 import { excessReasonOnDate, shouldPromptExcessReason } from "@/lib/hour-bank";
 import { pendingPunchDatesInCycle } from "@/lib/pending-punches";
+import { buildResumoDayRow, resumoFinancialFrozen, type ResumoDayRow } from "@/lib/resumo-days";
 import { HourBankCard } from "@/components/hour-bank-card";
 import { ExcessReasonModal } from "@/components/excess-reason-modal";
 import type { CompKind, DayResult, DaySummary } from "@/lib/types";
@@ -49,6 +50,38 @@ import { StackedPeriodChart } from "@/components/stacked-period-chart";
 import { SmartExit } from "@/components/smart-exit";
 import { CompensationForm, type CompFormData } from "@/components/compensation-form";
 import { useToast } from "@/components/toast";
+
+/**
+ * 3H — Situação canônica de um dia em "Dias recentes".
+ * Consome a classificação central (buildResumoDayRow — a MESMA de
+ * Registros/Resumo); apenas traduz status → rótulo/tom usando a MESMA
+ * nomenclatura dos cards de Registros (statusBadge + estados inválidos).
+ * Dias financeiramente congelados nunca exibem saldo como definitivo.
+ */
+export function recentDayStatusOf(row: ResumoDayRow): { label: string; tone: "amber" | "rose" | "indigo" | "emerald" | "slate" | "sky" } {
+  switch (row.status) {
+    case "incomplete":
+      return { label: "Registro incompleto", tone: "amber" };
+    case "inconsistent":
+      return { label: "Registro inconsistente", tone: "amber" };
+    case "deficit":
+      return { label: "Abaixo da base", tone: "amber" };
+    case "in-progress":
+      return { label: "Em andamento", tone: "indigo" };
+    case "falta":
+      return { label: "Falta", tone: "rose" };
+    case "ferias":
+      return { label: "Férias", tone: "sky" };
+    case "afastamento":
+      return { label: "Afastamento", tone: "sky" };
+    case "empty":
+      return { label: "Sem registros", tone: "slate" };
+    default:
+      // "ok" (base cumprida, inclusive com saldo positivo) — excess é
+      // tratado pelo chip [10+] existente antes deste helper.
+      return { label: "Dia ok", tone: "emerald" };
+  }
+}
 
 function toSummary(d: DayResult, date?: string): DaySummary {
   return {
@@ -67,7 +100,7 @@ function toSummary(d: DayResult, date?: string): DaySummary {
 export default function DashboardPage() {
   const toast = useToast();
   const mounted = useIsClient();
-  const { user, entries, compensations, absences, companyCalendars, faltas, excessReasons } = useAppData();
+  const { user, entries, compensations, absences, companyCalendars, faltas, excessReasons, specialExcessUses } = useAppData();
   const settings = settingsOf(user);
   const todayStr = todayString();
   const period = getPointPeriod(todayStr);
@@ -93,7 +126,7 @@ export default function DashboardPage() {
   }, []);
   const nowMinutes = nowMinutesLocal();
 
-  const { totals, today, todayCtx, recent, pending } = useMemo(() => {
+  const { totals, today, todayCtx, recent, recentRows, pending } = useMemo(() => {
     /* §1 SALDO DO PERÍODO: percorre TODOS os dias do período de ponto com a
      * resolução central (companyDayContext — folga/fim de semana/abonado não
      * geram déficit) e soma a CONTRIBUIÇÃO CENTRAL do dia
@@ -123,6 +156,7 @@ export default function DashboardPage() {
      * nunca mais "trabalhado − base 8h" (o antigo −6h/−7h de fim de semana).
      */
     const recents: DaySummary[] = [];
+    const recentRows: Record<string, ResumoDayRow> = {};
     for (let i = 13; i >= 0; i--) {
       const d = addDays(todayStr, -i);
       const cctx = companyDayContext(d, entries, absences, companyCalendars, settings, d === todayStr ? nowMinutes : undefined);
@@ -130,6 +164,18 @@ export default function DashboardPage() {
       s.expectedMinutes = cctx.effectiveExpected;
       s.balanceMinutes = cctx.adjustedBalance;
       recents.push(s);
+      // 3H: classificação CANÔNICA do dia (a MESMA de Registros/Resumo) —
+      // incompleto/inconsistente/abaixo da base nunca aparecem como "ok".
+      recentRows[d] = buildResumoDayRow({
+        date: d,
+        today: todayStr,
+        entries,
+        absences,
+        calendars: companyCalendars,
+        settings,
+        faltas,
+        controlStartDate: user.controlStartDate ?? null,
+      });
     }
 
     // Regra 15: pendências de ciclos encerrados NÃO aparecem como ativas no ciclo atual
@@ -138,8 +184,8 @@ export default function DashboardPage() {
       .map((c) => enrichComp(c, entries, settings))
       .sort((a, b) => a.targetDate.localeCompare(b.targetDate));
 
-    return { totals: sum, today: todays, todayCtx: tCtx, recent: recents, pending: pend };
-  }, [entries, compensations, absences, companyCalendars, faltas, settings, period, todayStr, nowMinutes]);
+    return { totals: sum, today: todays, todayCtx: tCtx, recent: recents, recentRows, pending: pend };
+  }, [entries, compensations, absences, companyCalendars, faltas, settings, period, todayStr, nowMinutes, user]);
 
   const range = period;
 
@@ -604,6 +650,8 @@ export default function DashboardPage() {
         settings={settings}
         range={period}
         today={todayStr}
+        specialExcessUses={specialExcessUses ?? []}
+        controlStartDate={user.controlStartDate ?? null}
         onRegisterReason={(date) => setReasonDate(date)}
       />
 
@@ -750,17 +798,45 @@ export default function DashboardPage() {
                 </span>
                 <span className="hidden text-xs text-slate-400 sm:block">{d.entryCount} batida(s)</span>
                 <span className="ml-auto text-sm font-extrabold tabular-nums text-slate-900">
-                  {formatMinutes(d.workedMinutes)}
+                  {formatMinutes(recentRows[d.date]?.workedMinutes ?? d.workedMinutes)}
                 </span>
-                <span
-                  className={`w-20 text-right text-xs font-bold tabular-nums ${
-                    d.balanceMinutes > 0 ? "text-emerald-600" : d.balanceMinutes < 0 ? "text-rose-600" : "text-slate-400"
-                  }`}
-                >
-                  {d.balanceMinutes >= 0 ? "+" : ""}
-                  {formatMinutes(d.balanceMinutes)}
-                </span>
-                {d.excessMinutes > 0 ? <ExcessTenBadge /> : <Badge tone="slate">ok</Badge>}
+                {/* 3H: saldo financeiro definitivo só para dia VÁLIDO — dia
+                    congelado (incompleto/inconsistente/sem registro) mostra
+                    "—" (neutro), nunca +0min como saldo final. */}
+                {(() => {
+                  const row = recentRows[d.date];
+                  if (row && resumoFinancialFrozen(row)) {
+                    return <span className="w-20 text-right text-xs font-bold text-slate-300">—</span>;
+                  }
+                  const bal = row ? row.balanceMinutes : d.balanceMinutes;
+                  return (
+                    <span
+                      className={`w-20 text-right text-xs font-bold tabular-nums ${
+                        bal > 0 ? "text-emerald-600" : bal < 0 ? "text-rose-600" : "text-slate-400"
+                      }`}
+                    >
+                      {bal >= 0 ? "+" : ""}
+                      {formatMinutes(bal)}
+                    </span>
+                  );
+                })()}
+                {/* 3H: situação CANÔNICA — acabou o "ok" genérico para dia
+                    inválido/abaixo da base; [10+] preserva seu chip. */}
+                {(() => {
+                  const row = recentRows[d.date];
+                  if (row && row.status === "excess") return <ExcessTenBadge />;
+                  const st = recentDayStatusOf(row ?? buildResumoDayRow({
+                    date: d.date,
+                    today: todayStr,
+                    entries,
+                    absences,
+                    calendars: companyCalendars,
+                    settings,
+                    faltas,
+                    controlStartDate: user.controlStartDate ?? null,
+                  }));
+                  return <Badge tone={st.tone}>{st.label}</Badge>;
+                })()}
               </Link>
             ))}
           </div>
