@@ -56,6 +56,26 @@ export function manualRemainingAfterSelection(remainingMinutes: number, selected
 }
 
 /**
+ * 3G.2 — MÁXIMO selecionável de UMA origem no modo MANUAL. Regra-mãe: um
+ * destino só recebe [10+] até completar a BASE EFETIVA (nunca cria crédito
+ * artificial). Reutiliza a necessidade JÁ derivada pelo day-view
+ * (`remainingMinutes`) e a disponibilidade real do lote; o restante é
+ * descontado das OUTRAS seleções do formulário — derivação de apresentação,
+ * sem fórmula financeira paralela. Nunca negativo.
+ *
+ *   remainingSelectable = max(remainingNeed − selectedFromOthers, 0)
+ *   maxForThisOrigin    = min(availableFromThisOrigin, remainingSelectable)
+ */
+export function manualMaxForOrigin(
+  availableMinutes: number,
+  remainingNeedMinutes: number,
+  selectedFromOtherOrigins: number,
+): number {
+  const remainingSelectable = Math.max(0, remainingNeedMinutes - selectedFromOtherOrigins);
+  return Math.max(0, Math.min(availableMinutes, remainingSelectable));
+}
+
+/**
  * Modal "Completar jornada com [10+]" (Etapa 3E).
  *
  * - Automático (padrão): o sistema retira das origens mais antigas (motor 3C);
@@ -93,6 +113,9 @@ export function SpecialExcessUseModal({ date, onClose }: Props) {
   const [manualSel, setManualSel] = useState<Record<string, number>>({});
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // 3G.2: aviso curto quando o valor digitado excede o máximo da seleção
+  // (o campo trava no máximo — nada inválido é mantido no formulário).
+  const [clampNote, setClampNote] = useState<string | null>(null);
 
   const maxUsable = view.maxUsableMinutes;
   const autoMinutes = Math.max(0, Math.floor(Number(autoDraft) || 0));
@@ -352,24 +375,36 @@ export function SpecialExcessUseModal({ date, onClose }: Props) {
                 {view.lots.map((lot) => {
                   const sel = manualSel[lot.originDate] ?? 0;
                   const checked = sel > 0;
+                  {/* 3G.2: máximo DINÂMICO — disponibilidade do lote limitada
+                      pela necessidade restante do destino, descontada das
+                      OUTRAS origens selecionadas. Necessidade completa → a
+                      origem não selecionada fica bloqueada (visual claro). */}
+                  const maxForThisOrigin = manualMaxForOrigin(lot.availableMinutes, view.remainingMinutes, manualTotal - sel);
+                  const blocked = !checked && maxForThisOrigin <= 0;
                   return (
                     <li
                       key={lot.originDate}
                       className={`flex flex-col gap-2 rounded-xl border px-3.5 py-2.5 sm:flex-row sm:items-center ${
                         checked ? "border-violet-300 bg-violet-50" : "border-slate-200 bg-white"
-                      }`}
+                      } ${blocked ? "opacity-50" : ""}`}
                     >
                       <label className="flex items-center gap-2.5">
                         <input
                           type="checkbox"
                           checked={checked}
-                          onChange={(e) =>
+                          disabled={blocked}
+                          onChange={(e) => {
+                            setClampNote(null);
                             setManualSel((prev) => ({
                               ...prev,
-                              [lot.originDate]: e.target.checked ? (prev[lot.originDate] || lot.availableMinutes) : 0,
-                            }))
-                          }
-                          className="h-4 w-4 accent-violet-600"
+                              // 3G.2: pré-preenche respeitando o máximo da
+                              // seleção (disponibilidade ∩ necessidade restante).
+                              [lot.originDate]: e.target.checked
+                                ? Math.min(prev[lot.originDate] || lot.availableMinutes, maxForThisOrigin)
+                                : 0,
+                            }));
+                          }}
+                          className="h-4 w-4 accent-violet-600 disabled:cursor-not-allowed"
                         />
                         <span className="text-xs font-bold text-slate-900">{formatDateShortBR(lot.originDate)}</span>
                       </label>
@@ -388,17 +423,19 @@ export function SpecialExcessUseModal({ date, onClose }: Props) {
                         <Input
                           type="number"
                           min={0}
-                          max={lot.availableMinutes}
+                          max={maxForThisOrigin}
                           step={5}
                           inputMode="numeric"
                           disabled={!checked}
                           value={checked ? String(sel) : ""}
-                          onChange={(e) =>
-                            setManualSel((prev) => ({
-                              ...prev,
-                              [lot.originDate]: Math.max(0, Math.min(lot.availableMinutes, Math.floor(Number(e.target.value) || 0))),
-                            }))
-                          }
+                          onChange={(e) => {
+                            // 3G.2: trava no máximo dinâmico (padrão do
+                            // componente: clamp) + aviso curto e claro.
+                            const wanted = Math.floor(Number(e.target.value) || 0);
+                            const capped = Math.max(0, Math.min(maxForThisOrigin, wanted));
+                            setManualSel((prev) => ({ ...prev, [lot.originDate]: capped }));
+                            setClampNote(wanted > capped ? `Máximo disponível para esta seleção: ${formatMinutes(capped)}.` : null);
+                          }}
                           className="w-24"
                           aria-label={`Minutos da origem ${formatDateShortBR(lot.originDate)}`}
                         />
@@ -409,6 +446,12 @@ export function SpecialExcessUseModal({ date, onClose }: Props) {
                   );
                 })}
               </ul>
+            )}
+            {/* 3G.2: feedback do clamp — o valor inválido nunca é mantido. */}
+            {clampNote && (
+              <p className="text-[11px] font-semibold text-amber-700" role="status">
+                {clampNote}
+              </p>
             )}
             <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-slate-50 px-3.5 py-2.5 text-xs">
               <span className="font-medium text-slate-600">
