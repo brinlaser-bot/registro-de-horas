@@ -60,9 +60,12 @@ check("3. inferência inequívoca não exige dropdown de tipo", () => {
   assert.ok(m.includes("será registrado como"));
 });
 
-check("4. CTA Ver pendências usa variante warning", () => {
+check("4. CTA Ver pendências em destaque de alerta (âmbar)", () => {
   const home = srcOf("src/app/(app)/page.tsx");
-  assert.ok(home.includes('variant="warning">Ver pendências'));
+  // 4D (Parte I): o CTA mora no bloco "Atenção agora" (âmbar) como link:
+  assert.ok(home.includes("Atenção agora"), "bloco de alerta presente");
+  assert.ok(home.includes("Ver pendências"));
+  assert.ok(home.includes("text-amber-800 underline"));
   const reg = srcOf("src/app/(app)/registros/page.tsx");
   assert.ok(reg.includes('variant="warning"'));
 });

@@ -7,7 +7,6 @@ import {
   CalendarClock,
   Clock3,
   TrendingUp,
-  TriangleAlert,
   Wallet,
   Zap,
 } from "lucide-react";
@@ -28,15 +27,13 @@ import {
 import { isBirthdayToday } from "@/lib/absences";
 import { companyDayContext } from "@/lib/company-calendar";
 import { compensarObligationOnDate, isAbonadoDay } from "@/lib/compensar";
-import {
-  getAnnualPointCycle,
-  getPointPeriod,
-  listDaysBetween,
-} from "@/lib/periods";
-import { canRegisterFalta, dayBalanceContribution, faltaOnDate } from "@/lib/faltas";
+import { getAnnualPointCycle, getPointPeriod } from "@/lib/periods";
+import { canRegisterFalta, faltaOnDate } from "@/lib/faltas";
 import { excessReasonOnDate, shouldPromptExcessReason } from "@/lib/hour-bank";
 import { pendingPunchDatesInCycle } from "@/lib/pending-punches";
 import { buildResumoDayRow, resumoFinancialFrozen, type ResumoDayRow } from "@/lib/resumo-days";
+import { buildCalendarForecast } from "@/lib/calendar-forecast";
+import { buildCycleSituation } from "@/lib/cycle-dashboard";
 import { buildResumoPeriodView } from "@/lib/resumo-period-view";
 import { buildSpecialExcessBank } from "@/lib/special-excess-bank";
 import { buildSpecialExcessDayView } from "@/lib/special-excess-day-view";
@@ -128,28 +125,11 @@ export default function DashboardPage() {
   }, []);
   const nowMinutes = nowMinutesLocal();
 
-  const { totals, today, todayCtx, recent, recentRows } = useMemo(() => {
-    /* §1 SALDO DO PERÍODO: percorre TODOS os dias do período de ponto com a
-     * resolução central (companyDayContext — folga/fim de semana/abonado não
-     * geram déficit) e soma a CONTRIBUIÇÃO CENTRAL do dia
-     * (dayBalanceContribution — a MESMA fonte do Resumo do período e de
-     * Registros: falta efetiva conta −jornada efetiva; falta prevista entra
-     * mascarada em 0 até a data chegar). O total da Visão geral é, portanto,
-     * SEMPRE igual ao do Resumo — nunca "trabalhado − 8h" por dia com batida.
-     */
-    const sum = { trackedDays: 0, workedTotal: 0, registrableTotal: 0, balanceTotal: 0, excessTotal: 0 };
-    for (const date of listDaysBetween(period.from, period.to)) {
-      const cctx = companyDayContext(date, entries, absences, companyCalendars, settings);
-      const day = cctx.ctx.day;
-      if (date <= todayStr && day.entries.length > 0) {
-        sum.trackedDays += 1;
-        sum.workedTotal += day.workedMinutes;
-        sum.registrableTotal += day.registrableMinutes;
-        sum.excessTotal += day.excessMinutes;
-      }
-      sum.balanceTotal += dayBalanceContribution(cctx, faltas, date, todayStr);
-    }
-
+  /* 4D: o saldo do PERÍODO passa a vir da fonte canônica do Resumo
+   * (buildResumoPeriodView, abaixo) — a MESMA Σ de balanceContribution que
+   * este memo somava (prova de igualdade na suíte 4V). Aqui ficam apenas o
+   * dia corrente e os Dias recentes. */
+  const { today, todayCtx, recent, recentRows } = useMemo(() => {
     const tCtx = companyDayContext(todayStr, entries, absences, companyCalendars, settings, nowMinutes);
     const todays = tCtx.displayDay;
 
@@ -180,14 +160,14 @@ export default function DashboardPage() {
       });
     }
 
-    return { totals: sum, today: todays, todayCtx: tCtx, recent: recents, recentRows };
-  }, [entries, absences, companyCalendars, faltas, settings, period, todayStr, nowMinutes, user]);
+    return { today: todays, todayCtx: tCtx, recent: recents, recentRows };
+  }, [entries, absences, companyCalendars, faltas, settings, todayStr, nowMinutes, user]);
 
-  /* ETAPA 4V — RESUMO RÁPIDO: nada é recalculado aqui. A projeção no ponto e
-   * o [10+] gerado no período vêm da MESMA derivação canônica do Resumo
-   * (buildResumoPeriodView — 3A/3C); o Banco [10+] disponível vem da MESMA
-   * fonte canônica 3C usada pelo Resumo e pela reconciliação 3G (a fórmula
-   * fica na lib — a página apenas apresenta o valor derivado). */
+  /* 4D — PERÍODO ATUAL: nada é recalculado aqui. O saldo factual e o saldo
+   * projetado do período vêm da MESMA derivação canônica do Resumo
+   * (buildResumoPeriodView — 2A/3A/3C); o Banco [10+] disponível vem da
+   * MESMA fonte canônica 3C usada pelo Resumo e pela reconciliação 3G (a
+   * fórmula fica na lib — a página apenas apresenta o valor derivado). */
   const resumoView = useMemo(
     () =>
       buildResumoPeriodView({
@@ -245,6 +225,51 @@ export default function DashboardPage() {
       }),
     [todayStr, entries, absences, companyCalendars, settings, faltas, user, specialExcessUses, specialExcessPlans],
   );
+
+  /* 4D (PARTES B/C) — SITUAÇÃO DO CICLO: fonte canônica PURA
+   * (buildCycleSituation → projectRealizedPeriodOfficial sobre 01/05→30/04).
+   * Factual = Σ balanceContribution; Projetado = factual + [10+] aplicado
+   * (usos ativos, need-cap); reserva futura NÃO entra. */
+  const cycleSituation = useMemo(
+    () =>
+      buildCycleSituation({
+        today: todayStr,
+        entries,
+        absences,
+        calendars: companyCalendars,
+        settings,
+        faltas,
+        controlStartDate: user.controlStartDate ?? null,
+        uses: specialExcessUses ?? [],
+      }),
+    [todayStr, entries, absences, companyCalendars, settings, faltas, user, specialExcessUses],
+  );
+
+  /* 4D (PARTE F) — PREVISÃO DO CALENDÁRIO: obrigações COMPENSAR futuras do
+   * ciclo ainda não QUITADAS (cobertura concluída reduz; planejada NÃO —
+   * PLANEJADO ≠ REALIZADO). Helper puro calendar-forecast. */
+  const forecast = useMemo(
+    () =>
+      buildCalendarForecast({
+        calendars: companyCalendars,
+        compensations,
+        cycle: cycleSituation.cycle,
+        today: todayStr,
+      }),
+    [companyCalendars, compensations, cycleSituation.cycle, todayStr],
+  );
+
+  /* 4D (PARTE G) — PREVISÃO DO CICLO = saldo projetado do ciclo + impactos
+   * futuros conhecidos ainda descobertos. Rotulada como PREVISÃO — nunca
+   * saldo factual/atual/realizado. */
+  const forecastBalanceMinutes = cycleSituation.projectedBalanceMinutes - forecast.uncoveredFutureMinutes;
+
+  /* 4D (PARTE I) — "Atenção agora": somente pendências factuais canônicas. */
+  const pendingPlansCount = useMemo(
+    () => (specialExcessPlans ?? []).filter((pl) => pl.status === "planned" && pl.destinationDate <= todayStr).length,
+    [specialExcessPlans, todayStr],
+  );
+  const pendingPunchesCount = useMemo(() => pendingPunchDatesInCycle(entries, settings, todayStr).length, [entries, settings, todayStr]);
 
   /** Falta "hoje": a jornada vem SEMPRE da resolução central (nunca 8h fixas). */
   const faltaHojeGate = useMemo(
@@ -448,7 +473,6 @@ export default function DashboardPage() {
     !faltaHoje &&
     !todayCtx.ctx.absence &&
     todayCtx.effectiveExpected > 0;
-  const balanceTone = totals.balanceTotal > 0 ? "emerald" : totals.balanceTotal < 0 ? "rose" : "slate";
   const firstName = user.name.split(" ")[0];
   /* Banner de aniversário: SOMENTE VISUAL (data local dia+mês) — nunca entra
    * em jornada, saldo, déficit ou qualquer cálculo central. */
@@ -503,6 +527,134 @@ export default function DashboardPage() {
             <CalendarClock size={15} /> Ver registros
           </Button>
         </Link>
+      </div>
+
+      {/* B. ATENÇÃO AGORA (4D, Parte I) — SOMENTE pendências factuais
+          canônicas que exigem decisão. Sem linguagem do motor antigo
+          ("déficit a compensar"/"compensações pendentes"). */}
+      {(pendingPunchesCount > 0 || pendingPlansCount > 0) && (
+        <div className="rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3">
+          <p className="text-sm font-extrabold text-amber-800">⚠ Atenção agora</p>
+          <ul className="mt-1 space-y-1 text-xs font-medium text-amber-700">
+            {pendingPunchesCount > 0 && (
+              <li>
+                Registros pendentes: {pendingPunchesCount} — dias que precisam de correção antes do saldo ser definitivo.{" "}
+                <Link href="/registros?pendentes=1" className="font-bold text-amber-800 underline underline-offset-2">
+                  Ver pendências
+                </Link>
+              </li>
+            )}
+            {pendingPlansCount > 0 && (
+              <li>
+                Planejamentos [10+] aguardando confirmação: {pendingPlansCount} — resolva ou libere nos dias de Registros.{" "}
+                <Link href="/registros" className="font-bold text-amber-800 underline underline-offset-2">
+                  Abrir Registros
+                </Link>
+              </li>
+            )}
+          </ul>
+        </div>
+      )}
+
+      {/* C. SITUAÇÃO DO CICLO (4D, Partes B/C/E) — três grandezas NUNCA
+          misturadas: FACTUAL (sem [10+]) · PROJETADO (com [10+] já aplicado)
+          · BANCO [10+] DISPONÍVEL. Título derivado do ciclo real. */}
+      <div>
+        <h3 className="mb-3 text-sm font-extrabold uppercase tracking-wider text-slate-400">
+          Ciclo {cycleSituation.cycle}
+        </h3>
+        <div className="grid gap-2 sm:grid-cols-3 sm:gap-3">
+          <StatCard
+            label="Saldo factual"
+            value={fmtSigned(cycleSituation.factualBalanceMinutes)}
+            sub="Sem [10+]"
+            tone={cycleSituation.factualBalanceMinutes > 0 ? "emerald" : cycleSituation.factualBalanceMinutes < 0 ? "rose" : "slate"}
+            icon={<Wallet size={16} />}
+          />
+          <StatCard
+            label="Saldo projetado"
+            value={fmtSigned(cycleSituation.projectedBalanceMinutes)}
+            sub="Com [10+] já aplicado"
+            tone={cycleSituation.projectedBalanceMinutes > 0 ? "indigo" : cycleSituation.projectedBalanceMinutes < 0 ? "rose" : "slate"}
+            icon={<TrendingUp size={16} />}
+          />
+          <StatCard
+            label="BANCO [10+] DISPONÍVEL"
+            value={formatMinutes(specialBank.availableMinutes)}
+            sub={specialBank.reservedMinutes > 0 ? `${formatMinutes(specialBank.reservedMinutes)} reservados` : undefined}
+            tone={specialBank.availableMinutes > 0 ? "violet" : "slate"}
+            icon={<Zap size={16} />}
+          />
+        </div>
+      </div>
+
+      {/* D. PERÍODO ATUAL (4D, Parte D) — factual e projetado da MESMA fonte
+          canônica do Resumo (buildResumoPeriodView — nada recalculado aqui),
+          com o fechamento derivado do período real em destaque. */}
+      <div>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+          <h3 className="text-sm font-extrabold uppercase tracking-wider text-slate-400">
+            Período atual — {formatDateShortBR(period.from)} a {formatDateShortBR(period.to)}
+          </h3>
+          <Badge tone="slate">Fecha em {formatDateShortBR(period.to)}</Badge>
+        </div>
+        <div className="grid gap-2 sm:grid-cols-2 sm:gap-3">
+          <StatCard
+            label="Saldo factual do período"
+            value={fmtSigned(resumoView.cards.regularBalanceMinutes)}
+            sub="Sem [10+] · a mesma fonte do Resumo"
+            tone={resumoView.cards.regularBalanceMinutes > 0 ? "emerald" : resumoView.cards.regularBalanceMinutes < 0 ? "rose" : "slate"}
+            icon={<Wallet size={16} />}
+          />
+          <StatCard
+            label="Saldo projetado do período"
+            value={fmtSigned(projection.projectedBalanceMinutes)}
+            sub={
+              projApplied > 0
+                ? `Com [10+] já aplicado · inclui ${formatMinutes(projApplied)} em ${projAppliedDays} dia(s).`
+                : "Com [10+] já aplicado · nenhum uso ativo ainda."
+            }
+            tone={projection.projectedBalanceMinutes > 0 ? "indigo" : projection.projectedBalanceMinutes < 0 ? "rose" : "slate"}
+            icon={<TrendingUp size={16} />}
+          />
+        </div>
+      </div>
+
+      {/* E. O QUE VEM PELA FRENTE (4D, Partes F/G) — impactos futuros
+          CONHECIDOS do calendário e a PREVISÃO do ciclo (projetado + impacto
+          descoberto). PREVISÃO ≠ saldo factual/atual/realizado. Estado neutro
+          quando não há obrigações futuras (nunca inventar zero negativo). */}
+      <div>
+        <h3 className="mb-3 text-sm font-extrabold uppercase tracking-wider text-slate-400">
+          O que vem pela frente
+        </h3>
+        {forecast.futureEventCount > 0 ? (
+          <>
+            <div className="grid gap-2 sm:grid-cols-2 sm:gap-3">
+              <StatCard
+                label="Impacto futuro do calendário"
+                value={fmtSigned(-forecast.uncoveredFutureMinutes)}
+                sub={`${forecast.futureEventCount} evento(s) a compensar · desconta o já quitado`}
+                tone={forecast.uncoveredFutureMinutes > 0 ? "rose" : "slate"}
+                icon={<CalendarClock size={16} />}
+              />
+              <StatCard
+                label="Previsão do ciclo"
+                value={fmtSigned(forecastBalanceMinutes)}
+                sub="Saldo projetado + impactos futuros conhecidos"
+                tone={forecastBalanceMinutes > 0 ? "emerald" : forecastBalanceMinutes < 0 ? "rose" : "slate"}
+                icon={<TrendingUp size={16} />}
+              />
+            </div>
+            <p className="mt-2 text-[11px] font-medium text-slate-400">
+              Considera eventos futuros já conhecidos do calendário. Dias normais futuros presumem jornada cumprida; planejamentos de compensação não alteram estes números.
+            </p>
+          </>
+        ) : (
+          <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-500">
+            Sem impactos futuros conhecidos do calendário neste ciclo.
+          </div>
+        )}
       </div>
 
       {/* B. REGISTRO DE HOJE — Ponto + Assistente de jornada em UM ÚNICO card
@@ -621,72 +773,6 @@ export default function DashboardPage() {
         )}
       </Card>
 
-      {/* C. PENDÊNCIAS RELEVANTES — apenas o aviso já existente de registros
-          pendentes (dias que precisam de correção). Nenhuma nova lógica. */}
-      {(() => {
-        const nPending = pendingPunchDatesInCycle(entries, settings, todayStr).length;
-        if (nPending <= 0) return null;
-        return (
-          <div className="rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3">
-            <p className="text-sm font-extrabold text-amber-800">⚠ Registros pendentes: {nPending}</p>
-            <p className="mt-0.5 text-xs text-amber-700">Existem dias que precisam de correção antes do saldo ser definitivo.</p>
-            <Link href="/registros?pendentes=1">
-              <Button size="sm" className="mt-2" variant="warning">Ver pendências</Button>
-            </Link>
-          </div>
-        );
-      })()}
-
-      {/* D. RESUMO RÁPIDO — os indicadores do período em um bloco curto.
-          Fontes canônicas, nenhuma fórmula na página:
-          · Saldo regular do período → soma central (dayBalanceContribution),
-            a MESMA fonte de antes (igual ao Resumo);
-          · Projeção no ponto → buildResumoPeriodView (3A, usos ativos),
-            a MESMA fonte do Resumo;
-          · BANCO [10+] DISPONÍVEL → buildSpecialExcessBank (3C: gerado −
-            utilizado ativo − reservado ativo), a MESMA fonte do Resumo;
-          · [10+] gerado no período → factual (3F), MESMA fonte do Resumo.
-          Mobile: 2×2 · Desktop: 4 colunas. */}
-      <div>
-        <h3 className="mb-3 text-sm font-extrabold uppercase tracking-wider text-slate-400">
-          Resumo rápido
-        </h3>
-        <div className="grid grid-cols-2 items-stretch gap-2 lg:grid-cols-4 lg:gap-3">
-          <StatCard
-            label="Saldo regular do período"
-            value={fmtSigned(totals.balanceTotal)}
-            sub="Saldo factual dentro do limite diário de 10h."
-            tone={balanceTone}
-            icon={<Wallet size={16} />}
-          />
-          <StatCard
-            label="Projeção no ponto"
-            value={fmtSigned(projection.projectedBalanceMinutes)}
-            sub={
-              projApplied > 0
-                ? `Inclui ${formatMinutes(projApplied)} de [10+] aplicado em ${projAppliedDays} dia(s).`
-                : "Igual ao saldo factual (sem usos [10+] ativos)."
-            }
-            tone={projection.projectedBalanceMinutes > 0 ? "indigo" : projection.projectedBalanceMinutes < 0 ? "rose" : "slate"}
-            icon={<TrendingUp size={16} />}
-          />
-          <StatCard
-            label="BANCO [10+] DISPONÍVEL"
-            value={formatMinutes(specialBank.availableMinutes)}
-            sub={`${formatMinutes(specialBank.generatedMinutes)} gerado · ${formatMinutes(specialBank.usedMinutes)} utilizado${specialBank.reservedMinutes > 0 ? ` · ${formatMinutes(specialBank.reservedMinutes)} reservado` : ""}`}
-            tone={specialBank.availableMinutes > 0 ? "violet" : "slate"}
-            icon={<Zap size={16} />}
-          />
-          <StatCard
-            label="[10+] gerado no período"
-            value={formatMinutes(resumoView.cards.specialGeneratedMinutes)}
-            sub="Excedente factual acima de 10h/dia."
-            tone={resumoView.cards.specialGeneratedMinutes > 0 ? "violet" : "slate"}
-            icon={<TriangleAlert size={16} />}
-          />
-        </div>
-      </div>
-
       {/* Dias recentes */}
       <Card title="Dias recentes" subtitle="Seus últimos dias com registro">
         {recentDays.length === 0 ? (
@@ -697,55 +783,78 @@ export default function DashboardPage() {
           />
         ) : (
           <div className="divide-y divide-slate-100">
-            {recentDays.map((d) => (
-              <Link key={d.date} href="/registros" className="flex items-center gap-3 py-3 transition-colors hover:bg-slate-50/70">
-                <span className="w-24 shrink-0 text-sm font-bold text-slate-800">
-                  {weekdayShort(d.date).replace(".", "")}
-                  <span className="ml-1.5 font-medium text-slate-400">{formatDateShortBR(d.date)}</span>
-                </span>
-                <span className="hidden text-xs text-slate-400 sm:block">{d.entryCount} batida(s)</span>
-                <span className="ml-auto text-sm font-extrabold tabular-nums text-slate-900">
-                  {formatMinutes(recentRows[d.date]?.workedMinutes ?? d.workedMinutes)}
-                </span>
-                {/* 3H: saldo financeiro definitivo só para dia VÁLIDO — dia
-                    congelado (incompleto/inconsistente/sem registro) mostra
-                    "—" (neutro), nunca +0min como saldo final. */}
-                {(() => {
-                  const row = recentRows[d.date];
-                  if (row && resumoFinancialFrozen(row)) {
-                    return <span className="w-20 text-right text-xs font-bold text-slate-300">—</span>;
-                  }
-                  const bal = row ? row.balanceMinutes : d.balanceMinutes;
-                  return (
-                    <span
-                      className={`w-20 text-right text-xs font-bold tabular-nums ${
-                        bal > 0 ? "text-emerald-600" : bal < 0 ? "text-rose-600" : "text-slate-400"
-                      }`}
-                    >
-                      {bal >= 0 ? "+" : ""}
-                      {formatMinutes(bal)}
+            {/* 4D (PARTE J) — somente APRESENTAÇÃO: mobile em duas linhas por
+                dia; desktop em grid estável. Classificação 3H, saldo "—" para
+                congelados, chip [10+] e fallback recentDayStatusOf INTACTOS. */}
+            {recentDays.map((d) => {
+              const row = recentRows[d.date];
+              const worked = formatMinutes(row?.workedMinutes ?? d.workedMinutes);
+              const frozen = !!row && resumoFinancialFrozen(row);
+              const bal = row ? row.balanceMinutes : d.balanceMinutes;
+              const isExcess = !!row && row.status === "excess";
+              const st = recentDayStatusOf(row ?? buildResumoDayRow({
+                date: d.date,
+                today: todayStr,
+                entries,
+                absences,
+                calendars: companyCalendars,
+                settings,
+                faltas,
+                controlStartDate: user.controlStartDate ?? null,
+              }));
+              const chip = isExcess ? <ExcessTenBadge /> : <Badge tone={st.tone}>{st.label}</Badge>;
+              return (
+                <Link key={d.date} href="/registros" className="block rounded-lg px-1 py-2.5 transition-colors hover:bg-slate-50/70 sm:px-2 sm:py-3">
+                  {/* MOBILE: dia/trabalhado na 1ª linha; saldo + situação na 2ª */}
+                  <div className="sm:hidden">
+                    <div className="flex items-baseline justify-between gap-3">
+                      <span className="text-sm font-bold text-slate-800">
+                        {weekdayShort(d.date).replace(".", "")}
+                        <span className="ml-1.5 font-medium text-slate-400">{formatDateShortBR(d.date)}</span>
+                      </span>
+                      <span className="text-sm font-extrabold tabular-nums text-slate-900">{worked}</span>
+                    </div>
+                    <div className="mt-1 flex items-center justify-between gap-2">
+                      <span className="text-xs font-semibold text-slate-500">
+                        Saldo{" "}
+                        {frozen ? (
+                          <span className="font-bold text-slate-300">—</span>
+                        ) : (
+                          <span className={`font-bold tabular-nums ${bal > 0 ? "text-emerald-600" : bal < 0 ? "text-rose-600" : "text-slate-400"}`}>
+                            {bal >= 0 ? "+" : ""}
+                            {formatMinutes(bal)}
+                          </span>
+                        )}
+                      </span>
+                      {chip}
+                    </div>
+                  </div>
+                  {/* DESKTOP: linha única com colunas alinhadas */}
+                  <div className="hidden items-center gap-3 sm:grid sm:grid-cols-[7.5rem_1fr_6rem_auto]">
+                    <span className="text-sm font-bold text-slate-800">
+                      {weekdayShort(d.date).replace(".", "")}
+                      <span className="ml-1.5 font-medium text-slate-400">{formatDateShortBR(d.date)}</span>
                     </span>
-                  );
-                })()}
-                {/* 3H: situação CANÔNICA — acabou o "ok" genérico para dia
-                    inválido/abaixo da base; [10+] preserva seu chip. */}
-                {(() => {
-                  const row = recentRows[d.date];
-                  if (row && row.status === "excess") return <ExcessTenBadge />;
-                  const st = recentDayStatusOf(row ?? buildResumoDayRow({
-                    date: d.date,
-                    today: todayStr,
-                    entries,
-                    absences,
-                    calendars: companyCalendars,
-                    settings,
-                    faltas,
-                    controlStartDate: user.controlStartDate ?? null,
-                  }));
-                  return <Badge tone={st.tone}>{st.label}</Badge>;
-                })()}
-              </Link>
-            ))}
+                    <span className="text-sm font-extrabold tabular-nums text-slate-900">
+                      {worked} <span className="text-xs font-medium text-slate-400">trabalhadas</span>
+                    </span>
+                    {frozen ? (
+                      <span className="w-20 text-right text-xs font-bold text-slate-300">—</span>
+                    ) : (
+                      <span
+                        className={`w-20 text-right text-xs font-bold tabular-nums ${
+                          bal > 0 ? "text-emerald-600" : bal < 0 ? "text-rose-600" : "text-slate-400"
+                        }`}
+                      >
+                        {bal >= 0 ? "+" : ""}
+                        {formatMinutes(bal)}
+                      </span>
+                    )}
+                    {chip}
+                  </div>
+                </Link>
+              );
+            })}
           </div>
         )}
       </Card>

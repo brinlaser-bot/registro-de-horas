@@ -423,16 +423,18 @@ check("V. Excluir falta no banner; Assistente mostra Falta registrada (sem previ
 });
 
 /* ── W. Ordem da Visão geral preservada (desktop/mobile) ─── */
-check("W. 4V ordem: saudação → Registro de hoje → Resumo rápido → Dias recentes", () => {
+check("W. 4D ordem: saudação → … → O que vem pela frente → Registro de hoje → Dias recentes", () => {
   // 4V: a página virou fluxo único (sem classes order-*); o Registro de hoje
   // fica imediatamente após a saudação em mobile e desktop.
   const saudacao = pageSrc.indexOf("Olá, {user.name}");
   const registro = pageSrc.indexOf('title="Registro de hoje"');
-  const resumo = pageSrc.indexOf("Resumo rápido");
+  // 4D: "Resumo rápido" saiu; a seção "O que vem pela frente" precede o
+  // Registro de hoje, seguido de Dias recentes.
+  const frente = pageSrc.indexOf("O que vem pela frente");
   const recentes = pageSrc.indexOf('title="Dias recentes"');
   assert.ok(saudacao > 0 && saudacao < registro, "saudação antes do Registro de hoje");
-  assert.ok(registro > 0 && registro < resumo, "Registro de hoje antes do Resumo rápido");
-  assert.ok(resumo > 0 && resumo < recentes, "Resumo rápido antes de Dias recentes");
+  assert.ok(frente > 0 && frente < registro, "4D: O que vem pela frente antes do Registro de hoje");
+  assert.ok(registro > 0 && registro < recentes, "Registro de hoje antes de Dias recentes");
 });
 
 /* ── X. Store: alocar sem alterar useRealizedCreditForDeficit ── */

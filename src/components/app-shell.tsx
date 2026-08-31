@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -44,6 +44,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const mounted = useIsClient();
   const { user } = useAppData();
+
+  /* 4D (PARTE L) — reset de scroll CENTRALIZADO na navegação: toda troca de
+   * rota (Visão geral, Registros, Central, Férias, Resumo, Configurações)
+   * abre no topo, desktop e mobile. Efeito disparado SOMENTE na TROCA de
+   * pathname — expandir/recolher card, abrir modal ou interagir na mesma
+   * rota não muda a rota e portanto nunca reseta o scroll. */
+  const pathnameRef = useRef(pathname);
+  useEffect(() => {
+    if (pathnameRef.current !== pathname) {
+      pathnameRef.current = pathname;
+      window.scrollTo(0, 0);
+    }
+  }, [pathname]);
 
   const today = new Date().toLocaleDateString("pt-BR", {
     weekday: "long",

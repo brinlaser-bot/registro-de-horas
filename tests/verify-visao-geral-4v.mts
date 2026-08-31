@@ -90,13 +90,13 @@ check("TESTE 01 DE 10 — Visão Geral mantém o Registro de hoje", () => {
   assert.ok(page.includes("<ExcessReasonModal"), "modal do motivo do excedente preservado");
 });
 
-check("TESTE 02 DE 10 — Saldo regular do período presente, na MESMA fonte anterior", () => {
-  assert.ok(page.includes('label="Saldo regular do período"'), "indicador presente");
-  assert.ok(page.includes("value={fmtSigned(totals.balanceTotal)}"), "exibe o total da soma central");
-  // MESMA FONTE ANTERIOR: memo que percorre o período com a resolução central
-  // (companyDayContext) somando dayBalanceContribution — nada novo.
-  assert.ok(page.includes("listDaysBetween(period.from, period.to)"));
-  assert.ok(page.includes("dayBalanceContribution(cctx, faltas, date, todayStr)"));
+check("TESTE 02 DE 10 — Saldo factual do período presente, na MESMA fonte anterior", () => {
+  // 4D: o card virou "Saldo factual do período" e a fonte é a derivação
+  // canônica buildResumoPeriodView (a MESMA Σ de balanceContribution que o
+  // memo anterior somava — igualdade provada abaixo e na suíte 4D).
+  assert.ok(page.includes('label="Saldo factual do período"'), "indicador presente");
+  assert.ok(page.includes("value={fmtSigned(resumoView.cards.regularBalanceMinutes)}"), "exibe o total da fonte canônica");
+  assert.ok(page.includes("buildResumoPeriodView"), "fonte canônica na página");
   // Funcional: a soma da fonte anterior continua IGUAL à do Resumo (verdade canônica).
   const st = dd();
   const settings = settingsOf(st.user);
@@ -120,11 +120,12 @@ check("TESTE 02 DE 10 — Saldo regular do período presente, na MESMA fonte ant
   });
   assert.equal(total, view.cards.regularBalanceMinutes, "saldo do período = saldo regular canônico");
   // Linguagem factual (§9/§18) — sem crédito/débito/dívida na nova superfície:
-  assert.ok(!/débito|dívida|crédito/i.test(page.slice(page.indexOf('label="Saldo regular do período"'), page.indexOf("Projeção no ponto") + 200)), "sem vocabulário de dívida no indicador");
+  assert.ok(!/débito|dívida|crédito/i.test(page.slice(page.indexOf('label="Saldo factual do período"'), page.indexOf('label="Saldo projetado do período"') + 200)), "sem vocabulário de dívida no indicador");
 });
 
-check("TESTE 03 DE 10 — Projeção no ponto presente, na MESMA fonte anterior", () => {
-  assert.ok(page.includes('label="Projeção no ponto"'), "indicador presente");
+check("TESTE 03 DE 10 — Saldo projetado do período presente, na MESMA fonte anterior", () => {
+  // 4D: rótulo "Saldo projetado do período"; fonte inalterada (3A).
+  assert.ok(page.includes('label="Saldo projetado do período"'), "indicador presente");
   assert.ok(page.includes("value={fmtSigned(projection.projectedBalanceMinutes)}"), "exibe a projeção derivada");
   // MESMA FONTE do Resumo (3A): buildResumoPeriodView — nenhum recálculo na página.
   assert.ok(page.includes("buildResumoPeriodView"));
@@ -159,10 +160,10 @@ check("TESTE 04 DE 10 — BANCO [10+] DISPONÍVEL presente, sem fórmula paralel
   // Sem matemática paralela escrita na página:
   assert.ok(!/generatedMinutes\s*-\s*usedMinutes/.test(page), "sem subtração paralela no componente");
   assert.ok(!page.includes("excessSpecialFreeTotal"), "sem métrica legado");
-  // Subtexto gerado · utilizado · reservado (semântica 3H/4B preservada):
-  assert.ok(page.includes("gerado · "), "sub com gerado");
-  assert.ok(page.includes("utilizado"), "sub com utilizado");
-  assert.ok(page.includes("reservado`"), "reservado condicional (>0)");
+  // 4D (Parte E): sub secundário CURTO — somente "X reservados" quando > 0
+  // (gerado histórico/utilizado vão para a futura Central):
+  assert.ok(page.includes("reservados`"), "reservado condicional (>0) no sub");
+  assert.ok(!page.includes("gerado · "), "sem gerado histórico no card da Visão Geral (4D Parte E)");
   // Funcional: o valor exibido é o do motor canônico.
   const st = dd();
   const b = buildSpecialExcessBank({
@@ -180,10 +181,10 @@ check("TESTE 04 DE 10 — BANCO [10+] DISPONÍVEL presente, sem fórmula paralel
   assert.equal(b.availableMinutes, Math.max(0, b.generatedMinutes - b.usedMinutes - b.reservedMinutes), "identidade canônica (fórmula na lib, não na página)");
 });
 
-check("TESTE 05 DE 10 — [10+] gerado no período continua factual", () => {
-  assert.ok(page.includes('label="[10+] gerado no período"'), "indicador presente");
-  assert.ok(page.includes("value={formatMinutes(resumoView.cards.specialGeneratedMinutes)}"), "valor da fonte canônica factual (3F)");
-  assert.ok(page.includes("Excedente factual acima de 10h/dia."), "sub factual");
+check("TESTE 05 DE 10 — [10+] gerado: factual, fora da VG (4D) e intacto no Resumo", () => {
+  // 4D: o card de gerado saiu da Visão Geral (detalhe vai para a futura
+  // Central); o valor factual segue canônico no Resumo:
+  assert.ok(!page.includes('[10+] gerado no período'), "4D: fora da Visão Geral");
   // Funcional: o gerado do período é factual — igual à soma dos excessos diários
   // da classificação canônica (buildResumoDayRow, a MESMA de Registros/Resumo).
   const st = dd();
@@ -215,6 +216,8 @@ check("TESTE 05 DE 10 — [10+] gerado no período continua factual", () => {
     plans: st.specialExcessPlans ?? [],
   });
   assert.equal(view.cards.specialGeneratedMinutes, factual, "[10+] gerado no período = soma factual dos excessos");
+  const resumo4v = src("src/app/(app)/resumo/page.tsx");
+  assert.ok(resumo4v.includes('[10+] gerado no período'), "Resumo mantém o indicador factual");
 });
 
 check("TESTE 06 DE 10 — Dias recentes presentes, classificação 3H intacta", () => {
@@ -293,10 +296,12 @@ check("TESTE 08 DE 10 — Gráfico detalhado sai da Visão Geral; componente per
   assert.ok(resumo.includes('title="Barras empilhadas do período"'), "card do gráfico intacto no Resumo");
 });
 
-check("TESTE 09 DE 10 — Responsividade: 2×2 no mobile, sem overflow horizontal", () => {
-  // Resumo rápido: grid 2×2 no mobile, 4 colunas no desktop:
-  const bloco = page.slice(page.indexOf("Resumo rápido"));
-  assert.ok(/grid grid-cols-2 items-stretch gap-2 lg:grid-cols-4/.test(bloco), "indicadores 2×2 no mobile / 4 no desktop");
+check("TESTE 09 DE 10 — Responsividade: composição compacta mobile, sem overflow horizontal", () => {
+  // 4D: Situação do ciclo (3 cards empilhados no mobile / 3 colunas no
+  // desktop) e pares de cards (período/frente) empilhados no mobile:
+  const bloco = page.slice(page.indexOf("Ciclo {cycleSituation.cycle}"));
+  assert.ok(/grid gap-2 sm:grid-cols-3 sm:gap-3/.test(bloco), "ciclo: empilhado no mobile / 3 colunas no desktop");
+  assert.ok(/grid gap-2 sm:grid-cols-2 sm:gap-3/.test(bloco), "período/frente: empilhados no mobile / 2 colunas no desktop");
   // Registro de hoje empilha no mobile e divide colunas no desktop, sem estourar:
   assert.ok(page.includes("grid items-start gap-4 lg:grid-cols-2 lg:gap-5"), "Registro de hoje empilha no mobile");
   assert.ok(page.includes("min-w-0"), "filhos com min-w-0 (sem overflow)");

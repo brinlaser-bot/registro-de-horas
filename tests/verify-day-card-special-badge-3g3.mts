@@ -175,7 +175,10 @@ check("I. bloco EXPANDIDO preservado + 'Projeção completada com [10+]' apenas 
   assert.ok(summary.includes("Projeção completada com [10+]"), "linha nova no bloco expandido");
   assert.ok(summary.includes("view.remainingMinutes === 0"), "gated pelo uso TOTAL (parcial não mostra)");
   assert.ok(summary.includes("[10+] utilizado:"), "linha agregada original preservada");
-  assert.ok(summary.includes("Origem:"), "detalhe por uso preservado");
+  // 4D (Parte K): apresentação empilhada no mobile — rótulo "Origens" com
+  // uma linha por origem, mesma fonte (u.allocations):
+  assert.ok(summary.includes("Origens"), "detalhe por uso preservado");
+  assert.ok(summary.includes("u.allocations.map"), "origens listadas da mesma fonte");
   assert.ok(summary.includes("Cancelar uso"), "cancelamento individual preservado");
 });
 

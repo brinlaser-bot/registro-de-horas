@@ -97,7 +97,8 @@ check("A. 07/09 08:00–10:00 em 25/08: sem déficit, crédito, totais nem saldo
   const resumoDays = srcOf("src/lib/resumo-days.ts");
   assert.ok(resumoDays.includes("Jornada não iniciada"));
   assert.ok(resumoDays.includes("Registro futuro"));
-  assert.ok(pageSrc.includes("date <= todayStr && day.entries.length > 0"));
+  // 4D: mesma guarda 3H (futuro/s Dias recentes), nos nomes atuais:
+  assert.ok(pageSrc.includes("d.entryCount > 0 && d.date <= todayStr"));
 });
 
 /* ── B. HOJE sem ponto: jornada não iniciada, sem −8h ─────── */

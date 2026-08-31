@@ -109,18 +109,28 @@ export function SpecialExcessUseSummary({ view, onOpen }: Props) {
         <ul className="space-y-1.5">
           {view.activeUses.map((u, i) => {
             const m = specialExcessUseMinutes(u);
+            // 4D (PARTE K): somente APRESENTAÇÃO — mobile empilha uso,
+            // origens, modo e cancelamento (hierarquia clara em coluna
+            // estreita); desktop segue compacto. Rastreabilidade intacta.
             return (
               <li
                 key={u.id}
-                className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg bg-white/70 px-2.5 py-1.5 text-[11px] font-medium text-violet-900"
+                className="space-y-1.5 rounded-lg bg-white/70 px-2.5 py-2 text-[11px] font-medium text-violet-900 sm:flex sm:flex-wrap sm:items-center sm:gap-x-3 sm:space-y-0"
               >
-                <span className="font-bold tabular-nums">
+                <span className="block font-bold tabular-nums sm:contents">
                   Uso {i + 1} — {formatMinutes(m)}
                 </span>
-                <span className="min-w-0 flex-1">
-                  Origem:{" "}
-                  {u.allocations.map((a) => `${formatDateShortBR(a.originDate)} — ${formatMinutes(a.minutes)}`).join(" · ")}
-                  <span className="text-violet-600">
+                <span className="block min-w-0 sm:flex-1">
+                  <span className="block text-violet-500">Origens</span>
+                  {u.allocations.map((a) => (
+                    <span key={a.originDate} className="block tabular-nums">
+                      {formatDateShortBR(a.originDate)} · {formatMinutes(a.minutes)}
+                    </span>
+                  ))}
+                  <span className="mt-0.5 inline-flex items-center gap-1 rounded-md bg-violet-100/70 px-1.5 py-0.5 text-[10px] font-bold text-violet-700 sm:hidden">
+                    {u.allocationStrategy === "fifo" ? "Seleção automática" : "Origem escolhida manualmente"}
+                  </span>
+                  <span className="hidden text-violet-600 sm:inline">
                     {" "}
                     · {u.allocationStrategy === "fifo" ? "Seleção automática" : "Origem escolhida manualmente"}
                   </span>
@@ -128,7 +138,7 @@ export function SpecialExcessUseSummary({ view, onOpen }: Props) {
                 <Button
                   size="sm"
                   variant="ghost"
-                  className="!px-2 !text-rose-600 hover:!bg-rose-50"
+                  className="w-full !px-2 !text-rose-600 hover:!bg-rose-50 sm:w-auto"
                   onClick={() => setCancelTarget(u)}
                 >
                   Cancelar uso de [10+]
