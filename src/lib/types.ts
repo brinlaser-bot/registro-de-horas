@@ -117,6 +117,13 @@ export interface AppData {
    * Opcional em dados antigos — a hidratação preenche [].
    */
   specialExcessUses?: import("./special-excess-use").SpecialExcessUse[];
+  /**
+   * PLANOS/RESERVAS futuras do banco [10+] (Etapa 4A). PLANEJADO NÃO É
+   * UTILIZADO: a reserva não altera fatos, saldo regular nem projeção de
+   * dia realizado — dias realizados usam specialExcessUses. Opcional em
+   * dados antigos — a hidratação preenche [].
+   */
+  specialExcessPlans?: import("./special-excess-plan").SpecialExcessPlan[];
 }
 
 /** Códigos do MOTIVO DO EXCEDENTE acima de 10h (select do modal). */

@@ -34,10 +34,15 @@ import {
   specialExcessUseMinutes,
   validateSpecialExcessUse,
   activeSpecialExcessUses,
+  usedSpecialMinutesByOrigin,
   type SpecialExcessAllocation,
   type SpecialExcessAllocationStrategy,
   type SpecialExcessUse,
 } from "./special-excess-use";
+import {
+  validateSpecialExcessPlan,
+  type SpecialExcessPlan,
+} from "./special-excess-plan";
 import {
   planSpecialExcessReconciliation,
   type SpecialReconciliationPlan,
@@ -73,7 +78,12 @@ export interface ActionResult {
     | "period-closed"
     | "invalid-use"
     | "special-release-required"
-    | "special-release-cancelled";
+    | "special-release-cancelled"
+    | "destination-not-future"
+    | "plan-not-found"
+    | "plan-already-cancelled"
+    | "plan-already-concluded"
+    | "invalid-plan";
   /** Capacidade disponível no dia de destino (quando code = over-capacity). */
   available?: number;
   limitMinutes?: number;
@@ -162,6 +172,8 @@ export function parseStoredAppData(raw: string): AppData | null {
     const excessReasons = Array.isArray(parsed.excessReasons) ? parsed.excessReasons : [];
     // Dados antigos sem a coleção → [] (nada antigo é apagado ou reinterpretado).
     const specialExcessUses = Array.isArray(parsed.specialExcessUses) ? parsed.specialExcessUses : [];
+    // 4A: dados antigos sem planos → [] (retrocompatível; nada é reinterpretado).
+    const specialExcessPlans = Array.isArray(parsed.specialExcessPlans) ? parsed.specialExcessPlans : [];
     return {
       user: parsed.user,
       entries: parsed.entries,
@@ -171,6 +183,7 @@ export function parseStoredAppData(raw: string): AppData | null {
       faltas,
       excessReasons,
       specialExcessUses,
+      specialExcessPlans,
     };
   } catch {
     return null;
@@ -305,7 +318,28 @@ const SPECIAL_PERIOD_CLOSED_MSG =
 const nextSpecialUseId = (rows: SpecialExcessUse[]) =>
   `seu-${rows.reduce((m, u) => Math.max(m, Number(u.id.replace(/\D+/g, "")) || 0), 0) + 1}`;
 
-/** Banco [10+] do ciclo do destino, com o uso em edição fora (libera suas allocations). */
+/* ── ETAPA 4A — PLANOS DE RESERVA FUTURA [10+] (mensagens humanas) ── */
+
+const SPECIAL_PLAN_PERIOD_CLOSED_MSG =
+  "O período já está fechado: não é possível criar ou alterar reservas de [10+].";
+const SPECIAL_PLAN_FUTURE_MSG =
+  "A reserva de [10+] é um planejamento para um dia futuro: não é possível reservar para hoje ou para um dia passado.";
+const SPECIAL_PLAN_NOT_FOUND_MSG = "Reserva de [10+] não encontrada.";
+const SPECIAL_PLAN_ALREADY_CANCELLED_MSG =
+  "Esta reserva de [10+] já foi cancelada; o histórico não pode ser alterado.";
+const SPECIAL_PLAN_ALREADY_CONCLUDED_MSG =
+  "Esta reserva de [10+] já foi concluída; o histórico não pode ser alterado.";
+const SPECIAL_PLAN_CROSS_CYCLE_MSG =
+  "A reserva não pode atravessar o fechamento anual (30/04): origem e destino devem pertencer ao mesmo ciclo anual.";
+
+/** id string dos planos: "sep-<n>" (n = maior sufixo numérico + 1, sem colisão). */
+const nextSpecialPlanId = (rows: SpecialExcessPlan[]) =>
+  `sep-${rows.reduce((m, p) => Math.max(m, Number(p.id.replace(/\D+/g, "")) || 0), 0) + 1}`;
+
+/** Banco [10+] do ciclo do destino, com o uso em edição fora (libera suas allocations).
+ *  4A: planos ATIVOS entram como RESERVADO — a disponibilidade por origem é
+ *  GERADO − UTILIZADO − RESERVADO (§10/§11): um uso novo/editado nunca rouba
+ *  minuto já reservado por um plano ativo. */
 function specialBankOf(
   d: AppData,
   destinationDate: string,
@@ -322,6 +356,7 @@ function specialBankOf(
     faltas: d.faltas,
     controlStartDate: d.user.controlStartDate ?? "",
     uses: (d.specialExcessUses ?? []).filter((u) => u.id !== excludeUseId),
+    plans: (d.specialExcessPlans ?? []).filter((p) => p.status === "planned"),
   });
 }
 
@@ -848,6 +883,191 @@ function reconcileSpecialOrigins(
   return { ...d, specialExcessUses: uses };
 }
 
+/* ─────────────────────────────────────────────────────────────
+   ETAPA 4A — ORIGEM [10+] REDUZIDA/ELIMINADA ENQUANTO RESERVADA.
+
+   Estende o MESMO fluxo 3G.4 (sem segundo motor) aos PLANOS de
+   reserva. Prioridade canônica (§19): USO REALIZADO > PLANO FUTURO —
+   esta função roda DEPOIS de reconcileSpecialOrigins no MESMO mutate,
+   então a capacidade restante para planos é sempre:
+
+     geração factual atual da origem − minutos em USOS ativos
+
+   ou seja: o uso realizado é lastreado primeiro; só o remanescente
+   sustenta reservas futuras. Nunca se invalida um uso para preservar
+   uma reserva.
+
+   - MANUAL (§17): a origem escolhida NUNCA é substituída — mantém
+     somente a parcela com lastro (trim na mesma origem); redução
+     parcial segue o padrão 3G/3G.4 (original cancelado + versão ativa
+     reconciliada, histórico/auditabilidade preservados); zerada →
+     plano cancelado explicitamente (nunca migram origem);
+   - AUTOMÁTICO (§18): tenta preservar o TOTAL recompondo pelo FIFO
+     canônico (3C) sobre origens válidas do MESMO ciclo, respeitando
+     usos ativos e os DEMAIS planos ativos; nunca aumenta o total do
+     plano; sem lastro suficiente, reduz (nunca inventa saldo); total
+     preservado → redistribuição in-place (mesmo id).
+   Determinismo (§21): planos mais ANTIGOS primeiro (createdAt ASC — o
+   mesmo critério da 3G/3G.4). Avisos curtos (§10) para a UI. Histórico
+   NUNCA é apagado; motivo registrado na nota (append).
+   ───────────────────────────────────────────────────────────── */
+
+function reconcileSpecialPlanOrigins(
+  d: AppData,
+  affectedDates: string[],
+  nowTs: number,
+  warnings: string[],
+): AppData {
+  const affectedOrigins = new Set(affectedDates);
+  const allPlans = d.specialExcessPlans ?? [];
+  const active = allPlans.filter(
+    (p) => p.status === "planned" && p.allocations.some((a) => affectedOrigins.has(a.originDate)),
+  );
+  if (active.length === 0) return d;
+
+  const asOf = todayString();
+  const settings = settingsOf(d.user);
+  // Geração ATUAL por origem (mesma fonte 3C do banco — estado simulado).
+  const genByOrigin = new Map<string, number>();
+  const cycles = new Set<string>([...affectedOrigins].map(getAnnualPointCycle));
+  for (const cycle of cycles) {
+    const bank = buildSpecialExcessBank({
+      cycle,
+      asOfDate: asOf,
+      entries: d.entries,
+      absences: d.absences,
+      calendars: d.companyCalendars,
+      settings,
+      faltas: d.faltas,
+      controlStartDate: d.user.controlStartDate ?? "",
+      uses: [],
+      plans: [],
+    });
+    for (const lot of bank.lots) genByOrigin.set(lot.originDate, lot.generatedMinutes);
+  }
+  // §19 PRIORIDADE: usos ativos (JÁ reconciliados neste mutate pelo 3G.4)
+  // consomem a capacidade primeiro; o remanescente sustenta as reservas.
+  const usedActive = usedSpecialMinutesByOrigin(d.specialExcessUses ?? []);
+  const remaining = new Map<string, number>();
+  for (const o of affectedOrigins) {
+    remaining.set(o, Math.max(0, (genByOrigin.get(o) ?? 0) - (usedActive[o] ?? 0)));
+  }
+
+  // Planos ativos fora do conjunto de trabalho (outras origens) — entram
+  // como verdade no banco do FIFO (nunca recompor sobre reserva alheia).
+  const worksetIds = new Set(active.map((p) => p.id));
+  const untouchedPlans = allPlans.filter((p) => p.status === "planned" && !worksetIds.has(p.id));
+
+  // Critério determinístico existente (3G/3G.4): mais antigos primeiro.
+  const ordered = [...active].sort((a, b) => a.createdAt - b.createdAt);
+
+  const cancelledIds = new Set<string>();
+  const inPlaceUpdates = new Map<string, SpecialExcessAllocation[]>();
+  const reconciledCreates: Array<Pick<SpecialExcessPlan, "destinationDate" | "allocations" | "selectionMode" | "note">> = [];
+  const processedFinals: SpecialExcessPlan[] = []; // reservas finais p/ FIFO dos próximos planos
+
+  for (const plan of ordered) {
+    let changed = false;
+    const trimmed: SpecialExcessAllocation[] = [];
+    for (const a of plan.allocations) {
+      if (!affectedOrigins.has(a.originDate)) {
+        trimmed.push(a);
+        continue;
+      }
+      const cap = remaining.get(a.originDate) ?? 0;
+      const keep = Math.min(a.minutes, cap);
+      remaining.set(a.originDate, cap - keep);
+      if (keep < a.minutes) changed = true;
+      if (keep > 0) trimmed.push({ originDate: a.originDate, minutes: keep });
+    }
+    let finalAllocs = trimmed;
+    const originalTotal = plan.allocations.reduce((s, x) => s + x.minutes, 0);
+    // AUTOMÁTICO: tentar preservar o TOTAL pelo FIFO (3C) — nunca aumentar.
+    if (plan.selectionMode === "automatic" && changed) {
+      const trimmedTotal = trimmed.reduce((s, x) => s + x.minutes, 0);
+      if (trimmedTotal < originalTotal) {
+        const bank = buildSpecialExcessBank({
+          cycle: getAnnualPointCycle(plan.destinationDate),
+          asOfDate: asOf,
+          entries: d.entries,
+          absences: d.absences,
+          calendars: d.companyCalendars,
+          settings,
+          faltas: d.faltas,
+          controlStartDate: d.user.controlStartDate ?? "",
+          uses: d.specialExcessUses ?? [], // §19: usos primeiro (pós-3G.4)
+          plans: [...untouchedPlans, ...processedFinals], // o próprio plano fica fora
+        });
+        const fifo = allocateSpecialExcessFifo({ bank, destinationDate: plan.destinationDate, requestedMinutes: originalTotal });
+        if (!fifo.error && fifo.allocatedMinutes > trimmedTotal) finalAllocs = fifo.allocations;
+      }
+    }
+    if (finalAllocs.length > 0) processedFinals.push({ ...plan, allocations: finalAllocs });
+    if (!changed) continue;
+
+    const finalTotal = finalAllocs.reduce((s, x) => s + x.minutes, 0);
+    if (finalTotal === originalTotal && plan.selectionMode === "automatic") {
+      // Total preservado: redistribuição in-place do plano automático.
+      inPlaceUpdates.set(plan.id, finalAllocs);
+      warnings.push(
+        `As origens da reserva de ${formatMinutes(originalTotal)} de [10+] foram redistribuídas após a alteração da jornada.`,
+      );
+    } else if (finalTotal > 0) {
+      // Redução parcial: original fica no histórico; versão ativa reconciliada.
+      cancelledIds.add(plan.id);
+      reconciledCreates.push({
+        destinationDate: plan.destinationDate,
+        allocations: finalAllocs,
+        selectionMode: plan.selectionMode,
+        note: `Plano reconciliado após redução da geração [10+] na origem (original ${plan.id}: ${formatMinutes(originalTotal)} → ${formatMinutes(finalTotal)}).`,
+      });
+      warnings.push(
+        `A origem de [10+] foi reduzida. ${formatMinutes(finalTotal)} permanecem reservados e ${formatMinutes(originalTotal - finalTotal)} deixaram de estar reservados.`,
+      );
+    } else {
+      cancelledIds.add(plan.id);
+      warnings.push(
+        `${formatMinutes(originalTotal)} de [10+] deixaram de estar disponíveis após a alteração da jornada e a reserva vinculada foi cancelada.`,
+      );
+    }
+  }
+
+  if (cancelledIds.size === 0 && inPlaceUpdates.size === 0) return d;
+
+  let plans = allPlans;
+  // 1) Cancelamento histórico com motivo anexado (não destrutivo).
+  plans = plans.map((p) =>
+    cancelledIds.has(p.id)
+      ? {
+          ...p,
+          status: "cancelled" as const,
+          cancelledAt: nowTs,
+          updatedAt: nowTs,
+          note: p.note ? `${p.note} · ${ORIGIN_RECONCILE_NOTE}` : ORIGIN_RECONCILE_NOTE,
+        }
+      : p,
+  );
+  // 2) Redistribuição in-place (plano automático com total preservado).
+  plans = plans.map((p) =>
+    inPlaceUpdates.has(p.id) ? { ...p, allocations: inPlaceUpdates.get(p.id)!, updatedAt: nowTs } : p,
+  );
+  // 3) Versões ativas reconciliadas (validadas; defensivo: nunca inválida).
+  for (const rc of reconciledCreates) {
+    const candidate: SpecialExcessPlan = {
+      id: nextSpecialPlanId(plans),
+      destinationDate: rc.destinationDate,
+      allocations: rc.allocations,
+      selectionMode: rc.selectionMode,
+      status: "planned",
+      createdAt: nowTs,
+      note: rc.note,
+    };
+    if (!validateSpecialExcessPlan(candidate).ok) continue;
+    plans = [...plans, candidate];
+  }
+  return { ...d, specialExcessPlans: plans };
+}
+
 /** Opções 3G dos actions que alteram batidas. */
 interface PunchMutationOpts {
   /** Confirmação humana da liberação de [10+] (2ª chamada, §6/§8). */
@@ -908,6 +1128,9 @@ export const actions = {
       if (releasePlans.length > 0) next = applySpecialReconciliationPlans(next, releasePlans, ts);
       // 3G.4: origem [10+] com geração reduzida → reconcilia usos dependentes.
       next = reconcileSpecialOrigins(next, [p.date], ts, warnings);
+      // 4A: mesma redução de origem → reconcilia reservas (planos) dependentes;
+      // roda DEPOIS dos usos: USO REALIZADO > PLANO FUTURO (§19).
+      next = reconcileSpecialPlanOrigins(next, [p.date], ts, warnings);
       return withCompensarReconcile(next, p.date);
     });
     return withWarnings(result, warnings);
@@ -971,6 +1194,8 @@ export const actions = {
       if (releasePlans.length > 0) next = applySpecialReconciliationPlans(next, releasePlans, ts);
       // 3G.4: origens afetadas pelo conjunto de batidas adicionadas.
       next = reconcileSpecialOrigins(next, Array.from(byDate.keys()), ts, warnings);
+      // 4A: reconcilia reservas (planos) nas mesmas origens, após os usos (§19).
+      next = reconcileSpecialPlanOrigins(next, Array.from(byDate.keys()), ts, warnings);
       for (const date of byDate.keys()) next = withCompensarReconcile(next, date);
       return next;
     });
@@ -1037,6 +1262,8 @@ export const actions = {
       if (releasePlans.length > 0) reconciled = applySpecialReconciliationPlans(reconciled, releasePlans, ts);
       // 3G.4: origem [10+] com geração reduzida → reconcilia usos dependentes.
       reconciled = reconcileSpecialOrigins(reconciled, affectedDates, ts, warnings);
+      // 4A: reconcilia reservas (planos) nas mesmas origens, após os usos (§19).
+      reconciled = reconcileSpecialPlanOrigins(reconciled, affectedDates, ts, warnings);
       for (const date of affectedDates) reconciled = withCompensarReconcile(reconciled, date);
       return reconciled;
     });
@@ -1075,6 +1302,8 @@ export const actions = {
       if (releasePlans.length > 0) next = applySpecialReconciliationPlans(next, releasePlans, ts);
       // 3G.4: excluir batida também pode reduzir a geração da origem.
       next = reconcileSpecialOrigins(next, [target.date], ts, warnings);
+      // 4A: reconcilia reservas (planos) na mesma origem, após os usos (§19).
+      next = reconcileSpecialPlanOrigins(next, [target.date], ts, warnings);
       return withCompensarReconcile(next, target.date);
     });
     return withWarnings(result, warnings);
@@ -1984,6 +2213,7 @@ export const actions = {
       faltas: [],
       excessReasons: [],
       specialExcessUses: [],
+      specialExcessPlans: [],
     }));
   },
 
@@ -1997,6 +2227,7 @@ export const actions = {
     faltas?: Falta[];
     excessReasons?: ExcessReason[];
     specialExcessUses?: SpecialExcessUse[];
+    specialExcessPlans?: SpecialExcessPlan[];
   }) {
     resetCreateGuard();
     mutate(() => ({
@@ -2008,6 +2239,7 @@ export const actions = {
       faltas: p.faltas ?? [],
       excessReasons: p.excessReasons ?? [],
       specialExcessUses: p.specialExcessUses ?? [],
+      specialExcessPlans: p.specialExcessPlans ?? [],
     }));
   },
 
@@ -2015,7 +2247,7 @@ export const actions = {
    * Mescla o backup com os dados atuais, preservando eventos distintos.
    * Deduplicação segura via ID + conteúdo completo (nunca apenas dias/minutos).
    */
-  mergeBackup(p: { entries: TimeEntry[]; compensations: Compensation[]; absences?: Absence[]; companyCalendars?: CompanyCalendars; faltas?: Falta[]; excessReasons?: ExcessReason[]; specialExcessUses?: SpecialExcessUse[] }) {
+  mergeBackup(p: { entries: TimeEntry[]; compensations: Compensation[]; absences?: Absence[]; companyCalendars?: CompanyCalendars; faltas?: Falta[]; excessReasons?: ExcessReason[]; specialExcessUses?: SpecialExcessUse[]; specialExcessPlans?: SpecialExcessPlan[] }) {
     mutate((d) => {
       const entryMerge = mergeByIdAndContent(d.entries, p.entries, entriesEqual);
       const compMerge = mergeByIdAndContent(d.compensations, p.compensations, compsEqual);
@@ -2058,6 +2290,15 @@ export const actions = {
         useIds.add(u.id);
         useMerge.push(u);
       }
+      // 4A — Planos/reservas [10+]: mesma política dos usos (união por id;
+      // colisão → prevalece o local).
+      const planMerge = [...(d.specialExcessPlans ?? [])];
+      const planIds = new Set(planMerge.map((p2) => p2.id));
+      for (const pl of p.specialExcessPlans ?? []) {
+        if (planIds.has(pl.id)) continue;
+        planIds.add(pl.id);
+        planMerge.push(pl);
+      }
       return {
         ...d,
         entries: entryMerge.merged,
@@ -2067,6 +2308,7 @@ export const actions = {
         faltas: faltaMerge,
         excessReasons: reasonMerge.merged,
         specialExcessUses: useMerge,
+        specialExcessPlans: planMerge,
       };
     });
   },
@@ -2351,6 +2593,205 @@ export const actions = {
         ...d,
         specialExcessUses: (d.specialExcessUses ?? []).map((u) =>
           u.id === target.id ? { ...u, status: "cancelado" as const, cancelledAt: nowTs, updatedAt: nowTs } : u,
+        ),
+      };
+    });
+    return result;
+  },
+
+  /* ── ETAPA 4A — PLANOS/RESERVAS FUTURAS DO BANCO [10+] ──
+     Coletânea: specialExcessPlans. Nunca delete: o histórico persiste.
+     PLANEJADO NÃO É UTILIZADO: a reserva não altera fatos, saldo regular,
+     "No ponto", Resumo, SpecialExcessUse nem projeção de dia realizado.
+     A conversão PLANO → USO REAL é uma etapa posterior (§16: "concluded"
+     só desliga a reserva). SEM UI nesta etapa. */
+
+  /**
+   * Cria UMA reserva de [10+] para um DIA FUTURO. Atômica: qualquer
+   * rejeição persiste nada — nunca plano parcial inesperado.
+   *
+   * destinationDate deve ser FUTURA em relação à data civil do app
+   * (America/Sao_Paulo via todayString(); nunca toISOString()). Hoje e
+   * passado são rejeitados — dias realizados usam SpecialExcessUse.
+   * Ciclo anual: nenhuma allocation atravessa 30/04 (§9).
+   *
+   * automatic: origens escolhidas pelo FIFO canônico (3C — mais antigas
+   * do ciclo, respeitando usos ativos E outras reservas ativas).
+   * manual: o caller informa as origens; capacidade real validada pela
+   * 3C; a origem manual NUNCA é substituída silenciosamente.
+   *
+   * Fórmula de capacidade pós-4A por origem:
+   *   geração factual − usos ativos − reservas ativas (§11)
+   */
+  createSpecialExcessPlan(p: {
+    destinationDate: string;
+    minutes: number;
+    selectionMode: "automatic" | "manual";
+    manualAllocations?: SpecialExcessAllocation[];
+    note?: string | null;
+    asOfDate?: string;
+    periodClosed?: boolean;
+    now?: number;
+  }): ActionResult {
+    let result: ActionResult = OK;
+    mutate((d) => {
+      const asOf = p.asOfDate ?? todayString();
+      if (p.periodClosed) {
+        result = { ok: false, code: "period-closed", error: SPECIAL_PLAN_PERIOD_CLOSED_MSG };
+        return d;
+      }
+      const isManual = p.selectionMode === "manual";
+      const manualRequested = p.manualAllocations ?? [];
+      const requestedTotal = isManual
+        ? manualRequested.reduce((s, a) => s + a.minutes, 0)
+        : p.minutes;
+      if (
+        !/^\d{4}-\d{2}-\d{2}$/.test(p.destinationDate) ||
+        !Number.isInteger(requestedTotal) ||
+        requestedTotal <= 0 ||
+        (p.selectionMode !== "automatic" && p.selectionMode !== "manual")
+      ) {
+        result = {
+          ok: false,
+          code: isManual ? "invalid-manual-allocation" : "invalid",
+          error: "Parâmetros inválidos para criar uma reserva de [10+].",
+        };
+        return d;
+      }
+      // §8: destino deve ser FUTURO em relação à data civil atual (hoje e
+      // passado são rejeitados; dias realizados usam SpecialExcessUse).
+      if (p.destinationDate <= asOf) {
+        result = { ok: false, code: "destination-not-future", error: SPECIAL_PLAN_FUTURE_MSG };
+        return d;
+      }
+      // §9: seleção manual nunca atravessa o fechamento anual (30/04).
+      if (isManual) {
+        for (const a of manualRequested) {
+          if (/^\d{4}-\d{2}-\d{2}$/.test(a.originDate) && !sameAnnualCycle(a.originDate, p.destinationDate)) {
+            result = {
+              ok: false,
+              code: "cross-cycle",
+              error: `${SPECIAL_PLAN_CROSS_CYCLE_MSG} (origem ${a.originDate} = ciclo ${getAnnualPointCycle(a.originDate)}; destino ${p.destinationDate} = ciclo ${getAnnualPointCycle(p.destinationDate)}).`,
+            };
+            return d;
+          }
+        }
+      }
+      // Banco canônico 3C com USOS + RESERVAS ativas (disponível líquido, §10/§11).
+      const bank = specialBankOf(d, p.destinationDate, asOf, null);
+      let allocations: SpecialExcessAllocation[];
+      if (isManual) {
+        const m = validateManualSelection(bank, p.destinationDate, asOf, manualRequested);
+        if (m.error) {
+          result = m.error;
+          return d;
+        }
+        allocations = m.allocations;
+      } else {
+        const fifo = allocateSpecialExcessFifo({ bank, destinationDate: p.destinationDate, requestedMinutes: p.minutes });
+        if (fifo.error) {
+          result = { ok: false, code: "invalid", error: fifo.error };
+          return d;
+        }
+        if (fifo.unfulfilledMinutes > 0) {
+          // §14: reserva que não pode ser criada integralmente é REJEITADA
+          // — nenhum plano parcial, nenhuma allocation parcial persistida.
+          result = {
+            ok: false,
+            code: "insufficient-special-balance",
+            error: insufficientFifoMsg(bank, p.minutes, fifo.allocatedMinutes, fifo.unfulfilledMinutes),
+            available: fifo.allocatedMinutes,
+            limitMinutes: fifo.allocatedMinutes,
+          };
+          return d;
+        }
+        allocations = fifo.allocations;
+      }
+      const plan: SpecialExcessPlan = {
+        id: nextSpecialPlanId(d.specialExcessPlans ?? []),
+        destinationDate: p.destinationDate,
+        allocations,
+        selectionMode: p.selectionMode,
+        status: "planned",
+        createdAt: p.now ?? Date.now(),
+        ...(p.note != null ? { note: p.note } : {}),
+      };
+      const v = validateSpecialExcessPlan(plan);
+      if (!v.ok) {
+        result = { ok: false, code: "invalid-plan", error: `Reserva de [10+] estruturalmente inválida: ${v.errors.join(", ")}.` };
+        return d;
+      }
+      return { ...d, specialExcessPlans: [...(d.specialExcessPlans ?? []), plan] };
+    });
+    return result;
+  },
+
+  /**
+   * Cancela um plano ATIVO: status "planned" → "cancelled" (+ cancelledAt/
+   * updatedAt). NUNCA apaga: id, destino, allocations, modo e createdAt
+   * permanecem. A capacidade volta ao disponível POR DERIVAÇÃO (o banco
+   * canônico 4A só conta planos "planned" como RESERVADO) — sem devolução
+   * duplicada. Não cria uso; não altera fatos; não altera saldo regular.
+   *
+   * Cancelar plano já cancelado é IDEMPOTENTE (§15): nada muda e a
+   * capacidade não é devolvida duas vezes. Plano "concluded" é histórico:
+   * cancelamento rejeitado (transições só partem de "planned").
+   */
+  cancelSpecialExcessPlan(p: { id: string; now?: number }): ActionResult {
+    let result: ActionResult = OK;
+    mutate((d) => {
+      const target = (d.specialExcessPlans ?? []).find((pl) => pl.id === p.id);
+      if (!target) {
+        result = { ok: false, code: "plan-not-found", error: SPECIAL_PLAN_NOT_FOUND_MSG };
+        return d;
+      }
+      if (target.status === "concluded") {
+        result = { ok: false, code: "plan-already-concluded", error: SPECIAL_PLAN_ALREADY_CONCLUDED_MSG };
+        return d;
+      }
+      if (target.status === "cancelled") {
+        return d; // §15: idempotente — nunca devolve a mesma hora duas vezes.
+      }
+      const nowTs = p.now ?? Date.now();
+      return {
+        ...d,
+        specialExcessPlans: (d.specialExcessPlans ?? []).map((pl) =>
+          pl.id === target.id ? { ...pl, status: "cancelled" as const, cancelledAt: nowTs, updatedAt: nowTs } : pl,
+        ),
+      };
+    });
+    return result;
+  },
+
+  /**
+   * Marca um plano ATIVO como "concluded" (+ concludedAt/updatedAt).
+   * §16 — propositalmente simples NESTA etapa: o plano deixa de contar
+   * como RESERVADO (a capacidade volta ao disponível por derivação),
+   * NÃO cria SpecialExcessUse, NÃO altera jornada, NÃO altera projeção
+   * e NÃO conclui acordo algum. A transformação PLANO → USO REAL é a
+   * etapa posterior. Histórico preservado; transição só de "planned".
+   */
+  concludeSpecialExcessPlan(p: { id: string; now?: number }): ActionResult {
+    let result: ActionResult = OK;
+    mutate((d) => {
+      const target = (d.specialExcessPlans ?? []).find((pl) => pl.id === p.id);
+      if (!target) {
+        result = { ok: false, code: "plan-not-found", error: SPECIAL_PLAN_NOT_FOUND_MSG };
+        return d;
+      }
+      if (target.status === "cancelled") {
+        result = { ok: false, code: "plan-already-cancelled", error: SPECIAL_PLAN_ALREADY_CANCELLED_MSG };
+        return d;
+      }
+      if (target.status === "concluded") {
+        result = { ok: false, code: "plan-already-concluded", error: SPECIAL_PLAN_ALREADY_CONCLUDED_MSG };
+        return d;
+      }
+      const nowTs = p.now ?? Date.now();
+      return {
+        ...d,
+        specialExcessPlans: (d.specialExcessPlans ?? []).map((pl) =>
+          pl.id === target.id ? { ...pl, status: "concluded" as const, concludedAt: nowTs, updatedAt: nowTs } : pl,
         ),
       };
     });

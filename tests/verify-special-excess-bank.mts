@@ -111,7 +111,10 @@ check("A. 10h30 → gera 30min [10+]", () => {
   assert.equal(b.lots.length, 1);
   assert.deepEqual(b.lots[0], {
     originDate: "2026-08-10", generatedMinutes: 30, usedMinutes: 0,
-    availableMinutes: 30, overusedMinutes: 0, needsReview: false, destinations: [],
+    // 4A: o lote ganhou reservedMinutes/overreservedMinutes (sem planos = 0);
+    // a garantia anterior (gerado/usado/disponível/review) se preserva.
+    reservedMinutes: 0, availableMinutes: 30, overusedMinutes: 0,
+    overreservedMinutes: 0, needsReview: false, destinations: [],
   });
 });
 check("B. 11h30 → gera 1h30 (90min)", () => {

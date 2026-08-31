@@ -2,6 +2,7 @@
 import type { AppData, Compensation, ExcessReason, Falta, TimeEntry, User } from "./types";
 import type { Absence } from "./absences";
 import type { SpecialExcessUse } from "./special-excess-use";
+import type { SpecialExcessPlan } from "./special-excess-plan";
 import { normalizeCompanyCalendars, type CompanyCalendars } from "./company-calendar";
 
 /**
@@ -27,6 +28,8 @@ export interface BackupPayload {
   excessReasons?: ExcessReason[];
   /** Usos do [10+] (novo modelo). Campo opcional: backups antigos não o têm. */
   specialExcessUses?: SpecialExcessUse[];
+  /** Planos/reservas futuras [10+] (4A). Campo opcional: backups antigos não o têm. */
+  specialExcessPlans?: SpecialExcessPlan[];
 }
 
 export interface BackupSummary {
@@ -48,6 +51,8 @@ export interface ParsedBackup {
   faltas: Falta[];
   excessReasons: ExcessReason[];
   specialExcessUses: SpecialExcessUse[];
+  /** 4A: planos/reservas futuras. Backups antigos → []. */
+  specialExcessPlans: SpecialExcessPlan[];
   version: number;
   summary: BackupSummary;
 }
@@ -123,6 +128,28 @@ function validFalta(v: unknown): v is Falta {
   if (!v || typeof v !== "object") return false;
   const f = v as Record<string, unknown>;
   return isNum(f.id) && isDate(f.date) && isNum(f.createdAt);
+}
+
+/** Valida o shape estrutural de um plano/reserva futura [10+] (4A). */
+function validSpecialExcessPlan(v: unknown): v is SpecialExcessPlan {
+  if (!v || typeof v !== "object") return false;
+  const p = v as Record<string, unknown>;
+  return (
+    typeof p.id === "string" &&
+    p.id.length > 0 &&
+    isDate(p.destinationDate) &&
+    (p.selectionMode === "automatic" || p.selectionMode === "manual") &&
+    (p.status === "planned" || p.status === "cancelled" || p.status === "concluded") &&
+    isNum(p.createdAt) &&
+    Array.isArray(p.allocations) &&
+    p.allocations.length > 0 &&
+    (p.allocations as unknown[]).every((a) => {
+      if (!a || typeof a !== "object") return false;
+      const al = a as Record<string, unknown>;
+      return isDate(al.originDate) && isNum(al.minutes) && (al.minutes as number) > 0;
+    }) &&
+    (p.note === undefined || p.note === null || isStr(p.note))
+  );
 }
 
 /** Valida o shape estrutural de um uso do [10+] (novo modelo). */
@@ -213,6 +240,7 @@ export function buildBackupPayload(data: AppData): BackupPayload {
     faltas: data.faltas ?? [],
     excessReasons: data.excessReasons ?? [],
     specialExcessUses: data.specialExcessUses ?? [],
+    specialExcessPlans: data.specialExcessPlans ?? [],
   };
 }
 
@@ -283,6 +311,13 @@ export function parseBackup(
     return { ok: false, error: "bad-special-excess-uses" };
   }
   const specialExcessUses = (rawUses as SpecialExcessUse[] | undefined) ?? [];
+  // Retrocompatibilidade: backups antigos não possuem "specialExcessPlans" → []
+  // (4A — campo opcional introduzido sem nova versão, como faltas/motivos/usos).
+  const rawPlans = obj.specialExcessPlans;
+  if (rawPlans !== undefined && (!Array.isArray(rawPlans) || !rawPlans.every(validSpecialExcessPlan))) {
+    return { ok: false, error: "bad-special-excess-plans" };
+  }
+  const specialExcessPlans = (rawPlans as SpecialExcessPlan[] | undefined) ?? [];
 
   const allDates = [
     ...entries.map((e) => e.date),
@@ -301,7 +336,7 @@ export function parseBackup(
     periodTo,
   };
 
-  return { ok: true, backup: { user, entries, compensations, absences, companyCalendars, faltas, excessReasons, specialExcessUses, version, summary } };
+  return { ok: true, backup: { user, entries, compensations, absences, companyCalendars, faltas, excessReasons, specialExcessUses, specialExcessPlans, version, summary } };
 }
 
 /* ──────────────────────────────────────────────────────────

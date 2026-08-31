@@ -110,6 +110,7 @@ export function createEmptyState(today: string = todayString()): AppData {
     faltas: [],
     excessReasons: [],
     specialExcessUses: [],
+    specialExcessPlans: [],
   };
 }
 
@@ -176,6 +177,8 @@ export function buildSeedData(): AppData {
     // Banco [10+] nasce dos fatos acima; os usos são feitos pelo usuário
     // através da interface (botão "Completar jornada com [10+]").
     specialExcessUses: [],
+    // 4A: seed NÃO cria reservas — o seed continua previsível (§23).
+    specialExcessPlans: [],
   };
 }
 
@@ -308,6 +311,7 @@ export function buildLegacyDemoScenario(): AppData {
     // Seed legado NUNCA é convertido para o modelo novo (adapter é etapa
     // futura): o novo banco começa vazio, sem duplicar as compensações antigas.
     specialExcessUses: [],
+    specialExcessPlans: [],
   };
 }
 

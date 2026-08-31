@@ -11,10 +11,13 @@
 //                compensação, freeRegular nem settlement legado.
 //   UTILIZADO  = soma ATIVA dos allocations dos SpecialExcessUse com
 //                status "utilizado" (3B). Cancelados NÃO consomem.
-//   DISPONÍVEL = max(GERADO − UTILIZADO, 0) por lote.
+//   RESERVADO  = soma ATIVA dos allocations dos SpecialExcessPlan com
+//                status "planned" (4A). PLANEJADO NÃO É UTILIZADO —
+//                cancelados/concluídos NÃO reservam.
+//   DISPONÍVEL = max(GERADO − UTILIZADO − RESERVADO, 0) por lote.
 //
-// Sem UI, sem store, sem adapter legado, sem planejamento/reserva.
-// O banco é SOMENTE derivação de FATOS + SpecialExcessUse[].
+// Sem UI, sem store, sem adapter legado. O banco é SOMENTE derivação de
+// FATOS + SpecialExcessUse[] + SpecialExcessPlan[] (4A).
 //
 // Escopo: consulta SEMPRE vinculada a UM ciclo anual (periods.ts).
 // O fechamento do ponto 21→20 NÃO segmenta o banco — o saldo
@@ -25,6 +28,14 @@
 //
 // Overuse (used > generated, histórico): NUNCA corrigir —
 // available = 0, overused = used − generated, needsReview = true.
+//
+// ETAPA 4A — RESERVA FUTURA (SpecialExcessPlan): `plans` é OPCIONAL;
+// chamadas que não o informam (visões de uso, day-view, Central)
+// comportam-se EXATAMENTE como antes (reserved = 0). Com planos ativos,
+// disponível por lote = GERADO − UTILIZADO − RESERVADO (§10/§11): uma
+// mesma hora não pode estar simultaneamente utilizada e reservada.
+// Overreserve (reservado sem lastro, histórico): NUNCA escondido —
+// available = 0 e overreserved > 0 sinaliza needsReview.
 //
 // FIFO/MANUAL apenas SUGEREM allocations para um NOVO uso
 // (destino já determinado pela camada superior — 3A decide a
@@ -49,6 +60,7 @@ import type {
   SpecialExcessUse,
   SpecialExcessUseStatus,
 } from "./special-excess-use";
+import type { SpecialExcessPlan } from "./special-excess-plan";
 import type { WorkSettings } from "./time";
 import type { Falta, TimeEntry } from "./types";
 
@@ -67,10 +79,17 @@ export interface SpecialExcessOriginLot {
   generatedMinutes: number;
   /** Somente usos ATIVOS ("utilizado"). Cancelados não consomem. */
   usedMinutes: number;
-  /** max(generated − used, 0) — nunca negativo. */
+  /** Somente planos ATIVOS ("planned") — 4A. Cancelados/concluídos não reservam. */
+  reservedMinutes: number;
+  /**
+   * 4A: max(GERADO − UTILIZADO − RESERVADO, 0) — nunca negativo.
+   * Sem planos informados, equivale à fórmula anterior (GERADO − UTILIZADO).
+   */
   availableMinutes: number;
   /** max(used − generated, 0) — inconsistência histórica NUNCA é escondida. */
   overusedMinutes: number;
+  /** max(0, used + reserved − generated) − overused: reserva sem lastro (4A). */
+  overreservedMinutes: number;
   needsReview: boolean;
   /** Para quais destinos foi (histórico completo, inclusive cancelados). */
   destinations: SpecialExcessLotDestination[];
@@ -82,9 +101,15 @@ export interface SpecialExcessBankSummary {
   generatedMinutes: number;
   /** = Σ usedMinutes dos lotes (apenas usos ativos do ciclo). */
   usedMinutes: number;
-  /** = Σ availableMinutes dos lotes. Sem overuse: generated = used + available. */
+  /** = Σ reservedMinutes dos lotes (apenas planos ativos do ciclo) — 4A. */
+  reservedMinutes: number;
+  /**
+   * = Σ availableMinutes dos lotes. Sem overuse/overreserve:
+   * generated = used + reserved + available (fórmula canônica 4A).
+   */
   availableMinutes: number;
   overusedMinutes: number;
+  overreservedMinutes: number;
   needsReview: boolean;
   /** Lotes ordenados por originDate ascendente. */
   lots: SpecialExcessOriginLot[];
@@ -103,6 +128,11 @@ export interface SpecialExcessBankInput {
   controlStartDate: string;
   /** Registros de uso (3B) — insumo histórico; nunca mutados. */
   uses: SpecialExcessUse[];
+  /**
+   * Planos de reserva futura (4A) — somente ATIVOS ("planned") reservam.
+   * Opcional: chamadas antigas sem o campo comportam-se como antes (reserved 0).
+   */
+  plans?: SpecialExcessPlan[];
 }
 
 /**
@@ -110,7 +140,7 @@ export interface SpecialExcessBankInput {
  * Pura: não muta nada; não lê store; não toca legado.
  */
 export function buildSpecialExcessBank(input: SpecialExcessBankInput): SpecialExcessBankSummary {
-  const { cycle, asOfDate, entries, absences, calendars, settings, faltas, controlStartDate, uses } = input;
+  const { cycle, asOfDate, entries, absences, calendars, settings, faltas, controlStartDate, uses, plans = [] } = input;
   const bounds = annualCycleBounds(cycle);
 
   // GERADO: fonte factual limpa — excessMinutes do row (0 em dia futuro
@@ -144,13 +174,33 @@ export function buildSpecialExcessBank(input: SpecialExcessBankInput): SpecialEx
     }
   }
 
-  const originDates = new Set<string>([...generated.keys(), ...destinationsByOrigin.keys()]);
+  // RESERVADO (4A): somente planos ATIVOS ("planned") reservam — o mesmo
+  // padrão dos usos (cancelados não consomem). PLANEJADO NÃO É UTILIZADO:
+  // entra na fórmula do DISPONÍVEL, nunca no UTILIZADO.
+  const reservedByOrigin = new Map<string, number>();
+  for (const plan of plans) {
+    if (plan.status !== "planned") continue;
+    for (const a of plan.allocations) {
+      if (getAnnualPointCycle(a.originDate) !== cycle) continue; // ciclo de outro banco
+      reservedByOrigin.set(a.originDate, (reservedByOrigin.get(a.originDate) ?? 0) + a.minutes);
+    }
+  }
+
+  const originDates = new Set<string>([
+    ...generated.keys(),
+    ...destinationsByOrigin.keys(),
+    ...reservedByOrigin.keys(),
+  ]);
   const lots: SpecialExcessOriginLot[] = [...originDates]
     .sort()
     .map((originDate) => {
       const g = generated.get(originDate) ?? 0;
       const u = usedByOrigin.get(originDate) ?? 0;
+      const r = reservedByOrigin.get(originDate) ?? 0;
       const over = Math.max(0, u - g);
+      // Reserva sem lastro: o que exceder a geração depois de descontar o
+      // overuse já contabilizado (histórico NUNCA é escondido — §10).
+      const overReserved = Math.max(0, Math.max(0, u + r - g) - over);
       const destinations = (destinationsByOrigin.get(originDate) ?? []).slice().sort(
         (x, y) =>
           x.destinationDate === y.destinationDate
@@ -163,22 +213,27 @@ export function buildSpecialExcessBank(input: SpecialExcessBankInput): SpecialEx
         originDate,
         generatedMinutes: g,
         usedMinutes: u,
-        availableMinutes: Math.max(0, g - u),
+        reservedMinutes: r,
+        availableMinutes: Math.max(0, g - u - r),
         overusedMinutes: over,
-        needsReview: over > 0,
+        overreservedMinutes: overReserved,
+        needsReview: over > 0 || overReserved > 0,
         destinations,
       };
     });
 
   const sumLot = (f: (l: SpecialExcessOriginLot) => number) => lots.reduce((s, l) => s + f(l), 0);
   const overusedMinutes = sumLot((l) => l.overusedMinutes);
+  const overreservedMinutes = sumLot((l) => l.overreservedMinutes);
   return {
     cycle,
     generatedMinutes: sumLot((l) => l.generatedMinutes),
     usedMinutes: sumLot((l) => l.usedMinutes),
+    reservedMinutes: sumLot((l) => l.reservedMinutes),
     availableMinutes: sumLot((l) => l.availableMinutes),
     overusedMinutes,
-    needsReview: overusedMinutes > 0,
+    overreservedMinutes,
+    needsReview: overusedMinutes > 0 || overreservedMinutes > 0,
     lots,
   };
 }
@@ -197,12 +252,14 @@ export interface SpecialExcessFifoResult {
 }
 
 /**
- * Sugere as allocations de um NOVO uso FIFO: origens com disponível > 0,
- * do MESMO ciclo do destino, ordenadas por originDate ascendente
- * (mais antiga primeiro), consumindo cada uma até esgotar.
+ * Sugere as allocations de um NOVO uso/plano FIFO: origens com
+ * disponível > 0, do MESMO ciclo do destino, ordenadas por originDate
+ * ascendente (mais antiga primeiro), consumindo cada uma até esgotar.
+ * 4A: o disponível dos lotes JÁ desconta usos ativos E reservas ativas —
+ * uma mesma hora não pode ser usada e reservada ao mesmo tempo.
  *
  * - NÃO filtra originDate <= destinationDate (origem posterior é válida);
- * - NÃO cria SpecialExcessUse (a montagem cabe à camada superior);
+ * - NÃO cria SpecialExcessUse/SpecialExcessPlan (a montagem cabe à camada superior);
  * - saldo insuficiente → unfulfilledMinutes explícito (sem falha silenciosa).
  */
 export function allocateSpecialExcessFifo(args: {
