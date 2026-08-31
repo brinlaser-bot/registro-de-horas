@@ -61,6 +61,15 @@ export interface SpecialExcessPlan {
   updatedAt?: number;
   cancelledAt?: number;
   concludedAt?: number;
+  /* ── 4C — RASTREABILIDADE DA RESOLUÇÃO (somente na conclusão por uso) ──
+     Preenchidos ATOMICAMENTE por resolveSpecialExcessPlan: quanto do plano
+     virou uso, quanto voltou ao banco, qual uso foi criado e quando.
+     Informação estrutural — NUNCA depender só da note. Opcional: planos
+     antigos (backup 4A/4A.1) não os têm. */
+  resolvedAt?: number;
+  resolvedUseId?: string;
+  resolvedMinutes?: number;
+  releasedMinutes?: number;
   note?: string;
 }
 
@@ -150,7 +159,7 @@ export function validateSpecialExcessPlan(plan: SpecialExcessPlan): SpecialExces
   if (plan.status === "concluded" && (plan.concludedAt === undefined || plan.concludedAt === null)) {
     errors.push("concluido-sem-concludedAt");
   }
-  if (plan.status === "planned" && (plan.cancelledAt !== undefined || plan.concludedAt !== undefined)) {
+  if (plan.status === "planned" && (plan.cancelledAt !== undefined || plan.concludedAt !== undefined || plan.resolvedAt !== undefined)) {
     errors.push("planejado-com-cancelledAt-ou-concludedAt");
   }
   return { ok: errors.length === 0, errors };

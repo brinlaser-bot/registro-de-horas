@@ -40,6 +40,7 @@ import {
   type SpecialExcessUse,
 } from "./special-excess-use";
 import {
+  specialExcessPlanMinutes,
   validateSpecialExcessPlan,
   type SpecialExcessPlan,
 } from "./special-excess-plan";
@@ -80,6 +81,7 @@ export interface ActionResult {
     | "special-release-required"
     | "special-release-cancelled"
     | "destination-not-future"
+    | "destination-not-realized"
     | "plan-not-found"
     | "plan-already-cancelled"
     | "plan-already-concluded"
@@ -2767,6 +2769,149 @@ export const actions = {
         specialExcessPlans: (d.specialExcessPlans ?? []).map((pl) =>
           pl.id === target.id ? { ...pl, status: "cancelled" as const, cancelledAt: nowTs, updatedAt: nowTs } : pl,
         ),
+      };
+    });
+    return result;
+  },
+
+  /* ── ETAPA 4C — RESOLUÇÃO DO PLANEJAMENTO QUANDO O DIA CHEGA ──
+     PLANO NUNCA VIRA USO AUTOMATICAMENTE (§2/§4): a resolução existe
+     SOMENTE por ação explícita do usuário, nesta action ATÔMICA. */
+
+  /**
+   * Resolve UM planejamento/reserva [10+] cujo destinationDate JÁ CHEGOU:
+   * dentro de UMA única mutation revalida plano, data, dia e necessidade
+   * (gate canônico 3A/3G — nada recalculado), cria o SpecialExcessUse com
+   * as MESMAS origens reservadas (§10 — NENHUM FIFO novo), marca o plano
+   * como "concluded" com metadados de resolução (§12) e libera a sobra da
+   * reserva de volta ao Banco [10+]. Qualquer falha → NADA persiste (§11).
+   *
+   * Regras:
+   *  - destinationDate <= hoje civil (a data chegou; §5);
+   *  - dia realizado, financeiramente válido, não incompleto/inconsistente
+   *    (isProjectableDayStatus sobre o row canônico — §6);
+   *  - necessidade real restante > 0, considerando jornada factual, base
+   *    efetiva e usos [10+] ativos do dia (checkSpecialDestination);
+   *  - minutes ≤ min(reservado no plano, necessidade restante);
+   *  - consumo parcial na ORDEM PERSISTIDA das allocations do plano
+   *    (prefixo — as origens foram escolhidas na reserva; §10);
+   *  - sobra (reservado − aplicado) é LIBERADA: nenhuma sobra permanece
+   *    reservada para um dia já resolvido (§8/§9).
+   * Não executa FIFO, não altera fatos, não toca other plans/uses.
+   */
+  resolveSpecialExcessPlan(p: { id: string; minutes: number; asOfDate?: string; now?: number }): ActionResult {
+    let result: ActionResult = OK;
+    mutate((d) => {
+      const asOf = p.asOfDate ?? todayString();
+      const target = (d.specialExcessPlans ?? []).find((pl) => pl.id === p.id);
+      if (!target) {
+        result = { ok: false, code: "plan-not-found", error: SPECIAL_PLAN_NOT_FOUND_MSG };
+        return d;
+      }
+      if (target.status === "cancelled") {
+        result = { ok: false, code: "plan-already-cancelled", error: SPECIAL_PLAN_ALREADY_CANCELLED_MSG };
+        return d;
+      }
+      if (target.status === "concluded") {
+        result = { ok: false, code: "plan-already-concluded", error: SPECIAL_PLAN_ALREADY_CONCLUDED_MSG };
+        return d;
+      }
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(target.destinationDate) || !Number.isInteger(p.minutes) || p.minutes <= 0) {
+        result = { ok: false, code: "invalid", error: "Parâmetros inválidos para usar o planejamento de [10+]." };
+        return d;
+      }
+      // §5: o planejamento só pode ser usado quando o dia chega.
+      if (target.destinationDate > asOf) {
+        result = {
+          ok: false,
+          code: "destination-not-realized",
+          error: "O planejamento ainda é uma reserva futura: só pode ser usado quando o dia planejado chegar.",
+        };
+        return d;
+      }
+      // §5/§6/§13: GATE CANÔNICO do destino (3A/3G) — dia realizado, válido,
+      // não incompleto/inconsistente, com necessidade restante considerando
+      // os usos [10+] ativos do dia. Nada é recalculado aqui.
+      const planMinutes = specialExcessPlanMinutes(target);
+      const dest = checkSpecialDestination(d, target.destinationDate, asOf, null, p.minutes);
+      if (dest.error) {
+        if (dest.error.code === "destination-no-remaining-need") {
+          result = {
+            ok: false,
+            code: "destination-no-remaining-need",
+            error:
+              "Sua jornada já atingiu a base. Esta reserva não é mais necessária — libere a reserva para devolver o saldo ao Banco [10+].",
+            limitMinutes: 0,
+          };
+        } else if (dest.error.code === "destination-not-eligible") {
+          result = {
+            ok: false,
+            code: "destination-not-eligible",
+            error: "Complete ou corrija os registros deste dia antes de decidir o uso do [10+].",
+          };
+        } else {
+          result = dest.error;
+        }
+        return d;
+      }
+      const maxApplicable = Math.min(planMinutes, dest.remainingMinutes);
+      if (p.minutes > maxApplicable) {
+        result = {
+          ok: false,
+          code: "requested-exceeds-destination-need",
+          error: `Você pode aplicar no máximo ${formatMinutes(maxApplicable)} deste planejamento agora (necessidade restante do dia).`,
+          limitMinutes: maxApplicable,
+        };
+        return d;
+      }
+      // §10: consumir as PRÓPRIAS allocations do plano na ORDEM PERSISTIDA
+      // (prefixo) — sem novo FIFO, sem buscar outra origem.
+      let toConsume = p.minutes;
+      const useAllocations: SpecialExcessAllocation[] = [];
+      for (const a of target.allocations) {
+        if (toConsume <= 0) break;
+        const take = Math.min(a.minutes, toConsume);
+        if (take > 0) useAllocations.push({ originDate: a.originDate, minutes: take });
+        toConsume -= take;
+      }
+      const applied = useAllocations.reduce((s, a) => s + a.minutes, 0);
+      const released = planMinutes - applied;
+      const nowTs = p.now ?? Date.now();
+      // O uso criado herda as origens reservadas; a estratégia registra COMO
+      // as origens foram escolhidas originalmente (automatic → fifo).
+      const use: SpecialExcessUse = {
+        id: nextSpecialUseId(d.specialExcessUses ?? []),
+        destinationDate: target.destinationDate,
+        allocations: useAllocations,
+        allocationStrategy: target.selectionMode === "automatic" ? "fifo" : "manual",
+        status: "utilizado",
+        createdAt: nowTs,
+        note: `Aplicado do planejamento ${target.id} (reserva de ${formatMinutes(planMinutes)}).`,
+      };
+      const v = validateSpecialExcessUse(use);
+      if (!v.ok) {
+        result = { ok: false, code: "invalid-use", error: `Uso de [10+] estruturalmente inválido: ${v.errors.join(", ")}.` };
+        return d;
+      }
+      const resolvedPlan: SpecialExcessPlan = {
+        ...target,
+        status: "concluded",
+        concludedAt: nowTs,
+        updatedAt: nowTs,
+        resolvedAt: nowTs,
+        resolvedUseId: use.id,
+        resolvedMinutes: applied,
+        releasedMinutes: released,
+      };
+      const vp = validateSpecialExcessPlan(resolvedPlan);
+      if (!vp.ok) {
+        result = { ok: false, code: "invalid-plan", error: `Reserva de [10+] estruturalmente inválida: ${vp.errors.join(", ")}.` };
+        return d;
+      }
+      return {
+        ...d,
+        specialExcessUses: [...(d.specialExcessUses ?? []), use],
+        specialExcessPlans: (d.specialExcessPlans ?? []).map((pl) => (pl.id === target.id ? resolvedPlan : pl)),
       };
     });
     return result;

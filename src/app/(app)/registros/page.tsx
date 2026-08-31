@@ -2,7 +2,7 @@
 
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Ban, ChevronLeft, ChevronRight, Clock3, Search, X } from "lucide-react";
+import { Ban, CalendarClock, ChevronLeft, ChevronRight, Clock3, Search, X } from "lucide-react";
 import { actions, getAppData, settingsOf, useAppData, useIsClient, useIsStoreReady } from "@/lib/store";
 import { useSpecialPunchActions } from "@/components/special-release-confirm";
 import {
@@ -54,6 +54,7 @@ import { FaltaModal } from "@/components/falta-modal";
 import { FillDayRecordsModal } from "@/components/fill-day-records-modal";
 import { SpecialExcessUseModal } from "@/components/special-excess-use-modal";
 import { SpecialExcessPlanModal } from "@/components/special-excess-plan-modal";
+import { SpecialExcessPlanResolveModal } from "@/components/special-excess-plan-resolve-modal";
 import { DaySituationChips, DaySituationFilter } from "@/components/day-situation-filter";
 import { Button, Card, EmptyState, Skeleton } from "@/components/ui";
 import { useToast } from "@/components/toast";
@@ -115,6 +116,13 @@ function RegistrosBody() {
   const [completeDate, setCompleteDate] = useState<string | null>(null);
   // 4B: data FUTURA do modal "Planejar uso de [10+]".
   const [planDate, setPlanDate] = useState<string | null>(null);
+  // 4C: id do plano em resolução ("Usar planejamento [10+]").
+  const [resolvePlanId, setResolvePlanId] = useState<string | null>(null);
+  // 4C §17: planejamentos ativos cujo destinationDate já chegou/passou.
+  const pendingPlansCount = useMemo(
+    () => (specialExcessPlans ?? []).filter((pl) => pl.status === "planned" && pl.destinationDate <= todayStr).length,
+    [specialExcessPlans, todayStr],
+  );
   const wantPending = searchParams.get("pendentes") === "1";
   const wantMissing = searchParams.get("semRegistro") === "1";
   const situacaoRaw = searchParams.get("situacao");
@@ -706,7 +714,20 @@ function RegistrosBody() {
           }
         />
       ) : (
-        <div className={missingOnly || pendingOnly ? "space-y-4" : "space-y-2"}>
+        <>
+          {/* 4C — ALERTA DE PLANEJAMENTOS PENDENTES (§17): âmbar de pendência
+              operacional (nunca vermelho/erro). Discreto e acima da lista
+              (rolagem desnecessária — o banner já está no topo dos dias). */}
+          {pendingPlansCount > 0 && (
+            <div className="flex flex-wrap items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5">
+              <CalendarClock size={15} className="shrink-0 text-amber-500" aria-hidden />
+              <p className="min-w-0 flex-1 text-xs font-semibold text-amber-800">
+                Planejamentos [10+] aguardando confirmação: <b className="tabular-nums">{pendingPlansCount}</b>
+                <span className="ml-1.5 font-medium text-amber-700/80">— resolva ou libere nos dias abaixo.</span>
+              </p>
+            </div>
+          )}
+          <div className={missingOnly || pendingOnly ? "space-y-4" : "space-y-2"}>
           {listedDays.map(({ date, balanceView, displayDay, absence, calendarLabel, falta, workedInAbonoMinutes, abonoParcial, missingExpected, historicalEmpty, compact, specialExcess, specialPlans }) => (
             <DayCard
               key={date}
@@ -749,9 +770,12 @@ function RegistrosBody() {
               // 4B: a ação de planejar só é oferecida para dia FUTURO
               // (destinationDate > hoje); o store 4A continua o gate final.
               onPlanSpecial={date > todayStr ? () => setPlanDate(date) : undefined}
+              // 4C: resolução individual do plano (modal "Usar planejamento").
+              onResolvePlan={(planId) => setResolvePlanId(planId)}
             />
           ))}
-        </div>
+          </div>
+        </>
       )}
 
       <Card padded={false} className="bg-slate-900 !border-slate-800">
@@ -810,6 +834,13 @@ function RegistrosBody() {
       {planDate && (
         <SpecialExcessPlanModal date={planDate} onClose={() => setPlanDate(null)} />
       )}
+      {/* NOVO [10+] (Etapa 4C): modal "Usar planejamento [10+]" (dia chegou —
+          decisão explícita; store resolveSpecialExcessPlan é atômico). */}
+      {resolvePlanId &&
+        (() => {
+          const plan = (specialExcessPlans ?? []).find((pl) => pl.id === resolvePlanId && pl.status === "planned");
+          return plan ? <SpecialExcessPlanResolveModal plan={plan} onClose={() => setResolvePlanId(null)} /> : null;
+        })()}
     </div>
   );
 }

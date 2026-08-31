@@ -148,7 +148,13 @@ function validSpecialExcessPlan(v: unknown): v is SpecialExcessPlan {
       const al = a as Record<string, unknown>;
       return isDate(al.originDate) && isNum(al.minutes) && (al.minutes as number) > 0;
     }) &&
-    (p.note === undefined || p.note === null || isStr(p.note))
+    (p.note === undefined || p.note === null || isStr(p.note)) &&
+    // 4C — campos de rastreabilidade da resolução (opcionais; backups
+    // 4A/4A.1 não os têm e continuam válidos).
+    (p.resolvedAt === undefined || isNum(p.resolvedAt)) &&
+    (p.resolvedUseId === undefined || isStr(p.resolvedUseId)) &&
+    (p.resolvedMinutes === undefined || isNum(p.resolvedMinutes)) &&
+    (p.releasedMinutes === undefined || isNum(p.releasedMinutes))
   );
 }
 

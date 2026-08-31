@@ -154,6 +154,8 @@ interface Props {
   /** 4B: abre o modal "Planejar uso de [10+]" — só passado para dia FUTURO
    *  (a regra destinationDate > hoje continua soberana no store 4A). */
   onPlanSpecial?: () => void;
+  /** 4C: abre o modal "Usar planejamento [10+]" para o plano informado. */
+  onResolvePlan?: (planId: string) => void;
 }
 
 export function DayCard({
@@ -184,6 +186,7 @@ export function DayCard({
   onCompleteJornada,
   specialPlans,
   onPlanSpecial,
+  onResolvePlan,
 }: Props) {
   const specialActions = useSpecialPunchActions();
   // Regra: todos os dias iniciam RECOLHIDOS — o usuário expande apenas o dia desejado.
@@ -628,6 +631,12 @@ export function DayCard({
               <SpecialExcessPlanSummary
                 plans={specialPlans}
                 isFuture={futureDay}
+                // 4C: decisão lida dos motores canônicos (specialExcess —
+                // 3A/3G); null quando o dia não tem visão válida (incompleto,
+                // inconsistente, congelado) → "Usar planejamento" oculto.
+                eligible={specialExcess ? specialExcess.eligible : null}
+                remainingNeedMinutes={specialExcess ? specialExcess.remainingMinutes : null}
+                onResolvePlan={onResolvePlan}
                 onPlan={onPlanSpecial}
               />
             </div>
