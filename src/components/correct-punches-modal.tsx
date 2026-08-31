@@ -7,6 +7,7 @@ import { useToast } from "@/components/toast";
 import { analyzePunches, suggestedPunchTypeAt } from "@/lib/punches";
 import { FUTURE_DATE_ERROR, formatDateBR, isFutureDate, toMinutes, todayString, type TimeEntryLike } from "@/lib/time";
 import { actions } from "@/lib/store";
+import { useSpecialPunchActions } from "@/components/special-release-confirm";
 
 interface Props {
   open: boolean;
@@ -29,6 +30,7 @@ export function CorrectPunchesModal({ open, onClose, date, entries, mode }: Prop
   const [intIn, setIntIn] = useState("");
   const [busy, setBusy] = useState(false);
   const inflight = useRef(false);
+  const punches = useSpecialPunchActions();
 
   const analysis = analyzePunches(entries);
   const suggested = time ? suggestedPunchTypeAt(entries, time) : null;
@@ -41,9 +43,10 @@ export function CorrectPunchesModal({ open, onClose, date, entries, mode }: Prop
     setBusy(true);
     try {
       const chosen = suggestedPunchTypeAt(entries, time);
-      const res = actions.addEntry({ date, time, type: chosen, note: note.trim() || null, source: "manual" });
+      const res = await punches.addEntry({ date, time, type: chosen, note: note.trim() || null, source: "manual" });
       if (!res.ok) {
-        toast.show(res.error ?? "Não foi possível salvar.", "error");
+        // 3G: "Voltar" na confirmação de [10+] é aborto silencioso.
+        if (res.code !== "special-release-cancelled") toast.show(res.error ?? "Não foi possível salvar.", "error");
         return;
       }
       toast.show(`${chosen === "entrada" ? "Entrada" : "Saída"} às ${time} registrada.`);
@@ -62,12 +65,13 @@ export function CorrectPunchesModal({ open, onClose, date, entries, mode }: Prop
     inflight.current = true;
     setBusy(true);
     try {
-      const res = actions.addEntries([
+      const res = await punches.addEntries([
         { date, time: intOut, type: "saida", note: note.trim() || null, source: "manual" },
         { date, time: intIn, type: "entrada", note: note.trim() || null, source: "manual" },
       ]);
       if (!res.ok) {
-        toast.show(res.error ?? "Não foi possível salvar o intervalo.", "error");
+        // 3G: aborto silencioso ao escolher "Voltar".
+        if (res.code !== "special-release-cancelled") toast.show(res.error ?? "Não foi possível salvar o intervalo.", "error");
         return;
       }
       toast.show("Intervalo registrado.");
@@ -79,9 +83,10 @@ export function CorrectPunchesModal({ open, onClose, date, entries, mode }: Prop
     }
   };
 
-  const remove = (id: number) => {
-    const res = actions.deleteEntry(id);
-    if (!res.ok) toast.show(res.error ?? "Não foi possível excluir.", "error");
+  const remove = async (id: number) => {
+    const res = await punches.deleteEntry(id);
+    // 3G: aborto silencioso ao escolher "Voltar" na confirmação de [10+].
+    if (!res.ok && res.code !== "special-release-cancelled") toast.show(res.error ?? "Não foi possível excluir.", "error");
   };
 
   return (

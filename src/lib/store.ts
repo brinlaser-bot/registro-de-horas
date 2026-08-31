@@ -33,10 +33,15 @@ import {
 import {
   specialExcessUseMinutes,
   validateSpecialExcessUse,
+  activeSpecialExcessUses,
   type SpecialExcessAllocation,
   type SpecialExcessAllocationStrategy,
   type SpecialExcessUse,
 } from "./special-excess-use";
+import {
+  planSpecialExcessReconciliation,
+  type SpecialReconciliationPlan,
+} from "./special-excess-reconciliation";
 
 /** Resultado estruturado de operações que podem ser rejeitadas por validação. */
 export interface ActionResult {
@@ -66,12 +71,21 @@ export interface ActionResult {
     | "use-not-found"
     | "use-already-cancelled"
     | "period-closed"
-    | "invalid-use";
+    | "invalid-use"
+    | "special-release-required"
+    | "special-release-cancelled";
   /** Capacidade disponível no dia de destino (quando code = over-capacity). */
   available?: number;
   limitMinutes?: number;
   /** Evento atravessa o fechamento anual: sugestão de divisão em 2 registros. */
   split?: AbsenceSplit;
+  /**
+   * 3G: plano(s) de reconciliação do [10+] exigido(s) pela alteração
+   * factual prospectiva (quando code = special-release-required). NADA é
+   * persistido junto — a operação só é concluída quando o caller re-invoca
+   * o MESMO action com `specialReleaseConfirmed: true`.
+   */
+  specialReleases?: SpecialReconciliationPlan[];
   /** Operação salva, com aviso informativo (ex.: batidas existentes no período). */
   warning?: string;
 }
@@ -544,6 +558,128 @@ function withCompensarReconcile(d: AppData, date: string): AppData {
   return comps === d.compensations ? d : { ...d, compensations: comps };
 }
 
+/* ─────────────────────────────────────────────────────────────
+   ETAPA 3G — RECONCILIAÇÃO DO [10+] APÓS ALTERAÇÃO DA JORNADA
+   FACTUAL (gate central de liberação).
+
+   Mesma arquitetura das guardas de compensação concluída: o action
+   simula o resultado final das batidas e avalia o IMPACTO
+   PROSPECTIVO no [10+] do dia (regra-mãe: uso ativo ≤ necessidade 3A
+   do dia prospectivo). A liberação NUNCA é silenciosa (§6):
+
+   - 1ª chamada (sem confirmação): NADA persiste; o action devolve
+     code "special-release-required" + plano(s) para a UI confirmar;
+   - "Voltar": nada mudou (a 1ª chamada já não alterou estado);
+   - 2ª chamada (specialReleaseConfirmed): o MESMO action revalida
+     tudo e aplica batidas + reconciliação num ÚNICO mutate (§8) —
+     não existe frame persistido com factual novo e uso antigo (§40/W).
+   ───────────────────────────────────────────────────────────── */
+
+const SPECIAL_RELEASE_REQUIRED_MSG =
+  "Esta alteração reduz a necessidade de [10+] deste dia e exige confirmação.";
+
+/**
+ * Planos de reconciliação exigidos pela alteração prospectiva — UM por
+ * data afetada que possua usos ativos cujo uso exceda a nova necessidade.
+ * Fonte factual prospectiva: buildResumoDayRow (a MESMA fonte central do
+ * Resumo/3A) sobre as entries simuladas — nenhum cálculo paralelo.
+ */
+function specialReleasePlansFor(
+  d: AppData,
+  affected: Array<{ date: string; entries: TimeEntry[] }>,
+): SpecialReconciliationPlan[] {
+  const active = activeSpecialExcessUses(d.specialExcessUses ?? []);
+  if (active.length === 0) return [];
+  const today = todayString();
+  const settings = settingsOf(d.user);
+  const plans: SpecialReconciliationPlan[] = [];
+  for (const { date, entries } of affected) {
+    const usesOfDate = active.filter((u) => u.destinationDate === date); // §26: só o próprio destino
+    if (usesOfDate.length === 0) continue;
+    const row = buildResumoDayRow({
+      date,
+      today,
+      entries,
+      absences: d.absences,
+      calendars: d.companyCalendars,
+      settings,
+      faltas: d.faltas,
+      controlStartDate: d.user.controlStartDate ?? null,
+    });
+    const plan = planSpecialExcessReconciliation({
+      destinationDate: date,
+      prospectiveStatus: row.status,
+      prospectiveWorkedMinutes: row.workedMinutes,
+      prospectiveBaseMinutes: row.expectedMinutes,
+      prospectiveRegistrableMinutes: row.registrableMinutes,
+      uses: usesOfDate,
+    });
+    if (plan.needsReconciliation) plans.push(plan);
+  }
+  return plans;
+}
+
+/**
+ * Aplica as decisões do plano no MESMO mutate da alteração factual.
+ * Histórico NUNCA é apagado (§13/§14/§19):
+ *  - "cancel"  → status "cancelado" (+ cancelledAt/updatedAt);
+ *  - "reduce"  → o original é cancelado (id/allocations/strategy/createdAt/
+ *                nota preservados) e uma versão ATIVA reconciliada é criada
+ *                com o PREFIXO das allocations históricas, na MESMA
+ *                estratégia e SEM origens novas (fifo continua fifo, manual
+ *                continua manual).
+ */
+function applySpecialReconciliationPlans(
+  d: AppData,
+  plans: SpecialReconciliationPlan[],
+  nowTs: number,
+): AppData {
+  if (plans.length === 0) return d;
+  let uses = d.specialExcessUses ?? [];
+  for (const plan of plans) {
+    for (const dec of plan.decisions) {
+      if (dec.action === "keep") continue;
+      const original = uses.find((u) => u.id === dec.useId && u.status === "utilizado");
+      if (!original) continue; // idempotência defensiva (nunca esperado)
+      uses = uses.map((u) =>
+        u.id === dec.useId
+          ? { ...u, status: "cancelado" as const, cancelledAt: nowTs, updatedAt: nowTs }
+          : u,
+      );
+      if (dec.action === "reduce") {
+        const keptTotal = dec.keepAllocations.reduce((s, a) => s + a.minutes, 0);
+        const reconciled: SpecialExcessUse = {
+          id: nextSpecialUseId(uses),
+          destinationDate: original.destinationDate,
+          allocations: dec.keepAllocations,
+          allocationStrategy: original.allocationStrategy,
+          status: "utilizado",
+          createdAt: nowTs,
+          note: `Uso reconciliado após alteração da jornada (original ${original.id}: ${specialExcessUseMinutes(original)}min → ${keptTotal}min).`,
+        };
+        const v = validateSpecialExcessUse(reconciled);
+        if (!v.ok) {
+          // Defensivo: prefixo do próprio uso preserva origens, ciclo e
+          // estratégia — nunca deve ocorrer. Neste caso mantém só o
+          // cancelamento (nunca um uso inválido no estado).
+          uses = [...uses];
+        } else {
+          uses = [...uses, reconciled];
+        }
+      }
+    }
+  }
+  return { ...d, specialExcessUses: uses };
+}
+
+/** Opções 3G dos actions que alteram batidas. */
+interface PunchMutationOpts {
+  /** Confirmação humana da liberação de [10+] (2ª chamada, §6/§8). */
+  specialReleaseConfirmed?: boolean;
+  /** Timestamp injetável (testes). */
+  now?: number;
+}
+
 export const actions = {
   /**
    * Cria uma batida. REGRA ABSOLUTA: somente em data <= hoje — batida em
@@ -563,7 +699,7 @@ export const actions = {
     type: EntryType;
     note: string | null;
     source?: "live" | "manual";
-  }): ActionResult {
+  }, opts?: PunchMutationOpts): ActionResult {
     let result: ActionResult = OK;
     mutate((d) => {
       if (isFutureDate(p.date)) {
@@ -581,7 +717,18 @@ export const actions = {
         result = { ok: false, code: "sequence", error: seqError };
         return d;
       }
-      return withCompensarReconcile({ ...d, entries: [...d.entries, created] }, p.date);
+      // 3G: impacto PROSPECTIVO no [10+] do dia — liberação nunca é
+      // silenciosa; exige confirmação e, quando confirmada, é aplicada
+      // no MESMO mutate (batidas + reconciliação coesas, §8).
+      const nextEntries = [...d.entries, created];
+      const releasePlans = specialReleasePlansFor(d, [{ date: p.date, entries: nextEntries }]);
+      if (releasePlans.length > 0 && !opts?.specialReleaseConfirmed) {
+        result = { ok: false, code: "special-release-required", error: SPECIAL_RELEASE_REQUIRED_MSG, specialReleases: releasePlans };
+        return d; // NADA persiste (§7)
+      }
+      let next: AppData = { ...d, entries: nextEntries };
+      if (releasePlans.length > 0) next = applySpecialReconciliationPlans(next, releasePlans, opts?.now ?? Date.now());
+      return withCompensarReconcile(next, p.date);
     });
     return result;
   },
@@ -592,6 +739,7 @@ export const actions = {
    */
   addEntries(
     list: Array<{ date: string; time: string; type: EntryType; note: string | null; source?: "live" | "manual" }>,
+    opts?: PunchMutationOpts,
   ): ActionResult {
     let result: ActionResult = OK;
     mutate((d) => {
@@ -629,6 +777,16 @@ export const actions = {
         }
       }
       let next: AppData = { ...d, entries: [...d.entries, ...created] };
+      // 3G: gate prospectivo por data afetada (mesmo contrato do addEntry).
+      const releasePlans = specialReleasePlansFor(
+        d,
+        Array.from(byDate.keys()).map((date) => ({ date, entries: next.entries })),
+      );
+      if (releasePlans.length > 0 && !opts?.specialReleaseConfirmed) {
+        result = { ok: false, code: "special-release-required", error: SPECIAL_RELEASE_REQUIRED_MSG, specialReleases: releasePlans };
+        return d; // NADA persiste (§7)
+      }
+      if (releasePlans.length > 0) next = applySpecialReconciliationPlans(next, releasePlans, opts?.now ?? Date.now());
       for (const date of byDate.keys()) next = withCompensarReconcile(next, date);
       return next;
     });
@@ -646,7 +804,7 @@ export const actions = {
    * compensação CONCLUÍDA cujas horas utilizadas a edição reduziria, a
    * alteração é bloqueada pela guarda de histórico (concludedCompGuard).
    */
-  updateEntry(id: number, patch: Partial<Pick<TimeEntry, "time" | "type" | "note" | "date">>): ActionResult {
+  updateEntry(id: number, patch: Partial<Pick<TimeEntry, "time" | "type" | "note" | "date">>, opts?: PunchMutationOpts): ActionResult {
     let result: ActionResult = OK;
     mutate((d) => {
       if (patch.date && isFutureDate(patch.date)) {
@@ -681,6 +839,16 @@ export const actions = {
         }
       }
       let reconciled: AppData = { ...d, entries: sim.entries };
+      // 3G: gate prospectivo em TODAS as datas afetadas (origem e destino).
+      const releasePlans = specialReleasePlansFor(
+        d,
+        affectedDates.map((date) => ({ date, entries: sim.entries })),
+      );
+      if (releasePlans.length > 0 && !opts?.specialReleaseConfirmed) {
+        result = { ok: false, code: "special-release-required", error: SPECIAL_RELEASE_REQUIRED_MSG, specialReleases: releasePlans };
+        return d; // NADA persiste (§7)
+      }
+      if (releasePlans.length > 0) reconciled = applySpecialReconciliationPlans(reconciled, releasePlans, opts?.now ?? Date.now());
       for (const date of affectedDates) reconciled = withCompensarReconcile(reconciled, date);
       return reconciled;
     });
@@ -692,7 +860,7 @@ export const actions = {
    * regra): simula a exclusão e bloqueia quando o dia sustenta compensação
    * concluída — pela ORIGEM (dívida) ou pelo DESTINO (capacidade consumida).
    */
-  deleteEntry(id: number): ActionResult {
+  deleteEntry(id: number, opts?: PunchMutationOpts): ActionResult {
     let result: ActionResult = OK;
     mutate((d) => {
       const target = d.entries.find((e) => e.id === id);
@@ -706,7 +874,16 @@ export const actions = {
         result = guard;
         return d; // bloqueia: batida sustenta compensação concluída
       }
-      return withCompensarReconcile(sim, target.date);
+      // 3G: gate prospectivo — excluir batida também pode reduzir a
+      // necessidade do [10+] do dia (mesmo contrato de updateEntry).
+      const releasePlans = specialReleasePlansFor(d, [{ date: target.date, entries: sim.entries }]);
+      if (releasePlans.length > 0 && !opts?.specialReleaseConfirmed) {
+        result = { ok: false, code: "special-release-required", error: SPECIAL_RELEASE_REQUIRED_MSG, specialReleases: releasePlans };
+        return d; // NADA persiste (§7)
+      }
+      let next: AppData = sim;
+      if (releasePlans.length > 0) next = applySpecialReconciliationPlans(next, releasePlans, opts?.now ?? Date.now());
+      return withCompensarReconcile(next, target.date);
     });
     return result;
   },

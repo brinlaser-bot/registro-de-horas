@@ -4,6 +4,7 @@ import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Ban, ChevronLeft, ChevronRight, Clock3, Search, X } from "lucide-react";
 import { actions, getAppData, settingsOf, useAppData, useIsClient, useIsStoreReady } from "@/lib/store";
+import { useSpecialPunchActions } from "@/components/special-release-confirm";
 import {
   formatDateShortBR,
   formatMinutes,
@@ -364,6 +365,8 @@ function RegistrosBody() {
     }
   };
 
+  const punches = useSpecialPunchActions();
+
   const addEntry = async (p: { date: string; time: string; type: EntryType; note: string | null; source?: "live" | "manual" }) => {
     // §7: data futura → bloquear ANTES de tratar qualquer conflito com falta
     if (isFutureDate(p.date)) {
@@ -371,9 +374,10 @@ function RegistrosBody() {
       return;
     }
     if (!resolveFaltaConflict(p.date)) return;
-    const res = actions.addEntry(p);
+    const res = await punches.addEntry(p);
     if (!res.ok) {
-      toast.show(res.error ?? FUTURE_DATE_ERROR, "error");
+      // 3G: "Voltar" na confirmação de [10+] é aborto silencioso (o diálogo já é o feedback).
+      if (res.code !== "special-release-cancelled") toast.show(res.error ?? FUTURE_DATE_ERROR, "error");
       return;
     }
     reconcileDay(p.date);
@@ -381,9 +385,10 @@ function RegistrosBody() {
 
   const updateEntry = async (id: number, patch: { time?: string; type?: EntryType; note?: string | null; date?: string }) => {
     const target = entries.find((e) => e.id === id);
-    const res = actions.updateEntry(id, patch);
+    const res = await punches.updateEntry(id, patch);
     if (!res.ok) {
-      toast.show(res.error ?? "Não foi possível editar o registro.", "error");
+      // 3G: aborto silencioso ao escolher "Voltar" na confirmação de [10+].
+      if (res.code !== "special-release-cancelled") toast.show(res.error ?? "Não foi possível editar o registro.", "error");
       return;
     }
     if (target) {
@@ -395,9 +400,10 @@ function RegistrosBody() {
     const target = entries.find((e) => e.id === id);
     // §25: excluir usa a MESMA guarda central do updateEntry — bloqueado se a
     // batida sustenta compensação concluída (origem OU destino).
-    const res = actions.deleteEntry(id);
+    const res = await punches.deleteEntry(id);
     if (!res.ok) {
-      toast.show(res.error ?? "Não foi possível excluir o registro.", "error");
+      // 3G: aborto silencioso ao escolher "Voltar" na confirmação de [10+].
+      if (res.code !== "special-release-cancelled") toast.show(res.error ?? "Não foi possível excluir o registro.", "error");
       return;
     }
     if (target) reconcileDay(target.date);
@@ -459,14 +465,14 @@ function RegistrosBody() {
       return;
     }
     if (!resolveFaltaConflict(data.date)) return;
-    const r1 = actions.addEntry({ date: data.date, time: data.entrada, type: "entrada", note: data.note || null, source: "manual" });
+    const r1 = await punches.addEntry({ date: data.date, time: data.entrada, type: "entrada", note: data.note || null, source: "manual" });
     if (!r1.ok) {
-      toast.show(r1.error ?? FUTURE_DATE_ERROR, "error");
+      if (r1.code !== "special-release-cancelled") toast.show(r1.error ?? FUTURE_DATE_ERROR, "error");
       return;
     }
-    const r2 = actions.addEntry({ date: data.date, time: data.saida, type: "saida", note: data.note || null, source: "manual" });
+    const r2 = await punches.addEntry({ date: data.date, time: data.saida, type: "saida", note: data.note || null, source: "manual" });
     if (!r2.ok) {
-      toast.show(r2.error ?? FUTURE_DATE_ERROR, "error");
+      if (r2.code !== "special-release-cancelled") toast.show(r2.error ?? FUTURE_DATE_ERROR, "error");
       return;
     }
     reconcileDay(data.date);

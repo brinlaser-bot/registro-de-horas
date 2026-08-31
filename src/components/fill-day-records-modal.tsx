@@ -12,6 +12,7 @@ import {
   type FillTouched,
 } from "@/lib/fill-day-records";
 import { actions, settingsOf, useAppData } from "@/lib/store";
+import { useSpecialPunchActions } from "@/components/special-release-confirm";
 
 interface Props {
   date: string;
@@ -31,6 +32,7 @@ export function FillDayRecordsModal({ date, onClose, onSaved }: Props) {
   const [touched, setTouched] = useState<FillTouched[]>([{ entrada: false, saida: false }]);
   const [busy, setBusy] = useState(false);
   const inflight = useRef(false);
+  const specialActions = useSpecialPunchActions();
 
   const ui = fillDayUiState(date, periods, touched);
   const preview = fillDayPreview(periods, settings);
@@ -40,14 +42,15 @@ export function FillDayRecordsModal({ date, onClose, onSaved }: Props) {
     setTouched((cur) => cur.map((t, j) => (j === index ? { ...t, [field]: true } : t)));
   };
 
-  const save = () => {
+  const save = async () => {
     if (inflight.current || busy || !canSave) return;
     const v = validateFillDaySave(date, periods);
     if (!v.ok || !v.punches) return;
     inflight.current = true;
     setBusy(true);
     try {
-      const res = actions.addEntries(v.punches);
+      const res = await specialActions.addEntries(v.punches);
+      // 3G: "Voltar" na confirmação de [10+] é aborto silencioso (modal permanece).
       if (!res.ok) return;
       onSaved();
     } finally {

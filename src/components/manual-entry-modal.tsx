@@ -13,6 +13,7 @@ import {
   type FillTouched,
 } from "@/lib/fill-day-records";
 import { actions } from "@/lib/store";
+import { useSpecialPunchActions } from "@/components/special-release-confirm";
 import { settingsOf, useAppData } from "@/lib/store";
 import type { EntryType } from "@/lib/types";
 
@@ -45,6 +46,7 @@ export function ManualEntryModal({ open, onClose, initialDate, onSave }: Props) 
   const [touched, setTouched] = useState<FillTouched[]>([{ entrada: false, saida: false }]);
   const [busy, setBusy] = useState(false);
   const inflight = useRef(false);
+  const specialActions = useSpecialPunchActions();
 
   useEffect(() => {
     if (open) {
@@ -110,9 +112,10 @@ export function ManualEntryModal({ open, onClose, initialDate, onSave }: Props) 
     setBusy(true);
     try {
       const punches = punchesOf();
-      const res = actions.addEntries(punches);
+      const res = await specialActions.addEntries(punches);
       if (!res.ok) {
-        toast.show(res.error ?? "Não foi possível salvar.", "error");
+        // 3G: "Voltar" na confirmação de [10+] é aborto silencioso.
+        if (res.code !== "special-release-cancelled") toast.show(res.error ?? "Não foi possível salvar.", "error");
         return;
       }
       toast.show("Lançamento manual registrado!");

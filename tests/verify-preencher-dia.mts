@@ -81,7 +81,7 @@ check("3. abrir / montar o plano não altera o store", () => {
   assert.equal(JSON.stringify(getAppData().entries), before);
   const modal = srcOf("src/components/fill-day-records-modal.tsx");
   assert.ok(modal.includes("validateFillDaySave"));
-  assert.ok(modal.includes("actions.addEntries(v.punches)"));
+  assert.ok(modal.includes("specialActions.addEntries(v.punches)"), "3G: preencher dia passa pelo gate central de [10+]");
   assert.ok(!modal.includes("actions.addEntry("));
 });
 
@@ -358,7 +358,7 @@ check("30. submit válido continua atômico", () => {
   assert.equal(getAppData().entries.filter((e) => e.date === WED).length, 2);
   const modal = srcOf("src/components/fill-day-records-modal.tsx");
   assert.ok(modal.includes("validateFillDaySave(date, periods)"));
-  assert.ok(modal.includes("actions.addEntries(v.punches)"));
+  assert.ok(modal.includes("specialActions.addEntries(v.punches)"), "3G: preencher dia passa pelo gate central de [10+]");
 });
 
 check("31. nenhuma regressão no filtro ?semRegistro=1", () => {

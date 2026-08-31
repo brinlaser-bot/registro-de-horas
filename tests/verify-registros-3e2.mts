@@ -600,10 +600,15 @@ check("C11. inferência intacta: dia válido (26/08) + 17:00 → 'entrada' (moto
   assert.ok(correctModal.includes('Adicionar ${suggested === "entrada" ? "entrada" : "saída"}'), "rótulo do botão segue a inferência");
 });
 
-check("C12. nenhuma action duplicada no modal; sem motor financeiro novo na UI de batidas", () => {
-  assert.equal((correctModal.match(/actions\.addEntry\(/g) ?? []).length, 1, "addEntry única");
-  assert.equal((correctModal.match(/actions\.addEntries\(/g) ?? []).length, 1, "addEntries (intervalo) única");
-  assert.equal((correctModal.match(/actions\.deleteEntry\(/g) ?? []).length, 1, "deleteEntry única");
+check("C12. nenhuma action duplicada no modal; sem motor financeiro novo na UI de batidas (3G: chamadas via provider com confirmação)", () => {
+  // 3G: os actions de batida passam pelo gate central de liberação [10+]
+  // (useSpecialPunchActions) — a garantia é a MESMA: uma única chamada de
+  // store por operação, zero motor de cálculo na UI.
+  assert.equal((correctModal.match(/punches\.addEntry\(/g) ?? []).length, 1, "addEntry única (via provider 3G)");
+  assert.equal((correctModal.match(/punches\.addEntries\(/g) ?? []).length, 1, "addEntries (intervalo) única (via provider 3G)");
+  assert.equal((correctModal.match(/punches\.deleteEntry\(/g) ?? []).length, 1, "deleteEntry única (via provider 3G)");
+  assert.ok(correctModal.includes('useSpecialPunchActions'), "gate 3G presente");
+  assert.ok(correctModal.includes('special-release-cancelled'), "aborto silencioso ao Voltar");
   for (const f of [dayCard, correctModal]) {
     assert.ok(!f.includes('from "@/lib/official-projection"'), "sem import de projeção na UI de batidas");
     assert.ok(!f.includes('from "@/lib/special-excess-bank"'), "sem import de banco na UI de batidas");

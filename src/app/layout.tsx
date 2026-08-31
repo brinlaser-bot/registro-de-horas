@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import "./globals.css";
 import { ToastProvider } from "@/components/toast";
+import { SpecialReleaseProvider } from "@/components/special-release-confirm";
 
 export const metadata: Metadata = {
   title: {
@@ -16,7 +17,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="pt-BR">
       <body className="bg-slate-50 text-slate-900 antialiased">
-        <ToastProvider>{children}</ToastProvider>
+        <ToastProvider>
+          <SpecialReleaseProvider>{children}</SpecialReleaseProvider>
+        </ToastProvider>
       </body>
     </html>
   );

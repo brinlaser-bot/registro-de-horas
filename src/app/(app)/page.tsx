@@ -13,6 +13,7 @@ import {
   Wallet,
 } from "lucide-react";
 import { actions, enrichComp, getAppData, settingsOf, useAppData, useIsClient } from "@/lib/store";
+import { useSpecialPunchActions } from "@/components/special-release-confirm";
 import {
   addDays,
   computeDay,
@@ -235,6 +236,8 @@ export default function DashboardPage() {
     }
   };
 
+  const punches = useSpecialPunchActions();
+
   const onAddEntry = async (p: { date: string; time: string; type: EntryType; note: string | null }) => {
     // §7: data futura → bloquear ANTES de tratar qualquer conflito com falta
     if (isFutureDate(p.date)) {
@@ -243,10 +246,11 @@ export default function DashboardPage() {
     }
     if (!resolveFaltaConflict(p.date)) return { ok: false as const };
     const before = snapshotDay(p.date);
-    const res = actions.addEntry(p);
+    const res = await punches.addEntry(p);
     // §7: rejeição da validação central de sequência chega aqui (toast + erro)
     if (!res.ok) {
-      toast.show(res.error ?? FUTURE_DATE_ERROR, "error");
+      // 3G: "Voltar" na confirmação de [10+] é aborto silencioso (o diálogo já é o feedback).
+      if (res.code !== "special-release-cancelled") toast.show(res.error ?? FUTURE_DATE_ERROR, "error");
       return res;
     }
     promptExcessReasonIfNeeded(p.date, before);
@@ -254,10 +258,11 @@ export default function DashboardPage() {
   };
 
   const onDeleteEntry = async (id: number) => {
-    const res = actions.deleteEntry(id);
+    const res = await punches.deleteEntry(id);
     // §25: guarda central — batida sustentando compensação concluída é bloqueada
     if (!res.ok) {
-      toast.show(res.error ?? "Não foi possível excluir o registro.", "error");
+      // 3G: aborto silencioso ao escolher "Voltar" na confirmação de [10+].
+      if (res.code !== "special-release-cancelled") toast.show(res.error ?? "Não foi possível excluir o registro.", "error");
     }
     return res;
   };
@@ -268,9 +273,10 @@ export default function DashboardPage() {
   const onUpdateEntry = async (id: number, patch: { time?: string; note?: string | null }) => {
     const target = entries.find((e) => e.id === id);
     const before = target ? snapshotDay(target.date) : { excessMinutes: 0, open: false };
-    const res = actions.updateEntry(id, patch);
+    const res = await punches.updateEntry(id, patch);
     if (!res.ok) {
-      toast.show(res.error ?? "Não foi possível editar o registro.", "error");
+      // 3G: aborto silencioso ao escolher "Voltar" na confirmação de [10+].
+      if (res.code !== "special-release-cancelled") toast.show(res.error ?? "Não foi possível editar o registro.", "error");
       return res;
     }
     if (target) promptExcessReasonIfNeeded(target.date, before);
@@ -306,14 +312,14 @@ export default function DashboardPage() {
       return;
     }
     if (!resolveFaltaConflict(todayStr)) return;
-    const res = actions.addEntry({
+    const res = await punches.addEntry({
       date: todayStr,
       time,
       type: "saida",
       note: "Saída sugerida pelo assistente",
     });
     if (!res.ok) {
-      toast.show(res.error ?? FUTURE_DATE_ERROR, "error");
+      if (res.code !== "special-release-cancelled") toast.show(res.error ?? FUTURE_DATE_ERROR, "error");
       return;
     }
     for (const id of compIds) actions.completeComp(id);

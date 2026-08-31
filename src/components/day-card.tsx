@@ -25,6 +25,7 @@ import { SmartExit } from "@/components/smart-exit";
 import { SpecialExcessUseSummary } from "@/components/special-excess-use-summary";
 import type { SpecialExcessDayView } from "@/lib/special-excess-day-view";
 import { actions } from "@/lib/store";
+import { useSpecialPunchActions } from "@/components/special-release-confirm";
 import { analyzePunches } from "@/lib/punches";
 import { absenceLabel, type Absence, type DayBalanceView } from "@/lib/absences";
 import { isIncompletePastPunch } from "@/lib/compensar";
@@ -172,6 +173,7 @@ export function DayCard({
   specialExcess,
   onCompleteJornada,
 }: Props) {
+  const specialActions = useSpecialPunchActions();
   // Regra: todos os dias iniciam RECOLHIDOS — o usuário expande apenas o dia desejado.
   const [expanded, setExpanded] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -681,10 +683,11 @@ export function DayCard({
                   if (busy || !intOut || !intIn || toMinutes(intIn) <= toMinutes(intOut)) return;
                   setBusy(true);
                   try {
-                    const res = actions.addEntries([
+                    const res = await specialActions.addEntries([
                       { date: d.date, time: intOut, type: "saida", note: null, source: "manual" },
                       { date: d.date, time: intIn, type: "entrada", note: null, source: "manual" },
                     ]);
+                    // 3G: "Voltar" na confirmação de [10+] é aborto silencioso.
                     if (res.ok) { setShowInterval(false); setIntOut(""); setIntIn(""); }
                   } finally { setBusy(false); }
                 })()}>Salvar intervalo</Button>

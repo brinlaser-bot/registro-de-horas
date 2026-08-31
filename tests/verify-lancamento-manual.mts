@@ -163,7 +163,7 @@ check("11. submit válido continua funcionando normalmente", () => {
   assert.equal(day.workedMinutes, 480);
   assert.equal(day.canFinalizeFinancialDay, true);
   const modal = srcOf("src/components/manual-entry-modal.tsx");
-  assert.ok(modal.includes("actions.addEntries(punches)"));
+  assert.ok(modal.includes("specialActions.addEntries(punches)"), "3G: lançamento manual passa pelo gate central de [10+]");
   assert.ok(modal.includes("onClose()"));
 });
 
