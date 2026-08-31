@@ -46,12 +46,14 @@ import {
 
 import { buildSpecialExcessBank, type SpecialExcessBankSummary } from "@/lib/special-excess-bank";
 import { buildSpecialExcessDayView } from "@/lib/special-excess-day-view";
+import { activeSpecialPlansForDate } from "@/lib/special-excess-plan";
 import type { WorkSettings } from "@/lib/types";
 import { DayCard } from "@/components/day-card";
 import { ManualEntryModal, type ManualPairData } from "@/components/manual-entry-modal";
 import { FaltaModal } from "@/components/falta-modal";
 import { FillDayRecordsModal } from "@/components/fill-day-records-modal";
 import { SpecialExcessUseModal } from "@/components/special-excess-use-modal";
+import { SpecialExcessPlanModal } from "@/components/special-excess-plan-modal";
 import { DaySituationChips, DaySituationFilter } from "@/components/day-situation-filter";
 import { Button, Card, EmptyState, Skeleton } from "@/components/ui";
 import { useToast } from "@/components/toast";
@@ -111,6 +113,8 @@ function RegistrosBody() {
   const [faltaInitialDate, setFaltaInitialDate] = useState<string | null>(null);
   const [fillDate, setFillDate] = useState<string | null>(null);
   const [completeDate, setCompleteDate] = useState<string | null>(null);
+  // 4B: data FUTURA do modal "Planejar uso de [10+]".
+  const [planDate, setPlanDate] = useState<string | null>(null);
   const wantPending = searchParams.get("pendentes") === "1";
   const wantMissing = searchParams.get("semRegistro") === "1";
   const situacaoRaw = searchParams.get("situacao");
@@ -238,10 +242,12 @@ function RegistrosBody() {
           compact,
           creditView,
           specialExcess,
+          // 4B: planos/reservas ATIVAS do dia (badge + detalhe + cancelamento).
+          specialPlans: activeSpecialPlansForDate(specialExcessPlans ?? [], date),
           situations,
         };
       });
-  }, [entries, compensations, absences, companyCalendars, faltas, excessReasons, settings, range, todayStr, nowMinutes, user.controlStartDate, specialExcessUses, specialBankByCycle]);
+  }, [entries, compensations, absences, companyCalendars, faltas, excessReasons, settings, range, todayStr, nowMinutes, user.controlStartDate, specialExcessUses, specialExcessPlans, specialBankByCycle]);
 
   // Resumo do intervalo, AGRUPADO POR CICLO ANUAL (nunca mistura pendências)
   const summaries = useMemo(() => {
@@ -701,7 +707,7 @@ function RegistrosBody() {
         />
       ) : (
         <div className={missingOnly || pendingOnly ? "space-y-4" : "space-y-2"}>
-          {listedDays.map(({ date, balanceView, displayDay, absence, calendarLabel, falta, workedInAbonoMinutes, abonoParcial, missingExpected, historicalEmpty, compact, specialExcess }) => (
+          {listedDays.map(({ date, balanceView, displayDay, absence, calendarLabel, falta, workedInAbonoMinutes, abonoParcial, missingExpected, historicalEmpty, compact, specialExcess, specialPlans }) => (
             <DayCard
               key={date}
               result={displayDay}
@@ -739,6 +745,10 @@ function RegistrosBody() {
               abonoParcial={abonoParcial}
               specialExcess={specialExcess.eligible || specialExcess.activeUses.length > 0 ? specialExcess : null}
               onCompleteJornada={(d) => setCompleteDate(d)}
+              specialPlans={specialPlans}
+              // 4B: a ação de planejar só é oferecida para dia FUTURO
+              // (destinationDate > hoje); o store 4A continua o gate final.
+              onPlanSpecial={date > todayStr ? () => setPlanDate(date) : undefined}
             />
           ))}
         </div>
@@ -795,6 +805,10 @@ function RegistrosBody() {
       {/* NOVO [10+] (Etapa 3E): modal "Completar jornada com [10+]". */}
       {completeDate && (
         <SpecialExcessUseModal date={completeDate} onClose={() => setCompleteDate(null)} />
+      )}
+      {/* NOVO [10+] (Etapa 4B): modal "Planejar uso de [10+]" (reserva futura). */}
+      {planDate && (
+        <SpecialExcessPlanModal date={planDate} onClose={() => setPlanDate(null)} />
       )}
     </div>
   );

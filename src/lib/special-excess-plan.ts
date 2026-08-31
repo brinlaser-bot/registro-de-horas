@@ -177,6 +177,14 @@ export function reservedSpecialMinutesByOrigin(plans: SpecialExcessPlan[]): Reco
   return out;
 }
 
+/**
+ * Planos ATIVOS ("planned") com destino NA data — insumo do badge/detalhe
+ * da UI (4B). Cancelados/concluídos não aparecem (não reservam).
+ */
+export function activeSpecialPlansForDate(plans: SpecialExcessPlan[], destinationDate: string): SpecialExcessPlan[] {
+  return plans.filter((p) => p.status === "planned" && p.destinationDate === destinationDate);
+}
+
 /* ── Rastreabilidade (histórico completo, inclusive cancelados/concluídos) ── */
 
 export interface SpecialExcessPlanTrace {

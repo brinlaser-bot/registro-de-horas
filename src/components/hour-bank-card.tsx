@@ -211,7 +211,7 @@ export function HourBankCard({
           value={formatMinutes(specialBank.availableMinutes)}
           tone="bg-violet-100 text-violet-600"
           title="Saldo [10+] do ciclo anual atual: gerado menos o utilizado ativo e o reservado ativo (a mesma fonte do Resumo)"
-          sub={`${formatMinutes(specialBank.generatedMinutes)} gerado · ${formatMinutes(specialBank.usedMinutes)} utilizado`}
+          sub={`${formatMinutes(specialBank.generatedMinutes)} gerado · ${formatMinutes(specialBank.usedMinutes)} utilizado${specialBank.reservedMinutes > 0 ? ` · ${formatMinutes(specialBank.reservedMinutes)} reservado` : ""}`}
         >
           {bank.excessWithoutReason > 0 && (
             <Badge tone="amber">⚠ {formatMinutes(bank.excessWithoutReason)} sem motivo</Badge>

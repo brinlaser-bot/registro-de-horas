@@ -381,13 +381,16 @@ export default function ResumoPage() {
 
 /* ── Blocos de apoio ─────────────────────────────────────────────────── */
 
-/** Banco anual [10+] de UM ciclo (3C): Gerado / Utilizado / Disponível. */
+/** Banco anual [10+] de UM ciclo (3C/4A): Gerado / Utilizado / Reservado / Disponível. */
 function BankPanel({ panel }: { panel: ResumoBankPanel }) {
   const { cycle, bank } = panel;
   return (
     <div className="rounded-xl border border-violet-200 bg-violet-50/40 px-4 py-3">
       <p className="text-xs font-extrabold uppercase tracking-wide text-violet-700">Ciclo {cycle}</p>
-      <dl className="mt-2 grid grid-cols-3 gap-3">
+      {/* 4B: "Reservado" entra para a matemática do DISPONÍVEL ficar
+          compreensível (GERADO − UTILIZADO − RESERVADO). Ajuste de coerência,
+          NÃO redesenho. O card "[10+] gerado no período" continua factual. */}
+      <dl className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-4">
         <div>
           <dt className="text-[11px] font-medium text-slate-500">Gerado</dt>
           <dd className="text-base font-extrabold tabular-nums text-slate-800">{formatMinutes(bank.generatedMinutes)}</dd>
@@ -395,6 +398,10 @@ function BankPanel({ panel }: { panel: ResumoBankPanel }) {
         <div>
           <dt className="text-[11px] font-medium text-slate-500">Utilizado</dt>
           <dd className="text-base font-extrabold tabular-nums text-slate-800">{formatMinutes(bank.usedMinutes)}</dd>
+        </div>
+        <div>
+          <dt className="text-[11px] font-medium text-slate-500">Reservado</dt>
+          <dd className="text-base font-extrabold tabular-nums text-violet-600">{formatMinutes(bank.reservedMinutes)}</dd>
         </div>
         <div>
           <dt className="text-[11px] font-medium text-slate-500">Disponível</dt>

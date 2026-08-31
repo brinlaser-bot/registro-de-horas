@@ -4,6 +4,7 @@ import { useState } from "react";
 import {
   Ban,
   Cake,
+  CalendarClock,
   CalendarDays,
   ChevronDown,
   ChevronUp,
@@ -24,7 +25,10 @@ import { Badge, Button, ConfirmDialog, Input, Select } from "@/components/ui";
 import { CorrectPunchesModal } from "@/components/correct-punches-modal";
 import { SmartExit } from "@/components/smart-exit";
 import { SpecialExcessUseSummary } from "@/components/special-excess-use-summary";
+import { SpecialExcessPlanSummary } from "@/components/special-excess-plan-summary";
 import type { SpecialExcessDayView } from "@/lib/special-excess-day-view";
+import type { SpecialExcessPlan } from "@/lib/special-excess-plan";
+import { specialExcessPlanMinutes } from "@/lib/special-excess-plan";
 import { actions } from "@/lib/store";
 import { useSpecialPunchActions } from "@/components/special-release-confirm";
 import { analyzePunches } from "@/lib/punches";
@@ -145,6 +149,11 @@ interface Props {
   specialExcess?: SpecialExcessDayView | null;
   /** Abre o modal "Completar jornada com [10+]". */
   onCompleteJornada?: (date: string) => void;
+  /** 4B: planos/reservas ATIVAS deste dia (activeSpecialPlansForDate). */
+  specialPlans?: SpecialExcessPlan[];
+  /** 4B: abre o modal "Planejar uso de [10+]" — só passado para dia FUTURO
+   *  (a regra destinationDate > hoje continua soberana no store 4A). */
+  onPlanSpecial?: () => void;
 }
 
 export function DayCard({
@@ -173,6 +182,8 @@ export function DayCard({
   onFillDayRecords,
   specialExcess,
   onCompleteJornada,
+  specialPlans,
+  onPlanSpecial,
 }: Props) {
   const specialActions = useSpecialPunchActions();
   // Regra: todos os dias iniciam RECOLHIDOS — o usuário expande apenas o dia desejado.
@@ -327,6 +338,20 @@ export function DayCard({
                 <Timer size={13} className="shrink-0" aria-hidden />
                 <span>
                   [10+] aplicado · {formatMinutes(specialExcess.usedActiveMinutes)}
+                </span>
+              </Badge>
+            )}
+            {/* 4B: destaque violeta quando o dia possui RESERVA [10+] ativa
+                (plano). PLANEJADO NÃO É UTILIZADO — é uma SEGUNDA informação:
+                o status real do dia ("Jornada não iniciada" etc.) permanece
+                intocado e dominante ao lado. Deriva dos planos ativos a cada
+                render (vários planos aparecem agregados no badge). */}
+            {specialPlans && specialPlans.length > 0 && (
+              <Badge tone="violet" className="shrink-0 gap-1.5 py-1">
+                <CalendarClock size={13} className="shrink-0" aria-hidden />
+                <span>
+                  [10+] reservado ·{" "}
+                  {formatMinutes(specialPlans.reduce((s, p) => s + specialExcessPlanMinutes(p), 0))}
                 </span>
               </Badge>
             )}
@@ -590,6 +615,44 @@ export function DayCard({
                 view={specialExcess}
                 onOpen={specialExcess.canComplete && onCompleteJornada ? () => onCompleteJornada(d.date) : undefined}
               />
+            </div>
+          )}
+
+          {/* 4B — [10+] PLANEJADO/RESERVADO (bloco separado do uso): detalhe
+              dos planos ativos do dia + cancelamento individual. Quando a
+              data chegou (hoje/passado) NADA é concluído/liberado — texto
+              neutro e "Cancelar reserva" permanecem. "Concluir" NÃO existe
+              nesta etapa (PLANO → USO é etapa posterior). */}
+          {specialPlans && specialPlans.length > 0 && (
+            <div className="mt-3 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2.5">
+              <SpecialExcessPlanSummary
+                plans={specialPlans}
+                isFuture={futureDay}
+                onPlan={onPlanSpecial}
+              />
+            </div>
+          )}
+
+          {/* 4B — ação discreta de planejamento, SOMENTE para dia FUTURO sem
+              reserva (com reserva, o bloco acima oferece "Planejar mais").
+              A regra destinationDate > hoje continua soberana no store 4A;
+              aqui ela apenas oculta a ação em datas não elegíveis. */}
+          {futureDay && onPlanSpecial && !(specialPlans && specialPlans.length > 0) && (
+            <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2.5">
+              <Badge tone="violet" className="shrink-0 py-1">
+                <CalendarClock size={13} aria-hidden /> [10+]
+              </Badge>
+              <p className="min-w-0 flex-1 text-xs font-medium text-violet-800/80">
+                Reserve saldo [10+] para este dia futuro.
+              </p>
+              <Button
+                size="sm"
+                variant="secondary"
+                className="w-full !border-violet-300 !text-violet-700 hover:!bg-violet-50 sm:w-auto"
+                onClick={onPlanSpecial}
+              >
+                <CalendarClock size={13} /> Planejar uso de [10+]
+              </Button>
             </div>
           )}
 
