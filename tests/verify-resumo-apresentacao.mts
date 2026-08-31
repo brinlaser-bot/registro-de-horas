@@ -73,9 +73,12 @@ check("B. 7h30 / base 8h => Jornada abaixo do previsto e −30min", () => {
   assert.equal(d.expectedMinutes, 480);
   assert.equal(d.balanceMinutes, -30);
   assert.equal(resumoFinancialFrozen(d), false);
+  // 3F.1: o badge do dia (mesma lógica de tons) vive no item mobile
   const page = srcOf("src/app/(app)/resumo/page.tsx");
-  assert.ok(page.includes('kind === "Jornada abaixo do previsto"'));
-  assert.ok(page.includes('? "rose"'));
+  const rowMobileSrc = srcOf("src/components/resumo-day-row-mobile.tsx");
+  const badgeSrc = page.includes('kind === "Jornada abaixo do previsto"') ? page : rowMobileSrc;
+  assert.ok(badgeSrc.includes('kind === "Jornada abaixo do previsto"'));
+  assert.ok(badgeSrc.includes('? "rose"'));
 });
 
 check("C. 11h30 => no ponto 10h, extra +2h, [10+] 1h30; tooltip separa", () => {
@@ -162,13 +165,16 @@ check("R4. botão Período atual permanece", () => {
 });
 
 check("R5. cores distintas Sem registro / abaixo / [10+] / Folga", () => {
+  // 3F.1: o mapeamento de tons do badge vive no item mobile (mesma lógica)
   const page = srcOf("src/app/(app)/resumo/page.tsx");
-  assert.ok(page.includes('kind === "Sem registro"'));
-  assert.ok(page.includes('kind === "Jornada abaixo do previsto"'));
-  assert.ok(page.includes('kind === "Acima do limite [10+]"'));
-  assert.ok(page.includes('kind === "Folga"'));
-  assert.ok(page.includes('? "violet"'));
-  assert.ok(page.includes('? "sky"'));
+  const rowMobileSrc = srcOf("src/components/resumo-day-row-mobile.tsx");
+  const badgeSrc = page.includes('kind === "Acima do limite [10+]"') ? page : rowMobileSrc;
+  assert.ok(badgeSrc.includes('kind === "Sem registro"'));
+  assert.ok(badgeSrc.includes('kind === "Jornada abaixo do previsto"'));
+  assert.ok(badgeSrc.includes('kind === "Acima do limite [10+]"'));
+  assert.ok(badgeSrc.includes('kind === "Folga"'));
+  assert.ok(badgeSrc.includes('? "violet"'));
+  assert.ok(badgeSrc.includes('? "sky"'));
 });
 
 check("R6. histórico sem fatos não vira abaixo do previsto", () => {

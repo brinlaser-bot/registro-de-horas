@@ -83,6 +83,8 @@ const page = src("src/app/(app)/resumo/page.tsx");
 const viewSrc = src("src/lib/resumo-period-view.ts");
 const chartSrc = src("src/components/stacked-period-chart.tsx");
 const barsSrc = src("src/components/charts.tsx");
+// 3F.1: a apresentacao mobile dos dias vive em proprio componente (mesma derivacao)
+const rowSrc = src("src/components/resumo-day-row-mobile.tsx");
 
 /** Mesmo mapping do exportCsv da página (mesma derivação `view.days`). */
 function csvFields(r: ResumoDetailRow): (string | number)[] {
@@ -330,21 +332,21 @@ check("V. composição do saldo mostra positivos / negativos / líquido (2A)", (
 
 check("W. detalhamento possui representação [10+] (tabela + mobile)", () => {
   assert.ok(page.includes(">[10+]</th>"), "coluna [10+] na tabela desktop");
-  assert.ok(page.includes('label="[10+] gerado"'), "campo mobile gerado");
-  assert.ok(page.includes('label="[10+] usado"'), "campo mobile usado");
+  assert.ok(rowSrc.includes('label="[10+] gerado"'), "campo mobile gerado");
+  assert.ok(rowSrc.includes('label="[10+] usado"'), "campo mobile usado");
 });
 
 check("X. detalhamento possui projeção (tabela + mobile)", () => {
   assert.ok(page.includes("Projeção**</th>"), "coluna Projeção na tabela desktop");
-  assert.ok(page.includes('label="Projeção"'), "campo mobile Projeção");
+  assert.ok(rowSrc.includes('label="Projeção"'), "campo mobile Projeção");
 });
 
-check("Y. registro incompleto continua sem saldo financeiro (mobile: mensagem de pendência)", () => {
+check("Y. registro incompleto continua sem saldo financeiro (mobile: mensagem de pendencia)", () => {
   const v = viewOf();
   const r = v.days.find((x) => x.day.date === "2026-08-27")!;
   assert.equal(r.day.balanceContribution, 0);
   assert.ok(resumoDayPending(r), "dia pendente identificado");
-  assert.ok(page.includes("Registro pendente. Os valores financeiros serão definidos após a correção."), "mensagem compacta do mobile");
+  assert.ok(rowSrc.includes("Registro pendente. Os valores financeiros serão definidos após a correção."), "mensagem compacta do item mobile");
 });
 
 check("Z. legenda principal do gráfico não depende da linguagem legada de compensação", () => {
@@ -374,22 +376,24 @@ check("AI. mobile não depende de scroll horizontal para campos essenciais", () 
 });
 
 check("AJ. mobile possui Trabalhado", () => {
-  assert.ok(page.includes('label="Trabalhado"'));
+  assert.ok(rowSrc.includes('label="Trabalhado"'));
 });
 
 check("AK. mobile possui Jornada", () => {
-  assert.ok(page.includes('label="Jornada"'));
+  assert.ok(rowSrc.includes('label="Jornada"'));
 });
 
 check("AL. mobile possui Saldo regular", () => {
-  assert.ok(page.includes('label="Saldo regular"'));
+  assert.ok(rowSrc.includes('label="Saldo regular"'));
 });
 
 check("AM. mobile possui No ponto", () => {
-  assert.ok(page.includes('label="No ponto"'));
+  assert.ok(rowSrc.includes('label="No ponto"'));
 });
 
-check("AN. mobile possui [10+] quando aplicável (gerado/usado)", () => {
+check("AN. mobile possui [10+] quando aplicavel (gerado/usado)", () => {
+  assert.ok(rowSrc.includes('label="[10+] gerado"'));
+  assert.ok(rowSrc.includes('label="[10+] usado"'));
   const v = viewOf();
   assert.equal(v.days.find((x) => x.day.date === "2026-08-28")!.specialGenerated, 30, "28/08 renderiza '[10+] gerado'");
 });
@@ -398,11 +402,13 @@ check("AO. mobile possui Projeção quando aplicável", () => {
   // sem uso: nenhuma projeção agregando informação → campo ausente (discreta)
   const v = viewOf();
   assert.ok(!v.days.some((r) => resumoProjectionVisible(r)), "sem uso: projeção discreta (—)");
-  assert.ok(page.includes('label="Projeção"'), "campo presente no layout (condicional)");
+  assert.ok(rowSrc.includes('label="Projeção"'), "campo presente no layout expandido (condicional)");
 });
 
 check("AP. registro incompleto no mobile não recebe valores financeiros inventados", () => {
-  assert.ok(page.includes(") : !frozen ? ("), "grid financeiro do mobile só quando não congelado");
+  assert.ok(rowSrc.includes("resumoDayPending(row)"), "pendência identificada no item mobile");
+  assert.ok(rowSrc.includes("resumoFinancialFrozen(d)"), "financeiro congelado identificado");
+  assert.ok(rowSrc.includes("const expandable = !frozen || pending;"), "só dias relevantes (ou pendentes) são recolhíveis");
   const v = viewOf();
   const r = v.days.find((x) => x.day.date === "2026-08-27")!;
   assert.ok(resumoFinancialFrozen(r.day) && resumoDayPending(r), "27/08: pendência, não financeiro");

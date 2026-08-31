@@ -21,14 +21,15 @@ import {
   type ResumoBankPanel,
   type ResumoDetailRow,
 } from "@/lib/resumo-period-view";
-import { resumoEventKind, resumoFinancialFrozen } from "@/lib/resumo-days";
+import { resumoFinancialFrozen } from "@/lib/resumo-days";
+import {
+  fmtSigned,
+  ResumoDayRowMobile,
+  ResumoEventBadge,
+  toggleDayOpen,
+} from "@/components/resumo-day-row-mobile";
 import { Badge, Button, Card, EmptyState, Skeleton, StatCard } from "@/components/ui";
 import { StackedPeriodChart } from "@/components/stacked-period-chart";
-
-/** +30min / -1h30 / 0min — convenção de sinal do Resumo. */
-function fmtSigned(v: number): string {
-  return `${v > 0 ? "+" : ""}${formatMinutes(v)}`;
-}
 
 export default function ResumoPage() {
   const mounted = useIsClient();
@@ -38,6 +39,9 @@ export default function ResumoPage() {
   const currentPeriod = getPointPeriod(todayStr);
   const [period, setPeriod] = useState<PointPeriod>(() => getPointPeriod(todayString()));
   const [detailsOpen, setDetailsOpen] = useState(false);
+  // 3F.1 - expansao local da lista MOBILE de dias: Set de datas abertas
+  // (padrao vazio = tudo recolhido; multiplos abertos; sem persistencia).
+  const [openDays, setOpenDays] = useState<Set<string>>(new Set());
   const viewingCurrentPeriod = samePointPeriod(period, currentPeriod);
 
   // ETAPA 3F — derivação ÚNICA do Resumo (fatos + 2A + 3A + 3B + 3C):
@@ -345,11 +349,17 @@ export default function ResumoPage() {
               </table>
             </div>
 
-            {/* MOBILE: lista vertical compacta por dia — MESMA derivação
-                (view.days); sem scroll horizontal para campos essenciais. */}
+            {/* MOBILE: lista vertical de dias RECOLHIVEIS (3F.1) - MESMA
+                derivacao (view.days); padrao fechado; multiplos abertos;
+                sem scroll horizontal para campos essenciais. */}
             <ul className="divide-y divide-slate-100 md:hidden">
               {view.days.map((r) => (
-                <DetailRowMobile key={r.day.date} row={r} />
+                <ResumoDayRowMobile
+                  key={r.day.date}
+                  row={r}
+                  open={openDays.has(r.day.date)}
+                  onToggle={() => setOpenDays((prev) => toggleDayOpen(prev, r.day.date))}
+                />
               ))}
               <li className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-1 py-3 font-extrabold text-slate-900">
                 <span>Total · {totals.trackedDays} dia(s)</span>
@@ -465,87 +475,6 @@ function DetailRowDesktop({ row }: { row: ResumoDetailRow }) {
       </td>
     </tr>
   );
-}
-
-/** Card/bloco vertical compacto por dia (mobile < md) — MESMA derivação.
-    Sem scroll horizontal: grid de duas colunas com labels textuais. */
-function DetailRowMobile({ row }: { row: ResumoDetailRow }) {
-  const d = row.day;
-  const pending = resumoDayPending(row);
-  const frozen = resumoFinancialFrozen(d);
-  const showProj = resumoProjectionVisible(row);
-  return (
-    <li className="px-1 py-2.5">
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-sm font-bold text-slate-800">
-          {weekdayShort(d.date).replace(".", "")}
-          <span className="ml-1.5 font-medium text-slate-400">
-            {d.date.slice(8)}/{d.date.slice(5, 7)}
-          </span>
-        </span>
-        <ResumoEventBadge day={d} />
-      </div>
-      {pending ? (
-        <p className="mt-1.5 text-xs text-slate-500">
-          Registro pendente. Os valores financeiros serão definidos após a correção.
-        </p>
-      ) : !frozen ? (
-        <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1.5">
-          <DetailField label="Trabalhado" value={d.workedMinutes > 0 ? formatMinutes(d.workedMinutes) : "—"} />
-          <DetailField label="Jornada" value={formatMinutes(d.expectedMinutes)} className="text-slate-500" />
-          <DetailField
-            label="Saldo regular"
-            value={fmtSigned(d.balanceMinutes)}
-            className={d.balanceMinutes > 0 ? "text-emerald-600" : d.balanceMinutes < 0 ? "text-rose-600" : "text-slate-500"}
-          />
-          <DetailField label="No ponto" value={formatMinutes(d.registrableMinutes)} className="text-indigo-600" />
-          {row.specialGenerated > 0 && (
-            <DetailField label="[10+] gerado" value={`+${formatMinutes(row.specialGenerated)}`} className="text-violet-600" />
-          )}
-          {row.specialUsed > 0 && <DetailField label="[10+] usado" value={formatMinutes(row.specialUsed)} />}
-          {showProj && (
-            <DetailField
-              label="Projeção"
-              value={`${formatMinutes(row.projection.projectedWorkedMinutes)} / ${fmtSigned(row.projection.projectedBalanceMinutes)}`}
-              className="text-indigo-600"
-            />
-          )}
-        </dl>
-      ) : null}
-    </li>
-  );
-}
-
-/** Campo label+valor do layout mobile (texto explícito — não depende de cor). */
-function DetailField({ label, value, className }: { label: string; value: string; className?: string }) {
-  return (
-    <div className="min-w-0">
-      <dt className="text-[11px] font-medium text-slate-500">{label}</dt>
-      <dd className={`text-sm font-extrabold tabular-nums leading-snug ${className ?? "text-slate-800"}`}>{value}</dd>
-    </div>
-  );
-}
-
-function ResumoEventBadge({ day }: { day: ResumoDetailRow["day"] }) {
-  const kind = resumoEventKind(day);
-  if (kind === "—") return <span className="text-xs text-slate-300">—</span>;
-  const tone =
-    kind === "Sem registro" || kind === "Registro inconsistente" || kind === "Registro incompleto"
-      ? "amber"
-      : kind === "Jornada abaixo do previsto"
-        ? "rose"
-        : kind === "Acima do limite [10+]"
-          ? "violet"
-          : kind === "Folga"
-            ? "sky"
-            : kind === "Ok"
-              ? "emerald"
-              : kind === "Em andamento"
-                ? "indigo"
-                : kind === "Falta"
-                  ? "rose"
-                  : "sky";
-  return <Badge tone={tone}>{kind}</Badge>;
 }
 
 function DetailColumn({ title, children }: { title: string; children: ReactNode }) {
