@@ -2,35 +2,37 @@
 
 import { useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
-import { BarChart3, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Clock3, Download, TriangleAlert, Wallet } from "lucide-react";
+import { BarChart3, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Clock3, Download, TrendingUp, TriangleAlert, Wallet } from "lucide-react";
 import { settingsOf, useAppData, useIsClient } from "@/lib/store";
-import { formatMinutes, isRealizedDate, todayString, weekdayShort } from "@/lib/time";
-import { effectiveFaltas } from "@/lib/faltas";
+import { formatMinutes, todayString, weekdayShort } from "@/lib/time";
 import {
   getNextPointPeriod,
   getPointPeriod,
   getPreviousPointPeriod,
-  listDaysBetween,
   periodLabel,
   samePointPeriod,
   type PointPeriod,
 } from "@/lib/periods";
 import { pendingPunchDates } from "@/lib/pending-punches";
-import { buildDebtDays } from "@/lib/debt";
-import { specialExcessBook } from "@/lib/hour-bank";
 import {
-  buildResumoDayRow,
-  isQuietResumoDay,
-  resumoEventKind,
-  resumoFinancialFrozen,
-  type ResumoDayRow,
-} from "@/lib/resumo-days";
+  buildResumoPeriodView,
+  resumoDayPending,
+  resumoProjectionVisible,
+  type ResumoBankPanel,
+  type ResumoDetailRow,
+} from "@/lib/resumo-period-view";
+import { resumoEventKind, resumoFinancialFrozen } from "@/lib/resumo-days";
 import { Badge, Button, Card, EmptyState, Skeleton, StatCard } from "@/components/ui";
 import { StackedPeriodChart } from "@/components/stacked-period-chart";
 
+/** +30min / -1h30 / 0min — convenção de sinal do Resumo. */
+function fmtSigned(v: number): string {
+  return `${v > 0 ? "+" : ""}${formatMinutes(v)}`;
+}
+
 export default function ResumoPage() {
   const mounted = useIsClient();
-  const { user, entries, compensations, absences, companyCalendars, faltas, excessReasons } = useAppData();
+  const { user, entries, compensations, absences, companyCalendars, faltas, specialExcessUses } = useAppData();
   const settings = settingsOf(user);
   const todayStr = todayString();
   const currentPeriod = getPointPeriod(todayStr);
@@ -38,65 +40,35 @@ export default function ResumoPage() {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const viewingCurrentPeriod = samePointPeriod(period, currentPeriod);
 
-  const allDays = useMemo(() => {
-    return listDaysBetween(period.from, period.to)
-      .map((date) =>
-        buildResumoDayRow({
-          date,
-          today: todayStr,
-          entries,
-          absences,
-          calendars: companyCalendars,
-          settings,
-          faltas,
-          controlStartDate: user.controlStartDate,
-        }),
-      )
-      .filter(isQuietResumoDay);
-  }, [entries, absences, companyCalendars, faltas, settings, period, todayStr, user.controlStartDate]);
-
-  const totals = useMemo(
+  // ETAPA 3F — derivação ÚNICA do Resumo (fatos + 2A + 3A + 3B + 3C):
+  // cards, composição, banco anual [10+], projeção e linhas do detalhamento
+  // (mesma fonte para tabela desktop, cards mobile e CSV).
+  const view = useMemo(
     () =>
-      allDays.reduce(
-        (acc, d) => {
-          if (d.entryCount > 0 && isRealizedDate(d.date, todayStr)) acc.trackedDays += 1;
-          acc.workedTotal += d.workedMinutes;
-          acc.registrableTotal += d.registrableMinutes;
-          // Mesmo agregador central usado em Registros; dias sem dados e jornada aberta = 0.
-          acc.balanceTotal += d.balanceContribution;
-          acc.excessTotal += d.excessMinutes;
-          return acc;
-        },
-        { trackedDays: 0, workedTotal: 0, registrableTotal: 0, balanceTotal: 0, excessTotal: 0 },
-      ),
-    [allDays, todayStr],
+      buildResumoPeriodView({
+        period,
+        today: todayStr,
+        entries,
+        absences,
+        calendars: companyCalendars,
+        settings,
+        faltas,
+        controlStartDate: user.controlStartDate ?? null,
+        uses: specialExcessUses ?? [],
+      }),
+    [entries, absences, companyCalendars, settings, faltas, period, todayStr, user.controlStartDate, specialExcessUses],
   );
 
+  // Pendências OPERACIONAIS (não representam dívida financeira) + contagens
+  // factuais de ausências — a apuração financeira vive na `view` acima.
   const detailStats = useMemo(() => {
-    const debts = buildDebtDays(
-      entries,
-      compensations,
-      settings,
-      period,
-      absences,
-      companyCalendars,
-      effectiveFaltas(faltas, todayStr),
-      todayStr,
-    );
-    const acordo = debts.filter((d) => d.kind === "acordo");
     let vacationDays = 0, healthDays = 0, waivedDays = 0;
-    for (const d of allDays) {
-      if (d.absence?.kind === "ferias") vacationDays += 1;
-      if (d.absence?.kind === "saude") healthDays += 1;
-      if (d.absence && (d.absence.kind === "outro" || (d.absence.kind === "acordado" && d.absence.treatment === "dispensado"))) {
+    for (const r of view.days) {
+      if (r.day.absence?.kind === "ferias") vacationDays += 1;
+      if (r.day.absence?.kind === "saude") healthDays += 1;
+      if (r.day.absence && (r.day.absence.kind === "outro" || (r.day.absence.kind === "acordado" && r.day.absence.treatment === "dispensado"))) {
         waivedDays += 1;
       }
-    }
-    let compensatedMinutes = 0, pendingCompMinutes = 0;
-    for (const c of compensations) {
-      if (c.sourceDate < period.from || c.sourceDate > period.to) continue;
-      if (c.status === "concluida") compensatedMinutes += c.minutes;
-      if (c.status === "pendente") pendingCompMinutes += c.minutes;
     }
     let faltaDays = 0, faltaPrevistaDays = 0;
     for (const f of faltas) {
@@ -105,49 +77,37 @@ export default function ResumoPage() {
       else faltaPrevistaDays += 1;
     }
     return {
-      workedDays: totals.trackedDays,
-      workedMinutes: totals.workedTotal,
-      registrableMinutes: totals.registrableTotal,
-      balanceMinutes: totals.balanceTotal,
-      excessMinutes: totals.excessTotal,
-      deficitMinutes: allDays.reduce((s, d) => s + d.deficitContribution, 0),
-      compensatedMinutes,
-      pendingCompMinutes,
       vacationDays,
       healthDays,
       waivedDays,
       faltaDays,
       faltaPrevistaDays,
-      acordoTotal: acordo.reduce((s, d) => s + d.debtMinutes, 0),
-      acordoDone: acordo.reduce((s, d) => s + d.concludedMinutes, 0),
-      acordoPending: acordo.reduce((s, d) => s + d.remainingMinutes, 0),
       pendingPunches: pendingPunchDates(entries, settings, todayStr, period).length,
-      missingRecords: allDays.filter((d) => d.missingExpected).length,
+      missingRecords: view.days.filter((r) => r.day.missingExpected).length,
     };
-  }, [allDays, totals, entries, compensations, settings, period, absences, companyCalendars, faltas, todayStr]);
-
-  const periodExcessBook = useMemo(
-    () =>
-      specialExcessBook(
-        entries, compensations, absences, companyCalendars, settings, excessReasons, period, todayStr,
-      ),
-    [entries, compensations, absences, companyCalendars, settings, excessReasons, period, todayStr],
-  );
+  }, [view, entries, settings, period, todayStr, faltas]);
 
   const exportCsv = () => {
     const rows = [
-      ["data", "dia_semana", "evento", "batidas", "trabalhado_min", "jornada_efetiva_min", "saldo_min", "excedente_min", "no_ponto_min"],
-      ...allDays.map((d) => [
-        d.date,
-        weekdayShort(d.date),
-        d.eventLabel ?? "",
-        d.entryCount,
-        d.workedMinutes,
-        d.expectedMinutes,
-        d.balanceMinutes,
-        d.excessMinutes,
-        d.registrableMinutes,
-      ]),
+      ["data", "dia_semana", "situacao", "trabalhado_min", "jornada_min", "saldo_regular_min", "no_ponto_min", "[10+]_gerado_min", "[10+]_utilizado_min", "projecao_no_ponto_min", "saldo_projetado_min"],
+      ...view.days.map((r) => {
+        const d = r.day;
+        const frozen = resumoFinancialFrozen(d); // dia inválido/futuro: sem valores financeiros
+        const p = r.projection;
+        return [
+          d.date,
+          weekdayShort(d.date),
+          r.situation === "—" ? "" : r.situation,
+          d.workedMinutes,
+          d.expectedMinutes,
+          frozen ? "" : d.balanceMinutes,
+          frozen || d.entryCount <= 0 ? "" : d.registrableMinutes,
+          r.specialGenerated,
+          r.specialUsed,
+          frozen ? "" : p.projectedWorkedMinutes,
+          frozen ? "" : p.projectedBalanceMinutes,
+        ];
+      }),
     ];
     const csv = rows.map((r) => r.join(";")).join("\n");
     const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" });
@@ -170,6 +130,11 @@ export default function ResumoPage() {
       </div>
     );
   }
+
+  const { cards, composition, totals } = view;
+  const projection = cards.projection;
+  const projApplied = projection.appliedSpecialMinutes;
+  const projAppliedDays = projection.days.filter((d) => d.appliedSpecialMinutes > 0).length;
 
   return (
     <div className="space-y-6">
@@ -221,35 +186,58 @@ export default function ResumoPage() {
           </Link>
         </div>
       )}
+
+      {/* QUATRO CARDS PRINCIPAIS — leitura rápida do período (3F):
+          A) Horas registradas (fato registrado) · B) Saldo regular factual
+          C) [10+] gerado no período · D) Projeção no ponto (3A, usos ativos) */}
       <div className="grid grid-cols-2 items-stretch gap-4 lg:grid-cols-4">
-        <StatCard label="Dias com registro" value={totals.trackedDays} sub={`no período`} icon={<CalendarDays size={16} />} />
         <StatCard
-          label="Total trabalhado"
-          value={formatMinutes(totals.workedTotal)}
-          sub={`para registrar no ponto: ${formatMinutes(totals.registrableTotal)}`}
+          label="Horas registradas"
+          value={formatMinutes(cards.registeredMinutes)}
+          sub={cards.hasPendingRegisteredDays ? "Inclui horas registradas em dias pendentes." : "no período"}
           icon={<Clock3 size={16} />}
         />
         <StatCard
-          label="Saldo do período"
-          value={`${totals.balanceTotal >= 0 ? "+" : ""}${formatMinutes(totals.balanceTotal)}`}
-          sub={totals.balanceTotal >= 0 ? "crédito (a seu favor)" : "débito"}
-          tone={totals.balanceTotal > 0 ? "emerald" : totals.balanceTotal < 0 ? "rose" : "slate"}
+          label="Saldo regular"
+          value={fmtSigned(cards.regularBalanceMinutes)}
+          sub="Saldo factual dentro do limite diário de 10h."
+          tone={cards.regularBalanceMinutes > 0 ? "emerald" : cards.regularBalanceMinutes < 0 ? "rose" : "slate"}
           icon={<Wallet size={16} />}
         />
         <StatCard
-          label="Excedente do período [10+]"
-          value={formatMinutes(periodExcessBook.original)}
-          sub={
-            <span className="block truncate">
-              Realocado {formatMinutes(periodExcessBook.realized)}
-              {" · "}
-              A realocar {formatMinutes(Math.max(0, periodExcessBook.original - periodExcessBook.realized))}
-            </span>
-          }
-          tone={periodExcessBook.original > 0 ? "violet" : "slate"}
+          label="[10+] gerado no período"
+          value={formatMinutes(cards.specialGeneratedMinutes)}
+          sub="Excedente factual acima de 10h/dia."
+          tone={cards.specialGeneratedMinutes > 0 ? "violet" : "slate"}
           icon={<TriangleAlert size={16} />}
         />
+        <StatCard
+          label="Projeção no ponto"
+          value={fmtSigned(projection.projectedBalanceMinutes)}
+          sub={
+            projApplied > 0
+              ? `Inclui ${formatMinutes(projApplied)} de [10+] aplicado em ${projAppliedDays} dia(s).`
+              : "Igual ao saldo factual (sem usos [10+] ativos)."
+          }
+          tone={projection.projectedBalanceMinutes > 0 ? "indigo" : projection.projectedBalanceMinutes < 0 ? "rose" : "slate"}
+          icon={<TrendingUp size={16} />}
+        />
       </div>
+
+      {/* BANCO ANUAL [10+] (3C) — um painel por ciclo anual intersectado.
+          Período que cruza 30/04 mostra ciclos SEPARADOS (nunca um único
+          banco atravessando o fechamento). Distinto do "[10+] gerado no
+          período" do card acima (escopo: ciclo × período). */}
+      <Card
+        title="Banco [10+]"
+        subtitle="Banco anual do ciclo — atravessa os períodos do ponto (≠ gerado no período)"
+      >
+        <div className={view.banks.length > 1 ? "space-y-3" : undefined}>
+          {view.banks.map((panel) => (
+            <BankPanel key={panel.cycle} panel={panel} />
+          ))}
+        </div>
+      </Card>
 
       <div>
         <button
@@ -262,19 +250,17 @@ export default function ResumoPage() {
           {detailsOpen ? <ChevronUp size={18} className="shrink-0 text-slate-500" /> : <ChevronDown size={18} className="shrink-0 text-slate-500" />}
         </button>
         {detailsOpen && (
-          <div className="mt-3 grid gap-3 text-sm text-slate-600 sm:grid-cols-3">
-            <DetailColumn title="Jornada e saldo">
-              <DetailRow label="No ponto" value={formatMinutes(detailStats.registrableMinutes)} />
-              <DetailRow label="Déficit do período" value={formatMinutes(detailStats.deficitMinutes)} />
-            </DetailColumn>
-            <DetailColumn title="Compensações">
-              <DetailRow label="Horas compensadas" value={formatMinutes(detailStats.compensatedMinutes)} />
-              <DetailRow label="Compensações pendentes" value={formatMinutes(detailStats.pendingCompMinutes)} />
+          <div className="mt-3 grid gap-3 text-sm text-slate-600 sm:grid-cols-2">
+            {/* Composição do saldo regular (2A) — puramente explicativa:
+                soma factual dos saldos positivos × negativos do período.
+                Não há vínculo "qual crédito cobriu qual déficit". */}
+            <DetailColumn title="Composição do saldo regular">
+              <DetailRow label="Créditos regulares" value={fmtSigned(composition.generatedCreditMinutes)} />
               <DetailRow
-                label="Acordo a compensar"
-                value={formatMinutes(detailStats.acordoTotal)}
-                hint={`feito ${formatMinutes(detailStats.acordoDone)} · falta ${formatMinutes(detailStats.acordoPending)}`}
+                label="Jornadas abaixo da base"
+                value={composition.generatedDeficitMinutes > 0 ? `-${formatMinutes(composition.generatedDeficitMinutes)}` : "0min"}
               />
+              <DetailRow label="Saldo regular" value={fmtSigned(composition.netBalanceMinutes)} />
             </DetailColumn>
             <DetailColumn title="Ausências e abonos">
               <DetailRow label="Férias" value={String(detailStats.vacationDays)} />
@@ -289,10 +275,11 @@ export default function ResumoPage() {
 
       <Card
         title="Barras empilhadas do período"
-        subtitle="Base · extra no ponto · excedente do limite diário · horas compensadas — férias/afastamentos reduzem a base"
+        subtitle="Fatos da jornada: base · extra regular · [10+] acima de 10h — férias/afastamentos reduzem a base"
       >
         {/* Preparação + componente COMPARTILHADOS (src/components/stacked-period-chart):
-            mesma fonte usada pela Visão geral — dados idênticos para o mesmo período. */}
+            mesmo componente da Visão geral; aqui no modo factualOnly (3F),
+            sem a camada legada de horas compensadas. */}
         <StackedPeriodChart
           entries={entries}
           compensations={compensations}
@@ -303,95 +290,243 @@ export default function ResumoPage() {
           faltas={faltas}
           today={todayStr}
           height={210}
+          factualOnly
         />
       </Card>
 
       <Card title="Detalhamento diário" subtitle="Clique em um dia na aba Registros para ver as batidas">
-        {allDays.length === 0 ? (
+        {view.days.length === 0 ? (
           <EmptyState icon={<BarChart3 size={24} />} title="Sem registros neste período" />
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[640px] text-sm">
-              <thead>
-                <tr className="border-b border-slate-200 text-left text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                  <th className="pb-2 pr-3">Dia</th>
-                  <th className="pb-2 pr-3">Evento</th>
-                  <th className="pb-2 pr-3 text-right">Trabalhado</th>
-                  <th className="pb-2 pr-3 text-right">Jornada</th>
-                  <th className="pb-2 pr-3 text-right">Saldo</th>
-                  <th className="pb-2 pr-3 text-right">No ponto*</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {allDays.map((d) => (
-                  <tr key={d.date} className="transition-colors hover:bg-slate-50/70">
-                    <td className="py-2.5 pr-3 font-bold text-slate-800">
-                      {weekdayShort(d.date).replace(".", "")}
-                      <span className="ml-1.5 font-medium text-slate-400">
-                        {d.date.slice(8)}/{d.date.slice(5, 7)}
-                      </span>
-                    </td>
-                    <td className="py-2.5 pr-3">
-                      <ResumoEventBadge day={d} />
-                    </td>
-                    <td className="py-2.5 pr-3 text-right font-bold tabular-nums text-slate-900">
-                      {resumoFinancialFrozen(d) || d.workedMinutes <= 0 ? "—" : formatMinutes(d.workedMinutes)}
-                    </td>
-                    <td className="py-2.5 pr-3 text-right tabular-nums text-slate-400">
-                      {formatMinutes(d.expectedMinutes)}
-                    </td>
+          <>
+            {/* DESKTOP / TABLET LARGO: tabela (base histórica) + colunas [10+] e Projeção */}
+            <div className="hidden md:block">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-slate-200 text-left text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                    <th className="pb-2 pr-3">Dia</th>
+                    <th className="pb-2 pr-3">Situação</th>
+                    <th className="pb-2 pr-3 text-right">Trabalhado</th>
+                    <th className="pb-2 pr-3 text-right">Jornada</th>
+                    <th className="pb-2 pr-3 text-right">Saldo regular</th>
+                    <th className="pb-2 pr-3 text-right">No ponto*</th>
+                    <th className="pb-2 pr-3 text-right">[10+]</th>
+                    <th className="pb-2 pr-3 text-right">Projeção**</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {view.days.map((r) => (
+                    <DetailRowDesktop key={r.day.date} row={r} />
+                  ))}
+                  <tr className="border-t-2 border-slate-200 bg-slate-50/80 font-extrabold text-slate-900">
+                    <td className="py-3 pr-3">Total</td>
+                    <td className="py-3 pr-3 text-slate-500">{totals.trackedDays} dia(s)</td>
+                    <td className="py-3 pr-3 text-right tabular-nums">{formatMinutes(cards.registeredMinutes)}</td>
+                    <td className="py-3 pr-3" />
                     <td
-                      className={`py-2.5 pr-3 text-right font-bold tabular-nums ${
-                        resumoFinancialFrozen(d)
-                          ? "text-slate-400"
-                          : d.balanceMinutes > 0
-                            ? "text-emerald-600"
-                            : d.balanceMinutes < 0
-                              ? "text-rose-600"
-                              : "text-slate-400"
+                      className={`py-3 pr-3 text-right tabular-nums ${
+                        cards.regularBalanceMinutes >= 0 ? "text-emerald-600" : "text-rose-600"
                       }`}
                     >
-                      {resumoFinancialFrozen(d) || d.faltaStatus === "prevista" || !(d.entryCount > 0 || d.eventLabel)
-                        ? "—"
-                        : `${d.balanceMinutes >= 0 ? "+" : ""}${formatMinutes(d.balanceMinutes)}`}
+                      {fmtSigned(cards.regularBalanceMinutes)}
                     </td>
-                    <td className="py-2.5 pr-3 text-right font-semibold tabular-nums text-indigo-600">
-                      {resumoFinancialFrozen(d) || d.entryCount <= 0 ? "—" : formatMinutes(d.registrableMinutes)}
+                    <td className="py-3 pr-3 text-right tabular-nums text-indigo-600">
+                      {formatMinutes(totals.noPontoValidMinutes)}
+                    </td>
+                    <td className="py-3 pr-3 text-right text-xs tabular-nums leading-tight">
+                      <span className="block text-violet-600">Gerado {formatMinutes(totals.specialGeneratedMinutes)}</span>
+                      <span className="block text-slate-600">Usado {formatMinutes(totals.specialUsedMinutes)}</span>
+                    </td>
+                    <td className="py-3 pr-3 text-right tabular-nums text-indigo-600">
+                      {fmtSigned(projection.projectedBalanceMinutes)}
                     </td>
                   </tr>
-                ))}
-                <tr className="border-t-2 border-slate-200 bg-slate-50/80 font-extrabold text-slate-900">
-                  <td className="py-3 pr-3">Total</td>
-                  <td className="py-3 pr-3 text-slate-500">{totals.trackedDays} dia(s)</td>
-                  <td className="py-3 pr-3 text-right tabular-nums">{formatMinutes(totals.workedTotal)}</td>
-                  <td className="py-3 pr-3" />
-                  <td
-                    className={`py-3 pr-3 text-right tabular-nums ${
-                      totals.balanceTotal >= 0 ? "text-emerald-600" : "text-rose-600"
-                    }`}
-                  >
-                    {totals.balanceTotal >= 0 ? "+" : ""}
-                    {formatMinutes(totals.balanceTotal)}
-                  </td>
-                  <td className="py-3 pr-3 text-right tabular-nums text-indigo-600">
-                    {formatMinutes(totals.registrableTotal)}
-                  </td>
-                </tr>
-              </tbody>
-            </table>
+                </tbody>
+              </table>
+            </div>
+
+            {/* MOBILE: lista vertical compacta por dia — MESMA derivação
+                (view.days); sem scroll horizontal para campos essenciais. */}
+            <ul className="divide-y divide-slate-100 md:hidden">
+              {view.days.map((r) => (
+                <DetailRowMobile key={r.day.date} row={r} />
+              ))}
+              <li className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-1 py-3 font-extrabold text-slate-900">
+                <span>Total · {totals.trackedDays} dia(s)</span>
+                <span className="text-right text-xs leading-tight">
+                  <span className="block tabular-nums">Registradas {formatMinutes(cards.registeredMinutes)} · Saldo {fmtSigned(cards.regularBalanceMinutes)}</span>
+                  <span className="block tabular-nums text-violet-600">
+                    [10+] gerado {formatMinutes(totals.specialGeneratedMinutes)} · usado {formatMinutes(totals.specialUsedMinutes)}
+                  </span>
+                  <span className="block tabular-nums text-indigo-600">Projeção {fmtSigned(projection.projectedBalanceMinutes)}</span>
+                </span>
+              </li>
+            </ul>
+
             <p className="mt-2 text-[11px] text-slate-400">
               * &quot;No ponto&quot; = total que pode ser lançado no sistema da empresa (limitado a{" "}
-              {formatMinutes(settings.maxDailyMinutes)}/dia). Férias e afastamentos reduzem a jornada
-              esperada do dia.
+              {formatMinutes(settings.maxDailyMinutes)}/dia); o total soma apenas dias financeiramente
+              válidos. Férias e afastamentos reduzem a jornada esperada do dia.
+              ** Projeção = no ponto considerando usos [10+] ativos (3A); &quot;—&quot; quando não agrega
+              informação. Dias com registro incompleto/inconsistente não recebem valores financeiros
+              até a correção.
             </p>
-          </div>
+          </>
         )}
       </Card>
     </div>
   );
 }
 
-function ResumoEventBadge({ day }: { day: ResumoDayRow }) {
+/* ── Blocos de apoio ─────────────────────────────────────────────────── */
+
+/** Banco anual [10+] de UM ciclo (3C): Gerado / Utilizado / Disponível. */
+function BankPanel({ panel }: { panel: ResumoBankPanel }) {
+  const { cycle, bank } = panel;
+  return (
+    <div className="rounded-xl border border-violet-200 bg-violet-50/40 px-4 py-3">
+      <p className="text-xs font-extrabold uppercase tracking-wide text-violet-700">Ciclo {cycle}</p>
+      <dl className="mt-2 grid grid-cols-3 gap-3">
+        <div>
+          <dt className="text-[11px] font-medium text-slate-500">Gerado</dt>
+          <dd className="text-base font-extrabold tabular-nums text-slate-800">{formatMinutes(bank.generatedMinutes)}</dd>
+        </div>
+        <div>
+          <dt className="text-[11px] font-medium text-slate-500">Utilizado</dt>
+          <dd className="text-base font-extrabold tabular-nums text-slate-800">{formatMinutes(bank.usedMinutes)}</dd>
+        </div>
+        <div>
+          <dt className="text-[11px] font-medium text-slate-500">Disponível</dt>
+          <dd className="text-base font-extrabold tabular-nums text-violet-700">{formatMinutes(bank.availableMinutes)}</dd>
+        </div>
+      </dl>
+    </div>
+  );
+}
+
+/** Linha da tabela desktop (md+) — factual + [10+] + projeção 3A. */
+function DetailRowDesktop({ row }: { row: ResumoDetailRow }) {
+  const d = row.day;
+  const frozen = resumoFinancialFrozen(d);
+  const showProj = resumoProjectionVisible(row);
+  return (
+    <tr className="transition-colors hover:bg-slate-50/70">
+      <td className="py-2.5 pr-3 font-bold text-slate-800">
+        {weekdayShort(d.date).replace(".", "")}
+        <span className="ml-1.5 font-medium text-slate-400">
+          {d.date.slice(8)}/{d.date.slice(5, 7)}
+        </span>
+      </td>
+      <td className="py-2.5 pr-3">
+        <ResumoEventBadge day={d} />
+      </td>
+      <td className="py-2.5 pr-3 text-right font-bold tabular-nums text-slate-900">
+        {frozen ? "—" : formatMinutes(d.workedMinutes)}
+      </td>
+      <td className="py-2.5 pr-3 text-right tabular-nums text-slate-400">{formatMinutes(d.expectedMinutes)}</td>
+      <td
+        className={`py-2.5 pr-3 text-right font-bold tabular-nums ${
+          frozen
+            ? "text-slate-400"
+            : d.balanceMinutes > 0
+              ? "text-emerald-600"
+              : d.balanceMinutes < 0
+                ? "text-rose-600"
+                : "text-slate-400"
+        }`}
+      >
+        {frozen || d.faltaStatus === "prevista" || !(d.entryCount > 0 || d.eventLabel)
+          ? "—"
+          : fmtSigned(d.balanceMinutes)}
+      </td>
+      <td className="py-2.5 pr-3 text-right font-semibold tabular-nums text-indigo-600">
+        {frozen || d.entryCount <= 0 ? "—" : formatMinutes(d.registrableMinutes)}
+      </td>
+      <td className="py-2.5 pr-3 text-right text-xs tabular-nums leading-tight">
+        {row.specialGenerated > 0 || row.specialUsed > 0 ? (
+          <span>
+            {row.specialGenerated > 0 && (
+              <span className="block font-bold text-violet-600">Gerado +{formatMinutes(row.specialGenerated)}</span>
+            )}
+            {row.specialUsed > 0 && <span className="block text-slate-600">Usado {formatMinutes(row.specialUsed)}</span>}
+          </span>
+        ) : (
+          <span className="text-slate-300">—</span>
+        )}
+      </td>
+      <td className="py-2.5 pr-3 text-right text-xs font-bold tabular-nums">
+        {showProj ? (
+          <span className="text-indigo-600">
+            {formatMinutes(row.projection.projectedWorkedMinutes)} / {fmtSigned(row.projection.projectedBalanceMinutes)}
+          </span>
+        ) : (
+          <span className="text-slate-300">—</span>
+        )}
+      </td>
+    </tr>
+  );
+}
+
+/** Card/bloco vertical compacto por dia (mobile < md) — MESMA derivação.
+    Sem scroll horizontal: grid de duas colunas com labels textuais. */
+function DetailRowMobile({ row }: { row: ResumoDetailRow }) {
+  const d = row.day;
+  const pending = resumoDayPending(row);
+  const frozen = resumoFinancialFrozen(d);
+  const showProj = resumoProjectionVisible(row);
+  return (
+    <li className="px-1 py-2.5">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-sm font-bold text-slate-800">
+          {weekdayShort(d.date).replace(".", "")}
+          <span className="ml-1.5 font-medium text-slate-400">
+            {d.date.slice(8)}/{d.date.slice(5, 7)}
+          </span>
+        </span>
+        <ResumoEventBadge day={d} />
+      </div>
+      {pending ? (
+        <p className="mt-1.5 text-xs text-slate-500">
+          Registro pendente. Os valores financeiros serão definidos após a correção.
+        </p>
+      ) : !frozen ? (
+        <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1.5">
+          <DetailField label="Trabalhado" value={d.workedMinutes > 0 ? formatMinutes(d.workedMinutes) : "—"} />
+          <DetailField label="Jornada" value={formatMinutes(d.expectedMinutes)} className="text-slate-500" />
+          <DetailField
+            label="Saldo regular"
+            value={fmtSigned(d.balanceMinutes)}
+            className={d.balanceMinutes > 0 ? "text-emerald-600" : d.balanceMinutes < 0 ? "text-rose-600" : "text-slate-500"}
+          />
+          <DetailField label="No ponto" value={formatMinutes(d.registrableMinutes)} className="text-indigo-600" />
+          {row.specialGenerated > 0 && (
+            <DetailField label="[10+] gerado" value={`+${formatMinutes(row.specialGenerated)}`} className="text-violet-600" />
+          )}
+          {row.specialUsed > 0 && <DetailField label="[10+] usado" value={formatMinutes(row.specialUsed)} />}
+          {showProj && (
+            <DetailField
+              label="Projeção"
+              value={`${formatMinutes(row.projection.projectedWorkedMinutes)} / ${fmtSigned(row.projection.projectedBalanceMinutes)}`}
+              className="text-indigo-600"
+            />
+          )}
+        </dl>
+      ) : null}
+    </li>
+  );
+}
+
+/** Campo label+valor do layout mobile (texto explícito — não depende de cor). */
+function DetailField({ label, value, className }: { label: string; value: string; className?: string }) {
+  return (
+    <div className="min-w-0">
+      <dt className="text-[11px] font-medium text-slate-500">{label}</dt>
+      <dd className={`text-sm font-extrabold tabular-nums leading-snug ${className ?? "text-slate-800"}`}>{value}</dd>
+    </div>
+  );
+}
+
+function ResumoEventBadge({ day }: { day: ResumoDetailRow["day"] }) {
   const kind = resumoEventKind(day);
   if (kind === "—") return <span className="text-xs text-slate-300">—</span>;
   const tone =

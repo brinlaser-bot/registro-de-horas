@@ -43,6 +43,13 @@ export interface StackedPeriodParams {
   faltas?: Falta[];
   /** Data local de hoje (yyyy-mm-dd) — resolve a falta efetiva sem depender do relógio do teste. */
   today?: string;
+  /**
+   * Etapa 3F — Resumo do período: modo FATO DA JORNADA. Sem a camada legada
+   * "horas compensadas" (appliedOnDate/pendingForTarget/buildDebtDays nem são
+   * consultados neste modo) e sem os marcadores exclusivos do modelo antigo.
+   * Ausente/false (padrão) = comportamento histórico (ex.: Visão geral).
+   */
+  factualOnly?: boolean;
 }
 
 /**
@@ -59,12 +66,16 @@ export function buildStackedPeriodData({
   period,
   faltas = [],
   today,
+  factualOnly = false,
 }: StackedPeriodParams): StackedDatum[] {
   const todayStr = today ?? todayString();
   // Visão central dos acordos do período (original/compensado/planejado/restante)
+  // — somente no modo legado; no modo factual do Resumo (3F) o legado nem é lido.
   const acordoByDate = new Map<string, AcordoView>();
-  for (const d of buildDebtDays(entries, compensations, settings, period, absences, companyCalendars)) {
-    if (d.kind === "acordo") acordoByDate.set(d.date, acordoViewOf(d));
+  if (!factualOnly) {
+    for (const d of buildDebtDays(entries, compensations, settings, period, absences, companyCalendars)) {
+      if (d.kind === "acordo") acordoByDate.set(d.date, acordoViewOf(d));
+    }
   }
 
   return listDaysBetween(period.from, period.to)
@@ -95,10 +106,11 @@ export function buildStackedPeriodData({
       const worked = realized ? d.ctx.day.workedMinutes : 0;
       const expected = d.cctx.expectedRegular;
       const seg = stackedSegments(worked, expected, settings.maxDailyMinutes);
-      const used = appliedOnDate(compensations, d.date);
-      const pendingMins = pendingForTarget(compensations, d.date).reduce((s, c) => s + c.minutes, 0);
+      // Modo factual (Resumo 3F): sem camada de compensação legada na barra.
+      const used = factualOnly ? 0 : appliedOnDate(compensations, d.date);
+      const pendingMins = factualOnly ? 0 : pendingForTarget(compensations, d.date).reduce((s, c) => s + c.minutes, 0);
       const concludedMins = Math.max(0, used - pendingMins);
-      const acordo = acordoByDate.get(d.date) ?? null;
+      const acordo = factualOnly ? null : acordoByDate.get(d.date) ?? null;
       const predictedWorked = !realized && d.ctx.day.entries.length > 0 ? d.ctx.day.workedMinutes : 0;
 
       const lines: string[] = [];
@@ -178,10 +190,11 @@ export function StackedPeriodChart({
   faltas = [],
   today,
   height = 210,
+  factualOnly = false,
 }: StackedPeriodParams & { height?: number }) {
   const data = useMemo(
-    () => buildStackedPeriodData({ entries, compensations, absences, companyCalendars, settings, period, faltas, today }),
-    [entries, compensations, absences, companyCalendars, settings, period, faltas, today],
+    () => buildStackedPeriodData({ entries, compensations, absences, companyCalendars, settings, period, faltas, today, factualOnly }),
+    [entries, compensations, absences, companyCalendars, settings, period, faltas, today, factualOnly],
   );
   if (data.length === 0) {
     return (
@@ -198,6 +211,7 @@ export function StackedPeriodChart({
       expected={expectedMinutesOf(settings)}
       cap={settings.maxDailyMinutes}
       height={height}
+      factualOnly={factualOnly}
     />
   );
 }

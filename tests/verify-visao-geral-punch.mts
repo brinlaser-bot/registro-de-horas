@@ -148,7 +148,10 @@ check("A. cenário canônico ⇒ mesmo cálculo por dia + corte temporal central
   for (const [name, s] of [["Visão geral", pageSrc], ["Resumo", resumoDaysSrc], ["Registros", registrosSrc]] as const) {
     assert.ok(s.includes("dayBalanceContribution(cctx, faltas"), `${name} usa a contribuição central`);
   }
-  assert.ok(resumoSrc.includes("buildResumoDayRow"), "Resumo monta as linhas pela fonte central");
+  // 3F: o Resumo consome a derivação única (resumo-period-view), ancorada na fonte central
+  assert.ok(resumoSrc.includes("buildResumoPeriodView"), "Resumo consome a derivação única");
+  const resumoViewSrc = src("lib/resumo-period-view.ts");
+  assert.ok(resumoViewSrc.includes("buildResumoDayRow"), "derivação ancora na fonte central");
   assert.ok(pageSrc.includes("listDaysBetween(period.from, period.to)"), "Visão geral percorre TODOS os dias do período");
 });
 

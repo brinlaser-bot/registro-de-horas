@@ -107,24 +107,27 @@ check("C. 11h30 => no ponto 10h, extra +2h, [10+] 1h30; tooltip separa", () => {
   assert.ok(!chart.includes("Saldo regular:"));
 });
 
-check("D. card [10+] mostra gerado, realocado e a realocar", () => {
+check("D. card [10+] do período mostra o gerado (3C) — sem Realocado/A realocar (3F)", () => {
   const date = "2026-08-24";
   const entries = [
     punch(1, date, "08:00", "entrada"), punch(2, date, "12:00", "saida"),
     punch(3, date, "13:00", "entrada"), punch(4, date, "20:30", "saida"),
   ];
+  // engine legado continua íntegro (preservado em 2º plano)
   const book0 = specialExcessBook(
     entries, [], [], undefined, S, [], { from: date, to: date }, TODAY,
   );
   assert.equal(book0.original, 90);
   assert.equal(book0.realized, 0);
   assert.equal(formatMinutes(book0.original), "1h30");
-  assert.equal(formatMinutes(Math.max(0, book0.original - book0.realized)), "1h30");
+  // novo modelo (3F): o card do Resumo mostra o gerado factual do período
   const page = srcOf("src/app/(app)/resumo/page.tsx");
-  assert.ok(page.includes('label="Excedente do período [10+]"'));
-  assert.ok(page.includes("periodExcessBook.original"));
-  assert.ok(page.includes("periodExcessBook.realized"));
-  assert.ok(page.includes("tone={periodExcessBook.original > 0 ? \"violet\""));
+  const view = srcOf("src/lib/resumo-period-view.ts");
+  assert.ok(page.includes('label="[10+] gerado no período"'));
+  assert.ok(page.includes("Excedente factual acima de 10h/dia."));
+  assert.ok(view.includes("buildSpecialExcessBank"), "fonte 3C na derivação");
+  assert.ok(!page.includes("Realocado"), "sem 'Realocado' no Resumo");
+  assert.ok(!page.includes("A realocar"), "sem 'A realocar' no Resumo");
 });
 
 check("R1. dias anteriores à controlStartDate continuam —", () => {

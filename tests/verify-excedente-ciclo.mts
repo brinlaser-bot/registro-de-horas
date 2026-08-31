@@ -240,44 +240,54 @@ check("23. novo ciclo começa zerado em relação ao ciclo anterior", () => {
   assert.equal(b.days.length, 0);
 });
 
-check("24. Excedente [10+] do período aparece no card principal", () => {
+check("24. [10+] do período aparece no card principal (3F: gerado factual)", () => {
   const r = srcOf("src/app/(app)/resumo/page.tsx");
-  assert.ok(r.includes("Excedente do período [10+]"));
-  assert.ok(r.includes("Realocado {formatMinutes(periodExcessBook.realized)}"));
-  assert.ok(r.includes("A realocar {formatMinutes(Math.max(0, periodExcessBook.original - periodExcessBook.realized))}"));
+  assert.ok(r.includes('label="[10+] gerado no período"'));
+  assert.ok(r.includes("Excedente factual acima de 10h/dia."));
+  assert.ok(!r.includes("Realocado"), "3F: 'Realocado' saiu do Resumo");
+  assert.ok(!r.includes("A realocar"), "3F: 'A realocar' saiu do Resumo");
   assert.ok(r.includes("{detailsOpen && ("));
 });
 
-check("25. Excedente do período usa somente excedente gerado no período selecionado", () => {
+
+check("25. [10+] do período usa somente excedente gerado no período selecionado", () => {
   const periodBook = book(PERIOD);
   const cycleB = book(CYCLE);
   assert.ok(cycleB.original >= periodBook.original);
   const r = srcOf("src/app/(app)/resumo/page.tsx");
-  assert.ok(r.includes("periodExcessBook.original"));
+  const view = srcOf("src/lib/resumo-period-view.ts");
+  assert.ok(r.includes("cards.specialGeneratedMinutes"), "card consome a derivação (escopo período)");
+  assert.ok(view.includes("generatedByDate"), "só origens mapeadas por data do período entram no total");
   assert.ok(!pending(PERIOD).some((d) => d.date === "2026-08-11"));
 });
 
-check("26. Já realocado refere-se ao excedente originado no período", () => {
+
+check("26. (3F) 'já realocado' saiu do Resumo; engine legado ainda apura o realizado", () => {
   const r = srcOf("src/app/(app)/resumo/page.tsx");
-  assert.ok(r.includes("periodExcessBook.realized"));
+  assert.ok(!r.includes("periodExcessBook"), "book legado fora do Resumo");
   const periodBook = book(PERIOD);
   const d24 = periodBook.days.find((d) => d.date === "2026-08-24");
   assert.ok(d24);
   assert.equal(d24!.realized, 25);
 });
 
-check("27. A realocar refere-se ao excedente originado no período ainda não realizado", () => {
+
+check("27. (3F) 'a realocar' saiu do Resumo; engine legado ainda apura o livre", () => {
   const r = srcOf("src/app/(app)/resumo/page.tsx");
-  assert.ok(r.includes("periodExcessBook.original - periodExcessBook.realized"));
+  assert.ok(!r.includes("periodExcessBook"), "book legado fora do Resumo");
   const periodBook = book(PERIOD);
-  assert.equal(periodBook.free, pending(PERIOD).reduce((s, d) => s + d.free, 0));
+  assert.equal(periodBook.free, pending(PERIOD).reduce((s2, d) => s2 + d.free, 0));
 });
 
-check("28. Déficit do período é do período selecionado", () => {
+
+check("28. (3F) 'Déficit do período' virou composição do saldo regular (2A)", () => {
   const r = srcOf("src/app/(app)/resumo/page.tsx");
-  assert.ok(r.includes("Déficit do período"));
-  assert.ok(r.includes("detailStats.deficitMinutes"));
+  assert.ok(r.includes('label="Jornadas abaixo da base"'), "déficits na composição");
+  assert.ok(r.includes('title="Composição do saldo regular"'));
+  const view = srcOf("src/lib/resumo-period-view.ts");
+  assert.ok(view.includes("summarizeRegularFacts"), "composição vem da 2A (escopo do período)");
 });
+
 
 check("29. mudar período muda esses quatro valores", () => {
   const r = srcOf("src/app/(app)/resumo/page.tsx");
@@ -298,7 +308,8 @@ check("30. isso não altera os cards operacionais do ciclo em Compensações", (
   assert.ok(c.includes("cycleBounds"));
   assert.ok(c.includes("cycleExcessBook.free"));
   const r = srcOf("src/app/(app)/resumo/page.tsx");
-  assert.ok(r.includes("periodExcessBook"));
+  // 3F: o Resumo deixou de usar os books legados (derivação única 3C)
+  assert.ok(!r.includes("periodExcessBook"));
   assert.ok(!r.includes("cycleExcessBook"));
 });
 

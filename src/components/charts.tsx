@@ -244,16 +244,24 @@ export function StackedBarsChart({
   expected,
   cap,
   height = 200,
+  factualOnly = false,
 }: {
   data: StackedDatum[];
   expected: number; // base diária (min)
   cap: number; // limite diário (min)
   height?: number;
+  /**
+   * Etapa 3F — Resumo do período: gráfico como FATO DA JORNADA.
+   * Sem a camada legada "horas compensadas", legenda factual e sem
+   * marcadores exclusivos do modelo antigo. Ausente/false (padrão) =
+   * comportamento histórico (ex.: Visão geral) — idêntico ao anterior.
+   */
+  factualOnly?: boolean;
 }) {
   // Escala: acompanha o maior valor exibido (trabalhado ou base + compensação)
   const maxVal = Math.max(
     expected * 1.25,
-    ...data.map((d) => d.workedMinutes + d.compensated),
+    ...data.map((d) => (factualOnly ? d.workedMinutes : d.workedMinutes + d.compensated)),
   );
   const pct = (m: number) => (m / maxVal) * 100;
   const basePct = pct(expected);
@@ -282,7 +290,7 @@ export function StackedBarsChart({
         )}
 
         {data.map((d) => {
-          const total = d.base + d.extra + d.excess + d.compensated;
+          const total = d.base + d.extra + d.excess + (factualOnly ? 0 : d.compensated);
           const MarkerIcon = d.marker ? MARKER_ICON[d.marker] : null;
           return (
             <div
@@ -314,7 +322,7 @@ export function StackedBarsChart({
                   {d.extra > 0 && (
                     <div className="w-full bg-amber-400" style={{ height: `${pct(d.extra) * (height / 100)}px` }} />
                   )}
-                  {d.compensated > 0 && (
+                  {!factualOnly && d.compensated > 0 && (
                     <div
                       className="w-full border-y border-dashed border-slate-400"
                       style={{ height: `${pct(d.compensated) * (height / 100)}px`, ...hatch }}
@@ -362,12 +370,12 @@ export function StackedBarsChart({
                     )}
                   </>
                 )}
-                {(d.compensatedConcluded ?? 0) > 0 && (
+                {!factualOnly && (d.compensatedConcluded ?? 0) > 0 && (
                   <span className="block text-slate-300">
                     Compensado no dia: {formatMinutes(d.compensatedConcluded ?? 0)}
                   </span>
                 )}
-                {(d.compensatedPending ?? 0) > 0 && (
+                {!factualOnly && (d.compensatedPending ?? 0) > 0 && (
                   <span className="block text-slate-300">
                     Programado para hoje: {formatMinutes(d.compensatedPending ?? 0)}
                   </span>
@@ -408,27 +416,36 @@ export function StackedBarsChart({
       {/* Legenda */}
       <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-[11px] font-medium text-slate-600">
         <span className="inline-flex items-center gap-1.5">
-          <span className="h-2.5 w-2.5 rounded-sm bg-emerald-500" /> Base (até {formatMinutes(expected)})
+          <span className="h-2.5 w-2.5 rounded-sm bg-emerald-500" />{" "}
+          {factualOnly ? "Base" : `Base (até ${formatMinutes(expected)})`}
         </span>
         <span className="inline-flex items-center gap-1.5">
-          <span className="h-2.5 w-2.5 rounded-sm bg-amber-400" /> Extra no ponto ({formatMinutes(expected)}→{formatMinutes(cap)})
+          <span className="h-2.5 w-2.5 rounded-sm bg-amber-400" />{" "}
+          {factualOnly ? "Extra regular" : `Extra no ponto (${formatMinutes(expected)}→${formatMinutes(cap)})`}
         </span>
         <span className="inline-flex items-center gap-1.5">
-          <span className="h-2.5 w-2.5 rounded-sm bg-violet-500" /> Excedente do limite diário
+          <span className="h-2.5 w-2.5 rounded-sm bg-violet-500" />
+          {factualOnly ? "[10+] acima de 10h" : "Excedente do limite diário"}
         </span>
-        <span className="inline-flex items-center gap-1.5">
-          <span
-            className="h-2.5 w-2.5 rounded-sm border border-dashed border-slate-400"
-            style={hatch}
-          /> Horas compensadas
-        </span>
+        {!factualOnly && (
+          <span className="inline-flex items-center gap-1.5">
+            <span
+              className="h-2.5 w-2.5 rounded-sm border border-dashed border-slate-400"
+              style={hatch}
+            /> Horas compensadas
+          </span>
+        )}
       </div>
 
       {/* Legenda das situações do dia (férias/afastamentos) — não depende só de cor */}
       {data.some((d) => d.marker) && (
         <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-slate-100 pt-3 text-[11px] font-medium text-slate-500">
           <span className="font-bold uppercase tracking-wide text-slate-400">Situações do dia:</span>
-          {MARKER_LEGEND.map(({ marker, label }) => {
+          {MARKER_LEGEND.filter(
+            // Etapa 3F: "folga/calendário a compensar" pertencem exclusivamente
+            // ao modelo legado — fora da legenda principal factual do Resumo.
+            ({ marker }) => !(factualOnly && (marker === "acordado-compensar" || marker === "calendario-compensar")),
+          ).map(({ marker, label }) => {
             const Icon = MARKER_ICON[marker];
             return (
               <span key={marker} className="inline-flex items-center gap-1.5" title={label}>

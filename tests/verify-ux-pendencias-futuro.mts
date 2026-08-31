@@ -215,9 +215,11 @@ check("19. Resumo do período possui Ver mais detalhes do período", () => {
   assert.ok(r.includes("Ocultar detalhes do período"));
 });
 
-check("20. detalhes expandidos mostram os indicadores", () => {
+check("20. detalhes expandidos mostram os indicadores (3F: composição + ausências)", () => {
   const r = srcOf("src/app/(app)/resumo/page.tsx");
-  assert.ok(r.includes("Acordo a compensar"));
+  assert.ok(r.includes("Composição do saldo regular"), "composição do saldo regular");
+  assert.ok(r.includes("Jornadas abaixo da base"), "déficits factuais na composição");
+  assert.ok(!r.includes("Acordo a compensar"), "acordo (legado) fora do Resumo");
   assert.ok(r.includes("Registros pendentes"));
   assert.ok(r.includes("O saldo pode sofrer alteração após a correção dos registros pendentes."));
 });
@@ -287,15 +289,18 @@ check("27. Ver mais detalhes do período expande", () => {
   assert.ok(r.includes("{detailsOpen && ("));
 });
 
-check("28. painel expandido contém as 3 colunas temáticas", () => {
+check("28. painel expandido contém as 2 seções temáticas (3F)", () => {
   const r = srcOf("src/app/(app)/resumo/page.tsx");
   for (const label of [
-    "Jornada e saldo", "Compensações", "Ausências e abonos",
-    "No ponto", "Déficit do período", "Horas compensadas", "Compensações pendentes",
-    "Férias", "Saúde", "Dispensados", "Faltas", "Faltas previstas", "Acordo a compensar",
+    "Composição do saldo regular", "Ausências e abonos",
+    "Créditos regulares", "Jornadas abaixo da base", "Saldo regular",
+    "Férias", "Saúde", "Dispensados", "Faltas", "Faltas previstas",
   ]) {
-    assert.ok(r.includes(`label="${label}"`) || r.includes(`"${label}"`), label);
+    assert.ok(r.includes(`label="${label}"`) || r.includes(`title="${label}"`), label);
   }
+  assert.ok(!r.includes("Jornada e saldo"), "coluna antiga fora");
+  assert.ok(!r.includes("Horas compensadas"), "compensações fora");
+  assert.ok(!r.includes('label="Déficit do período"'), "rótulo antigo fora");
   assert.ok(!r.includes('label="Dias trabalhados"'));
   assert.ok(!r.includes('label="Horas trabalhadas"'));
 });
@@ -307,9 +312,10 @@ check("29. clicar novamente recolhe", () => {
   assert.ok(r.includes("ChevronDown"));
 });
 
-check("30. mudar o período atualiza os 15 indicadores", () => {
+check("30. mudar o período atualiza os indicadores (3F: memos dependem de period)", () => {
   const r = srcOf("src/app/(app)/resumo/page.tsx");
-  assert.ok(r.includes("[allDays, totals, entries, compensations, settings, period"));
+  assert.ok(r.includes("settings, faltas, period, todayStr, user.controlStartDate, specialExcessUses"), "view depende do período");
+  assert.ok(r.includes("[view, entries, settings, period, todayStr, faltas]"), "detalhes operacionais dependem do período");
   assert.ok(r.includes("getNextPointPeriod(period)"));
   assert.ok(r.includes("getPreviousPointPeriod(period)"));
 });

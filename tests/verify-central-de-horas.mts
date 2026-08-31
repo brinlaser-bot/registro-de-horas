@@ -90,7 +90,8 @@ check("6. termos funcionais de compensação continuam intactos", () => {
   assert.ok(page.includes("Programar hora extra"));
   assert.ok(page.includes("Compensar com hora extra"));
   assert.ok(visao.includes("Compensações pendentes"));
-  assert.ok(resumo.includes("Compensações pendentes"));
+  // 3F: o bloco de compensações saiu da experiência principal do Resumo
+  assert.ok(!resumo.includes("Compensações pendentes"));
   // 3E.2: o card Registros não mostra mais compensação programada (fluxo legado)
   assert.ok(!dayCard.includes("Concluir compensação"));
   assert.ok(!dayCard.includes("Compensação programada para hoje"));
