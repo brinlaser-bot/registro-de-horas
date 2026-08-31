@@ -11,6 +11,7 @@ import {
   HeartPulse,
   Pencil,
   Plus,
+  Timer,
   Trash2,
   Umbrella,
   Wrench,
@@ -314,6 +315,19 @@ export function DayCard({
               >
                 <Ban size={14} className="shrink-0" aria-hidden />
                 <span>{falta.status === "prevista" ? "Falta prevista" : "Falta"}</span>
+              </Badge>
+            )}
+            {/* 3G.3: destaque violeta quando o dia possui [10+] APLICADO (uso
+                ativo). Deriva diretamente dos usos ativos (specialExcess,
+                motores 3A/3C) a cada render — cancelar o uso remove o destaque
+                automaticamente, sem estado visual separado. A situação real do
+                dia permanece intocada e dominante ao lado. */}
+            {specialExcess && specialExcess.usedActiveMinutes > 0 && (
+              <Badge tone="violet" className="shrink-0 gap-1.5 py-1">
+                <Timer size={13} className="shrink-0" aria-hidden />
+                <span>
+                  [10+] aplicado · {formatMinutes(specialExcess.usedActiveMinutes)}
+                </span>
               </Badge>
             )}
             {d.open && isToday && (

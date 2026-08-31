@@ -95,6 +95,12 @@ export function SpecialExcessUseSummary({ view, onOpen }: Props) {
             {view.projection.balanceMinutes > 0 ? "+" : ""}
             {formatMinutes(view.projection.balanceMinutes)}
           </b>
+          {/* 3G.3: uso TOTAL (necessidade zerada) — indica que a projeção
+              ficou completa. Uso parcial NÃO mostra (a jornada segue
+              pendente). Nada aqui altera o factual. */}
+          {view.remainingMinutes === 0 && (
+            <p className="mt-0.5 font-bold text-violet-700">Projeção completada com [10+]</p>
+          )}
         </div>
       )}
 
