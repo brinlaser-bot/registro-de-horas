@@ -25,6 +25,13 @@ interface Props {
   onResolvePlan?: (planId: string) => void;
   /** Abre o modal "Planejar uso de [10+]" (só passado quando o dia é futuro). */
   onPlan?: () => void;
+  /**
+   * 4C.1B — BANCO [10+] DISPONÍVEL do ciclo (fonte canônica 3C, lida da
+   * MESMA visão do dia usada pelos motores). `null` quando não há visão →
+   * o CTA permanece (o gate do store continua a verdade final). Com 0, a UI
+   * antecipa a verdade: nenhum CTA ativo que termina em impossibilidade.
+   */
+  bankAvailableMinutes?: number | null;
 }
 
 /**
@@ -47,7 +54,7 @@ interface Props {
  * - "Concluir"/conversão automática NÃO existem nesta UI (a resolução é
  *   sempre uma decisão explícita pelo modal; PLANO → USO no store 4C).
  */
-export function SpecialExcessPlanSummary({ plans, isFuture, eligible = null, remainingNeedMinutes = null, onResolvePlan, onPlan }: Props) {
+export function SpecialExcessPlanSummary({ plans, isFuture, eligible = null, remainingNeedMinutes = null, onResolvePlan, onPlan, bankAvailableMinutes = null }: Props) {
   const toast = useToast();
   const [cancelTarget, setCancelTarget] = useState<SpecialExcessPlan | null>(null);
   const [busy, setBusy] = useState(false);
@@ -102,7 +109,15 @@ export function SpecialExcessPlanSummary({ plans, isFuture, eligible = null, rem
             </>
           )}
         </p>
-        {isFuture && onPlan && (
+        {isFuture && onPlan && bankAvailableMinutes === 0 && (
+          <span
+            className="inline-flex cursor-not-allowed items-center gap-1.5 rounded-lg border border-slate-200 bg-white/60 px-2.5 py-1.5 text-[11px] font-bold text-slate-400"
+            title="O Banco [10+] deste ciclo não tem saldo disponível para novas reservas."
+          >
+            <CalendarClock size={13} aria-hidden /> Sem saldo [10+] disponível
+          </span>
+        )}
+        {isFuture && onPlan && bankAvailableMinutes !== 0 && (
           <Button
             size="sm"
             variant="secondary"
@@ -131,40 +146,47 @@ export function SpecialExcessPlanSummary({ plans, isFuture, eligible = null, rem
       <ul className="space-y-1.5">
         {plans.map((p, i) => {
           const planMinutes = specialExcessPlanMinutes(p);
+          // 4C.1B (§14): MOBILE empilha (reserva → origem → modo → ações em
+          // linhas próprias, sem quebra caótica nem overflow); DESKTOP segue
+          // compacto em linha única. Somente layout — dados/regra intactos.
           return (
             <li
               key={p.id}
-              className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg bg-white/70 px-2.5 py-1.5 text-[11px] font-medium text-violet-900"
+              className="space-y-1.5 rounded-lg bg-white/70 px-2.5 py-2 text-[11px] font-medium text-violet-900 sm:flex sm:flex-wrap sm:items-center sm:gap-x-3 sm:space-y-0"
             >
-              <span className="font-bold tabular-nums">
+              <span className="block font-bold tabular-nums sm:contents">
                 {plans.length > 1 ? `Plano ${i + 1}` : "Reserva"} — {formatMinutes(planMinutes)}
               </span>
-              <span className="min-w-0 flex-1">
-                Origem:{" "}
-                {p.allocations.map((a) => `${formatDateShortBR(a.originDate)} — ${formatMinutes(a.minutes)}`).join(" · ")}
-                <span className="text-violet-600">
-                  {" "}
-                  · {p.selectionMode === "automatic" ? "Seleção automática" : "Origem escolhida manualmente"}
+              <span className="block min-w-0 sm:flex-1">
+                <span className="block sm:inline">
+                  Origem:{" "}
+                  {p.allocations.map((a) => `${formatDateShortBR(a.originDate)} — ${formatMinutes(a.minutes)}`).join(" · ")}
+                </span>
+                <span className="block text-violet-600 sm:inline">
+                  <span className="hidden sm:inline">{" · "}</span>
+                  {p.selectionMode === "automatic" ? "Seleção automática" : "Origem escolhida manualmente"}
                 </span>
               </span>
-              {canApply && onResolvePlan && (
+              <span className="block space-y-1.5 sm:contents">
+                {canApply && onResolvePlan && (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    className="w-full !border-violet-300 !text-violet-700 hover:!bg-violet-50 sm:w-auto"
+                    onClick={() => onResolvePlan(p.id)}
+                  >
+                    <CalendarClock size={12} /> Usar planejamento
+                  </Button>
+                )}
                 <Button
                   size="sm"
-                  variant="secondary"
-                  className="!border-violet-300 !text-violet-700 hover:!bg-violet-50"
-                  onClick={() => onResolvePlan(p.id)}
+                  variant="ghost"
+                  className="w-full !px-2 !text-rose-600 hover:!bg-rose-50 sm:w-auto"
+                  onClick={() => setCancelTarget(p)}
                 >
-                  <CalendarClock size={12} /> Usar planejamento
+                  {cancelLabel}
                 </Button>
-              )}
-              <Button
-                size="sm"
-                variant="ghost"
-                className="!px-2 !text-rose-600 hover:!bg-rose-50"
-                onClick={() => setCancelTarget(p)}
-              >
-                {cancelLabel}
-              </Button>
+              </span>
             </li>
           );
         })}

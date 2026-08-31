@@ -39,7 +39,9 @@ import { pendingPunchDatesInCycle } from "@/lib/pending-punches";
 import { buildResumoDayRow, resumoFinancialFrozen, type ResumoDayRow } from "@/lib/resumo-days";
 import { buildResumoPeriodView } from "@/lib/resumo-period-view";
 import { buildSpecialExcessBank } from "@/lib/special-excess-bank";
+import { buildSpecialExcessDayView } from "@/lib/special-excess-day-view";
 import { ExcessReasonModal } from "@/components/excess-reason-modal";
+import { SpecialExcessUseModal } from "@/components/special-excess-use-modal";
 import type { DayResult, DaySummary } from "@/lib/types";
 import { Badge, Button, Card, EmptyState, ExcessTenBadge, Skeleton, StatCard } from "@/components/ui";
 import { QuickPunch } from "@/components/quick-punch";
@@ -114,6 +116,9 @@ export default function DashboardPage() {
   const period = getPointPeriod(todayStr);
   const [reasonDate, setReasonDate] = useState<string | null>(null);
   const [busyFalta, setBusyFalta] = useState(false);
+  /* 4C.1B — pendência da 4V: "Completar jornada com [10+]" no Registro de
+   * hoje da Visão Geral (o MESMO fluxo/modal já validado em Registros). */
+  const [completeDate, setCompleteDate] = useState<string | null>(null);
 
   // Relógio: mantém previsão de saída e horas "em andamento" em tempo real
   const [, setTick] = useState(0);
@@ -214,6 +219,27 @@ export default function DashboardPage() {
         settings,
         faltas,
         controlStartDate: user.controlStartDate ?? "",
+        uses: specialExcessUses ?? [],
+        plans: specialExcessPlans ?? [],
+      }),
+    [todayStr, entries, absences, companyCalendars, settings, faltas, user, specialExcessUses, specialExcessPlans],
+  );
+
+  /* 4C.1B — visão canônica do dia de HOJE (buildSpecialExcessDayView, a
+   * MESMA de Registros): gating "Completar jornada com [10+]" — canComplete
+   * já exige encerrada + financeiramente válida + abaixo da base +
+   * remainingNeed > 0 + Banco [10+] disponível > 0. Sem horário de parede. */
+  const todaySpecialView = useMemo(
+    () =>
+      buildSpecialExcessDayView({
+        date: todayStr,
+        asOfDate: todayStr,
+        entries,
+        absences,
+        calendars: companyCalendars,
+        settings,
+        faltas,
+        controlStartDate: user.controlStartDate ?? null,
         uses: specialExcessUses ?? [],
         plans: specialExcessPlans ?? [],
       }),
@@ -549,6 +575,50 @@ export default function DashboardPage() {
             />
           </section>
         </div>
+        {/* 4C.1B — "Completar jornada com [10+]" no dia de hoje (pendência da
+            4V). Gating CANÔNICO (a mesma visão de Registros — sem horário de
+            parede): canComplete já exige encerrada + financeiramente válida +
+            abaixo da base + remainingNeed > 0 + Banco [10+] > 0. Após o uso,
+            o factual acima permanece (ex.: 7h30/−30); aqui aparece, discreto,
+            o [10+] aplicado e a projeção no ponto (8h/0) — mesma fonte 3A. */}
+        {(todaySpecialView.canComplete || todaySpecialView.usedActiveMinutes > 0) && (
+          <div className="mt-4 space-y-2 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2.5">
+            {todaySpecialView.usedActiveMinutes > 0 && (
+              <p className="flex flex-wrap items-center gap-x-2 text-xs font-medium text-violet-900/80">
+                <Badge tone="violet" className="shrink-0 py-0.5">
+                  <CalendarClock size={12} aria-hidden /> [10+]
+                </Badge>
+                <span>
+                  Aplicado hoje: <b className="tabular-nums">{formatMinutes(todaySpecialView.usedActiveMinutes)}</b>
+                  {todaySpecialView.projection && (
+                    <>
+                      {" "}· Projeção no ponto:{" "}
+                      <b className="tabular-nums">
+                        {formatMinutes(todaySpecialView.projection.workedMinutes)} / {fmtSigned(todaySpecialView.projection.balanceMinutes)}
+                      </b>
+                    </>
+                  )}
+                </span>
+              </p>
+            )}
+            {todaySpecialView.canComplete && (
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                <p className="min-w-0 flex-1 text-xs font-medium text-violet-900/80">
+                  Jornada encerrada abaixo da base — faltam{" "}
+                  <b className="tabular-nums">{formatMinutes(todaySpecialView.remainingMinutes)}</b> para a base.
+                </p>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className="w-full !border-violet-300 !text-violet-700 hover:!bg-violet-50 sm:w-auto"
+                  onClick={() => setCompleteDate(todayStr)}
+                >
+                  <CalendarClock size={13} /> Completar jornada com [10+]
+                </Button>
+              </div>
+            )}
+          </div>
+        )}
       </Card>
 
       {/* C. PENDÊNCIAS RELEVANTES — apenas o aviso já existente de registros
@@ -679,6 +749,13 @@ export default function DashboardPage() {
           </div>
         )}
       </Card>
+
+      {/* 4C.1B — o MESMO modal "Completar jornada com [10+]" de Registros
+          (SpecialExcessUseModal: Automático/Manual, FIFO, manualMaxForOrigin,
+          banco canônico com plans descontados, gate do store, cancelamento). */}
+      {completeDate && (
+        <SpecialExcessUseModal date={completeDate} onClose={() => setCompleteDate(null)} />
+      )}
 
       {/* §10 Modal do motivo do excedente >10h (parte do fluxo de batida do
           Registro de hoje — preservado pela 4V). */}

@@ -636,6 +636,9 @@ export function DayCard({
                 // inconsistente, congelado) → "Usar planejamento" oculto.
                 eligible={specialExcess ? specialExcess.eligible : null}
                 remainingNeedMinutes={specialExcess ? specialExcess.remainingMinutes : null}
+                // 4C.1B (§15): BANCO [10+] disponível da MESMA visão canônica —
+                // com 0, o card antecipa a verdade e não oferece "Planejar mais".
+                bankAvailableMinutes={specialExcess ? specialExcess.bankAvailableMinutes : null}
                 onResolvePlan={onResolvePlan}
                 onPlan={onPlanSpecial}
               />

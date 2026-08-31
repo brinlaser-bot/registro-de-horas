@@ -42,6 +42,63 @@ export interface BackupSummary {
   periodTo: string | null;
 }
 
+/* ═══════════════════════════════════════════════════════════════════════
+ * 4C.1B — CONTRATO ÚNICO DE BACKUP (definition of done de persistência).
+ *
+ * Toda coleção PERSISTENTE do Meu Horário (a mesma do AppData/localStorage)
+ * deve constar EXATAMENTE UMA VEZ nesta lista. O pipeline inteiro passa a
+ * consumi-la: a exportação e o parse são auditados pelo teste sentinela
+ * contra o estado real do store, e o payload das actions de importação
+ * (Substituir/Mesclar) é DERIVADO daqui — uma coleção nova entra no
+ * contrato e automaticamente participa de export → parse → replace/merge.
+ * O teste sentinela (verify-backup-contract-4c1b.mts) falha se uma chave
+ * do estado real ficar fora deste contrato.
+ * ═══════════════════════════════════════════════════════════════════════ */
+export const BACKUP_COLLECTIONS = [
+  "user",
+  "entries",
+  "compensations",
+  "absences",
+  "companyCalendars",
+  "faltas",
+  "excessReasons",
+  "specialExcessUses",
+  "specialExcessPlans",
+] as const;
+
+export type BackupCollectionKey = (typeof BACKUP_COLLECTIONS)[number];
+
+/**
+ * Payload aceito pelas actions de importação (replaceAll/mergeBackup) —
+ * a MESMA forma do contrato, com coleções opcionais (backups antigos não
+ * as têm e o parse devolve defaults seguros).
+ */
+export interface BackupImportPayload {
+  user: User;
+  entries: TimeEntry[];
+  compensations: Compensation[];
+  absences?: Absence[];
+  companyCalendars?: CompanyCalendars;
+  faltas?: Falta[];
+  excessReasons?: ExcessReason[];
+  specialExcessUses?: SpecialExcessUse[];
+  specialExcessPlans?: SpecialExcessPlan[];
+}
+
+/**
+ * 4C.1B — Deriva o payload das actions de importação DIRETO do contrato.
+ * Usado pelo ImportBackupModal (Substituir e Mesclar): impossível importar
+ * uma coleção e esquecer outra — a lista é esta, e o sentinela a mantém
+ * alinhada com o estado real do store.
+ */
+export function backupImportPayload(parsed: ParsedBackup): BackupImportPayload {
+  const out = {} as Record<BackupCollectionKey, unknown>;
+  for (const key of BACKUP_COLLECTIONS) {
+    out[key] = parsed[key];
+  }
+  return out as unknown as BackupImportPayload;
+}
+
 export interface ParsedBackup {
   user: User;
   entries: TimeEntry[];

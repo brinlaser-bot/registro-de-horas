@@ -13,6 +13,7 @@ import { Button, Modal } from "@/components/ui";
 import { useToast } from "@/components/toast";
 import { actions, getAppData } from "@/lib/store";
 import {
+  backupImportPayload,
   compsEqual,
   entriesEqual,
   INVALID_BACKUP_MSG,
@@ -98,20 +99,9 @@ export function ImportBackupModal({ open, onClose }: Props) {
     );
     if (!ok) return;
     setBusy(true);
-    actions.replaceAll({
-      user: parsed.user,
-      entries: parsed.entries,
-      compensations: parsed.compensations,
-      absences: parsed.absences,
-      companyCalendars: parsed.companyCalendars,
-      faltas: parsed.faltas,
-      excessReasons: parsed.excessReasons,
-      specialExcessUses: parsed.specialExcessUses,
-      // 4C.1A: planos/reservas [10+] participam do MESMO pipeline de
-      // importação (eram descartados aqui — causa do plano perdido no
-      // restore real). parseBackup devolve [] para backups antigos.
-      specialExcessPlans: parsed.specialExcessPlans,
-    });
+    // 4C.1B: payload derivado do CONTRATO ÚNICO de backup — toda coleção
+    // persistente participa automaticamente (nada é esquecido aqui).
+    actions.replaceAll(backupImportPayload(parsed));
     setBusy(false);
     toast.show("Backup restaurado com sucesso.");
     onClose();
@@ -120,18 +110,9 @@ export function ImportBackupModal({ open, onClose }: Props) {
   const merge = async () => {
     if (!parsed) return;
     setBusy(true);
-    actions.mergeBackup({
-      entries: parsed.entries,
-      compensations: parsed.compensations,
-      absences: parsed.absences,
-      companyCalendars: parsed.companyCalendars,
-      faltas: parsed.faltas,
-      excessReasons: parsed.excessReasons,
-      specialExcessUses: parsed.specialExcessUses,
-      // 4C.1A: planos/reservas [10+] também na MESCLAGEM (união por id,
-      // colisão → prevalece o local — mesma política dos usos).
-      specialExcessPlans: parsed.specialExcessPlans,
-    });
+    // 4C.1B: mesmo contrato no MERGE (união por id/colisão → prevalece o
+    // local — política existente do store, intacta).
+    actions.mergeBackup(backupImportPayload(parsed));
     setBusy(false);
     toast.show("Backup mesclado com sucesso.");
     onClose();

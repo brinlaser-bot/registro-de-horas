@@ -21,7 +21,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
-import { buildBackupPayload, parseBackup } from "../src/lib/backup.ts";
+import { backupImportPayload, buildBackupPayload, parseBackup } from "../src/lib/backup.ts";
 import { buildSpecialExcessBank } from "../src/lib/special-excess-bank.ts";
 import { buildSeedData } from "../src/lib/seed-data.ts";
 import { actions, getAppData, settingsOf } from "../src/lib/store.ts";
@@ -93,20 +93,11 @@ function exportJson(): string {
   return JSON.stringify(buildBackupPayload(getAppData()));
 }
 
-/** IMPORTAÇÃO no deployment B replicando EXATAMENTE os campos que o
- * ImportBackupModal repassa para as actions (após a correção 4C.1A). */
+/** IMPORTAÇÃO no deployment B usando O MESMO CAMINHO do ImportBackupModal:
+ * o payload derivado do CONTRATO ÚNICO de backup (4C.1B — antes da 4C.1A
+ * esta função era a lista manual do modal, sem specialExcessPlans). */
 function importReplaceViaModal(parsed: ReturnType<typeof parseBackup> extends { ok: true; backup: infer B } ? B : never) {
-  actions.replaceAll({
-    user: parsed.user,
-    entries: parsed.entries,
-    compensations: parsed.compensations,
-    absences: parsed.absences,
-    companyCalendars: parsed.companyCalendars,
-    faltas: parsed.faltas,
-    excessReasons: parsed.excessReasons,
-    specialExcessUses: parsed.specialExcessUses,
-    specialExcessPlans: parsed.specialExcessPlans,
-  });
+  actions.replaceAll(backupImportPayload(parsed));
 }
 
 function bankOf(asOf = "2026-08-31") {
@@ -280,17 +271,8 @@ check("TESTE 08 DE 8 — Round-trip real: estado → export → zerar → import
   assert.deepEqual(restored.specialExcessUses, original.specialExcessUses, "uses equivalentes");
   assert.deepEqual(restored.specialExcessPlans, original.specialExcessPlans, "plans equivalentes (allocations/status/metadados 4C)");
   assert.equal(bankOf().availableMinutes, 70, "banco do round-trip = 1h10 disponível");
-  // Caminho MERGE do modal: união por id — reimportar NÃO duplica:
-  actions.mergeBackup({
-    entries: parsed.backup.entries,
-    compensations: parsed.backup.compensations,
-    absences: parsed.backup.absences,
-    companyCalendars: parsed.backup.companyCalendars,
-    faltas: parsed.backup.faltas,
-    excessReasons: parsed.backup.excessReasons,
-    specialExcessUses: parsed.backup.specialExcessUses,
-    specialExcessPlans: parsed.backup.specialExcessPlans,
-  });
+  // Caminho MERGE do modal (contrato 4C.1B): união por id — reimportar NÃO duplica:
+  actions.mergeBackup(backupImportPayload(parsed.backup));
   const merged = getAppData();
   assert.equal((merged.specialExcessPlans ?? []).length, 1, "merge: plano não duplica (colisão de id → prevalece o local)");
   assert.equal((merged.specialExcessUses ?? []).length, 1, "merge: uso não duplica");
@@ -315,9 +297,10 @@ check("UI/INTEGRAÇÃO — 01/09 reconhece '[10+] reservado · 30min' e NÃO 'Pl
   const dayCard = src("src/components/day-card.tsx");
   assert.ok(dayCard.includes("!(specialPlans && specialPlans.length > 0)"), "gate do CTA 'Planejar uso' exige dia SEM reserva");
   assert.ok(dayCard.includes("[10+] reservado ·"), "badge de reserva presente no card");
-  // O modal repassa plans nas DUAS chamadas (guarda estrutural da correção):
+  // O modal deriva o payload do CONTRATO nas DUAS chamadas (guarda 4C.1B —
+  // stronger que a guarda manual da 4C.1A: cobre TODAS as coleções):
   const modal = src("src/components/import-backup-modal.tsx");
-  assert.equal(modal.split("specialExcessPlans: parsed.specialExcessPlans").length - 1, 2, "replace() e merge() repassam specialExcessPlans");
+  assert.equal(modal.split("backupImportPayload(parsed)").length - 1, 2, "replace() e merge() usam o payload do contrato");
 });
 
 console.log(`\n${passed} verificações da Etapa 4C.1A passaram.`);
