@@ -108,6 +108,9 @@ function resetCreateGuard() {
 }
 
 const OK: ActionResult = { ok: true };
+/** 3G.4: anexa avisos curtos (§10) ao resultado bem-sucedido de uma edição. */
+const withWarnings = (res: ActionResult, warnings: string[]): ActionResult =>
+  res.ok && warnings.length > 0 ? { ...res, warning: warnings.join(" ") } : res;
 
 const CROSS_CYCLE_MSG =
   "Esta compensação não pode ser realizada porque a origem e o destino pertencem a ciclos anuais diferentes. As compensações devem ocorrer dentro do mesmo ciclo anual.";
@@ -672,6 +675,179 @@ function applySpecialReconciliationPlans(
   return { ...d, specialExcessUses: uses };
 }
 
+/* ─────────────────────────────────────────────────────────────
+   ETAPA 3G.4 — ORIGEM [10+] REDUZIDA/ELIMINADA ENQUANTO EM USO.
+
+   Estende o fluxo 3G (sem segundo motor): após editar batidas de um
+   dia ORIGEM, a geração [10+] daquele dia pode diminuir. Usos ATIVOS
+   com allocation dessa origem precisam de lastro real:
+
+   - MANUAL: a escolha do usuário é intocável — mantém apenas a parcela
+     com lastro (trim), NUNCA troca de origem; redução parcial segue o
+     padrão 3G (original cancelado + versão ativa reconciliada);
+   - AUTOMÁTICO (fifo): preserva o TOTAL decidido redistribuindo as
+     allocations pelo motor FIFO existente (3C) sobre origens ainda
+     válidas — nunca aumenta o total; sem lastro suficiente, reduz
+     (mesmo padrão de histórico da 3G).
+
+   Determinismo: usos mais ANTIGOS primeiro (createdAt asc — o mesmo
+   critério da reconciliação de destino da 3G). Tudo acontece no MESMO
+   mutate da edição (atomicidade) e devolve avisos curtos para a UI.
+   Histórico NUNCA é apagado; motivo registrado na nota (append).
+   ───────────────────────────────────────────────────────────── */
+
+const ORIGIN_RECONCILE_NOTE = "Reconciliado: a geração [10+] da origem diminuiu após edição da jornada.";
+
+/**
+ * Reconcilia usos ativos cujas allocations partem de origens afetadas
+ * pela edição (3G.4). Função PURA sobre o estado simulado: devolve o
+ * MESMO objeto quando nada precisa mudar; `warnings` recebe feedback
+ * curto para a interface (§10). Sem persistência, sem fatos alterados.
+ */
+function reconcileSpecialOrigins(
+  d: AppData,
+  affectedDates: string[],
+  nowTs: number,
+  warnings: string[],
+): AppData {
+  const affectedOrigins = new Set(affectedDates);
+  const active = (d.specialExcessUses ?? []).filter(
+    (u) => u.status === "utilizado" && u.allocations.some((a) => affectedOrigins.has(a.originDate)),
+  );
+  if (active.length === 0) return d;
+
+  const asOf = todayString();
+  const settings = settingsOf(d.user);
+  // Geração ATUAL por origem (mesma fonte 3C do banco — estado simulado).
+  const genByOrigin = new Map<string, number>();
+  const cycles = new Set<string>([...affectedOrigins].map(getAnnualPointCycle));
+  for (const cycle of cycles) {
+    const bank = buildSpecialExcessBank({
+      cycle,
+      asOfDate: asOf,
+      entries: d.entries,
+      absences: d.absences,
+      calendars: d.companyCalendars,
+      settings,
+      faltas: d.faltas,
+      controlStartDate: d.user.controlStartDate ?? "",
+      uses: [],
+    });
+    for (const lot of bank.lots) genByOrigin.set(lot.originDate, lot.generatedMinutes);
+  }
+  // Capacidade restante por origem afetada (default 0: origem sem lote).
+  const remaining = new Map<string, number>();
+  for (const o of affectedOrigins) remaining.set(o, genByOrigin.get(o) ?? 0);
+
+  // Critério determinístico existente (3G): usos mais antigos primeiro.
+  const ordered = [...active].sort((a, b) => a.createdAt - b.createdAt);
+
+  const cancelledOriginalIds = new Set<string>();
+  const inPlaceUpdates = new Map<string, SpecialExcessAllocation[]>();
+  const reconciledCreates: Array<Pick<SpecialExcessUse, "destinationDate" | "allocations" | "allocationStrategy" | "note">> = [];
+  const processedFinals: SpecialExcessUse[] = []; // reservas p/ FIFO dos próximos usos
+
+  for (const use of ordered) {
+    let changed = false;
+    const trimmed: SpecialExcessAllocation[] = [];
+    for (const a of use.allocations) {
+      if (!affectedOrigins.has(a.originDate)) {
+        trimmed.push(a);
+        continue;
+      }
+      const cap = remaining.get(a.originDate) ?? 0;
+      const keep = Math.min(a.minutes, cap);
+      remaining.set(a.originDate, cap - keep);
+      if (keep < a.minutes) changed = true;
+      if (keep > 0) trimmed.push({ originDate: a.originDate, minutes: keep });
+    }
+    let finalAllocs = trimmed;
+    const originalTotal = use.allocations.reduce((s, x) => s + x.minutes, 0);
+    // AUTOMÁTICO: tentar preservar o TOTAL pelo FIFO (3C) — nunca aumentar.
+    if (use.allocationStrategy === "fifo" && changed) {
+      const trimmedTotal = trimmed.reduce((s, x) => s + x.minutes, 0);
+      if (trimmedTotal < originalTotal) {
+        const bank = buildSpecialExcessBank({
+          cycle: getAnnualPointCycle(use.destinationDate),
+          asOfDate: asOf,
+          entries: d.entries,
+          absences: d.absences,
+          calendars: d.companyCalendars,
+          settings,
+          faltas: d.faltas,
+          controlStartDate: d.user.controlStartDate ?? "",
+          uses: processedFinals,
+        });
+        const fifo = allocateSpecialExcessFifo({ bank, destinationDate: use.destinationDate, requestedMinutes: originalTotal });
+        if (!fifo.error && fifo.allocatedMinutes > trimmedTotal) finalAllocs = fifo.allocations;
+      }
+    }
+    if (finalAllocs.length > 0) processedFinals.push({ ...use, allocations: finalAllocs });
+    if (!changed) continue;
+
+    const finalTotal = finalAllocs.reduce((s, x) => s + x.minutes, 0);
+    if (finalTotal === originalTotal && use.allocationStrategy === "fifo") {
+      // Total preservado: redistribuição in-place do uso automático.
+      inPlaceUpdates.set(use.id, finalAllocs);
+      warnings.push(
+        `As origens automáticas de ${formatMinutes(originalTotal)} de [10+] foram redistribuídas após a alteração da jornada.`,
+      );
+    } else if (finalTotal > 0) {
+      // Redução parcial: original fica no histórico; versão ativa reconciliada.
+      cancelledOriginalIds.add(use.id);
+      reconciledCreates.push({
+        destinationDate: use.destinationDate,
+        allocations: finalAllocs,
+        allocationStrategy: use.allocationStrategy,
+        note: `Uso reconciliado após redução da geração [10+] na origem (original ${use.id}: ${formatMinutes(originalTotal)} → ${formatMinutes(finalTotal)}).`,
+      });
+      warnings.push(
+        `A origem de [10+] foi reduzida. ${formatMinutes(finalTotal)} permanecem utilizados e ${formatMinutes(originalTotal - finalTotal)} deixaram de ser aplicados.`,
+      );
+    } else {
+      cancelledOriginalIds.add(use.id);
+      warnings.push(
+        `${formatMinutes(originalTotal)} de [10+] deixaram de estar disponíveis após a alteração da jornada e o uso vinculado foi ajustado.`,
+      );
+    }
+  }
+
+  if (cancelledOriginalIds.size === 0 && inPlaceUpdates.size === 0) return d;
+
+  let uses = d.specialExcessUses ?? [];
+  // 1) Cancelamento histórico com motivo anexado (não destrutivo).
+  uses = uses.map((u) =>
+    cancelledOriginalIds.has(u.id)
+      ? {
+          ...u,
+          status: "cancelado" as const,
+          cancelledAt: nowTs,
+          updatedAt: nowTs,
+          note: u.note ? `${u.note} · ${ORIGIN_RECONCILE_NOTE}` : ORIGIN_RECONCILE_NOTE,
+        }
+      : u,
+  );
+  // 2) Redistribuição in-place (uso automático com total preservado).
+  uses = uses.map((u) =>
+    inPlaceUpdates.has(u.id) ? { ...u, allocations: inPlaceUpdates.get(u.id)!, updatedAt: nowTs } : u,
+  );
+  // 3) Versões ativas reconciliadas (validadas; defensivo: nunca inválida).
+  for (const rc of reconciledCreates) {
+    const candidate: SpecialExcessUse = {
+      id: nextSpecialUseId(uses),
+      destinationDate: rc.destinationDate,
+      allocations: rc.allocations,
+      allocationStrategy: rc.allocationStrategy,
+      status: "utilizado",
+      createdAt: nowTs,
+      note: rc.note,
+    };
+    if (!validateSpecialExcessUse(candidate).ok) continue;
+    uses = [...uses, candidate];
+  }
+  return { ...d, specialExcessUses: uses };
+}
+
 /** Opções 3G dos actions que alteram batidas. */
 interface PunchMutationOpts {
   /** Confirmação humana da liberação de [10+] (2ª chamada, §6/§8). */
@@ -701,6 +877,7 @@ export const actions = {
     source?: "live" | "manual";
   }, opts?: PunchMutationOpts): ActionResult {
     let result: ActionResult = OK;
+    const warnings: string[] = [];
     mutate((d) => {
       if (isFutureDate(p.date)) {
         result = { ok: false, code: "invalid", error: FUTURE_DATE_ERROR };
@@ -726,11 +903,14 @@ export const actions = {
         result = { ok: false, code: "special-release-required", error: SPECIAL_RELEASE_REQUIRED_MSG, specialReleases: releasePlans };
         return d; // NADA persiste (§7)
       }
+      const ts = opts?.now ?? Date.now();
       let next: AppData = { ...d, entries: nextEntries };
-      if (releasePlans.length > 0) next = applySpecialReconciliationPlans(next, releasePlans, opts?.now ?? Date.now());
+      if (releasePlans.length > 0) next = applySpecialReconciliationPlans(next, releasePlans, ts);
+      // 3G.4: origem [10+] com geração reduzida → reconcilia usos dependentes.
+      next = reconcileSpecialOrigins(next, [p.date], ts, warnings);
       return withCompensarReconcile(next, p.date);
     });
-    return result;
+    return withWarnings(result, warnings);
   },
 
   /**
@@ -742,6 +922,7 @@ export const actions = {
     opts?: PunchMutationOpts,
   ): ActionResult {
     let result: ActionResult = OK;
+    const warnings: string[] = [];
     mutate((d) => {
       if (list.length === 0) {
         result = { ok: false, code: "invalid", error: "Informe ao menos um registro." };
@@ -786,11 +967,14 @@ export const actions = {
         result = { ok: false, code: "special-release-required", error: SPECIAL_RELEASE_REQUIRED_MSG, specialReleases: releasePlans };
         return d; // NADA persiste (§7)
       }
-      if (releasePlans.length > 0) next = applySpecialReconciliationPlans(next, releasePlans, opts?.now ?? Date.now());
+      const ts = opts?.now ?? Date.now();
+      if (releasePlans.length > 0) next = applySpecialReconciliationPlans(next, releasePlans, ts);
+      // 3G.4: origens afetadas pelo conjunto de batidas adicionadas.
+      next = reconcileSpecialOrigins(next, Array.from(byDate.keys()), ts, warnings);
       for (const date of byDate.keys()) next = withCompensarReconcile(next, date);
       return next;
     });
-    return result;
+    return withWarnings(result, warnings);
   },
 
   /**
@@ -806,6 +990,7 @@ export const actions = {
    */
   updateEntry(id: number, patch: Partial<Pick<TimeEntry, "time" | "type" | "note" | "date">>, opts?: PunchMutationOpts): ActionResult {
     let result: ActionResult = OK;
+    const warnings: string[] = [];
     mutate((d) => {
       if (patch.date && isFutureDate(patch.date)) {
         result = { ok: false, code: "invalid", error: FUTURE_DATE_ERROR };
@@ -848,11 +1033,14 @@ export const actions = {
         result = { ok: false, code: "special-release-required", error: SPECIAL_RELEASE_REQUIRED_MSG, specialReleases: releasePlans };
         return d; // NADA persiste (§7)
       }
-      if (releasePlans.length > 0) reconciled = applySpecialReconciliationPlans(reconciled, releasePlans, opts?.now ?? Date.now());
+      const ts = opts?.now ?? Date.now();
+      if (releasePlans.length > 0) reconciled = applySpecialReconciliationPlans(reconciled, releasePlans, ts);
+      // 3G.4: origem [10+] com geração reduzida → reconcilia usos dependentes.
+      reconciled = reconcileSpecialOrigins(reconciled, affectedDates, ts, warnings);
       for (const date of affectedDates) reconciled = withCompensarReconcile(reconciled, date);
       return reconciled;
     });
-    return result;
+    return withWarnings(result, warnings);
   },
 
   /**
@@ -862,6 +1050,7 @@ export const actions = {
    */
   deleteEntry(id: number, opts?: PunchMutationOpts): ActionResult {
     let result: ActionResult = OK;
+    const warnings: string[] = [];
     mutate((d) => {
       const target = d.entries.find((e) => e.id === id);
       if (!target) {
@@ -881,11 +1070,14 @@ export const actions = {
         result = { ok: false, code: "special-release-required", error: SPECIAL_RELEASE_REQUIRED_MSG, specialReleases: releasePlans };
         return d; // NADA persiste (§7)
       }
+      const ts = opts?.now ?? Date.now();
       let next: AppData = sim;
-      if (releasePlans.length > 0) next = applySpecialReconciliationPlans(next, releasePlans, opts?.now ?? Date.now());
+      if (releasePlans.length > 0) next = applySpecialReconciliationPlans(next, releasePlans, ts);
+      // 3G.4: excluir batida também pode reduzir a geração da origem.
+      next = reconcileSpecialOrigins(next, [target.date], ts, warnings);
       return withCompensarReconcile(next, target.date);
     });
-    return result;
+    return withWarnings(result, warnings);
   },
 
   /**

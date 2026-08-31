@@ -189,6 +189,19 @@ check("J. dias sem [10+] não sofrem regressão (condição exige uso ativo; nad
   assert.equal(viewOf("2026-08-24").usedActiveMinutes, 0, "24/08 sem uso não ganha badge");
 });
 
+
+/** A correção 3G.3 (commit fixado) não pode ter tocado estes arquivos. */
+const FIX_SHA = "0f85f4ffee97d300171cdf9ce2c6110bb90325ce";
+function changedInFix(rel: string): boolean {
+  try {
+    execFileSync("git", ["diff", "--quiet", `${FIX_SHA}~1`, FIX_SHA, "--", rel], { cwd: root });
+    return false;
+  } catch (e) {
+    if (e instanceof ReferenceError) throw e; // não engolir TDZ
+    return true;
+  }
+}
+
 check("Escopo. nenhuma mudança em motores/store/seed nesta correção", () => {
   for (const f of [
     "src/lib/special-excess-day-view.ts",
@@ -199,19 +212,11 @@ check("Escopo. nenhuma mudança em motores/store/seed nesta correção", () => {
     "src/lib/seed-data.ts",
     "src/components/special-excess-use-modal.tsx",
   ]) {
-    assert.equal(uncommitted(f), false, `${f} fora do diff`);
+    assert.equal(changedInFix(f), false, `${f} fora do diff da correção 3G.3`);
   }
 });
 
 /* ── helpers ─────────────────────────────────────────────────────────── */
 
-function uncommitted(rel: string): boolean {
-  try {
-    execFileSync("git", ["diff", "--quiet", "HEAD", "--", rel], { cwd: root });
-    return false;
-  } catch {
-    return true;
-  }
-}
 
 console.log(`\n${passed} verificações 3G.3 passaram.`);

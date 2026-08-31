@@ -72,9 +72,11 @@ function dayViewOf(date: string) {
   });
 }
 
-function uncommitted(rel: string): boolean {
+/** A correção 3G.1 (commit fixado) não pode ter tocado estes arquivos. */
+const FIX_SHA = "0775e6a1dbfac96015d6f1d85aff043add71342e";
+function changedInFix(rel: string): boolean {
   try {
-    execFileSync("git", ["diff", "--quiet", "HEAD", "--", rel], { cwd: root });
+    execFileSync("git", ["diff", "--quiet", `${FIX_SHA}~1`, FIX_SHA, "--", rel], { cwd: root });
     return false;
   } catch {
     return true;
@@ -186,7 +188,7 @@ check("Escopo. motores/banco/reconciliação/store/seed fora do diff desta corre
     "src/lib/special-excess-reconciliation.ts",
     "src/lib/store.ts",
   ]) {
-    assert.equal(uncommitted(f), false, `${f} não foi alterado nesta correção`);
+    assert.equal(changedInFix(f), false, `${f} não foi alterado na correção 3G.1`);
   }
 });
 

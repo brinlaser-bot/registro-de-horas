@@ -22,6 +22,7 @@ import { actions, type ActionResult } from "@/lib/store";
 import type { SpecialReconciliationPlan } from "@/lib/special-excess-reconciliation";
 import { formatMinutes, formatDateBR, weekdayShort } from "@/lib/time";
 import { Badge, Button, Modal } from "@/components/ui";
+import { useToast } from "@/components/toast";
 
 type AddEntryParams = Parameters<typeof actions.addEntry>[0];
 type AddEntriesParams = Parameters<typeof actions.addEntries>[0];
@@ -61,6 +62,7 @@ const SpecialReleaseContext = createContext<SpecialReleaseApi>({
 
 export function SpecialReleaseProvider({ children }: { children: ReactNode }) {
   const [pending, setPending] = useState<PendingRelease | null>(null);
+  const toast = useToast();
   const resolver = useRef<((res: ActionResult) => void) | null>(null);
 
   const confirmRelease = useCallback(
@@ -103,12 +105,14 @@ export function SpecialReleaseProvider({ children }: { children: ReactNode }) {
         return;
       }
       if (res.ok || res.code !== "special-release-required" || !res.specialReleases?.length) {
+        // 3G.4: ajuste automático de origem [10+] → feedback curto (§10).
+        if (res.ok && res.warning) toast.show(res.warning, "info");
         resolve(res);
         return;
       }
       confirmRelease(res.specialReleases, retryWith, resolve);
     },
-    [confirmRelease],
+    [confirmRelease, toast],
   );
 
   const api = useMemo<SpecialReleaseApi>(
