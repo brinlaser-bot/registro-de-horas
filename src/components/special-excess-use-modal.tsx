@@ -43,6 +43,19 @@ function translateUseError(code: string | undefined, fallback?: string): string 
 const QUICK_OPTIONS = [15, 30, 45, 60];
 
 /**
+ * 3G.1 — RESTANTE no modo MANUAL: "ainda pode completar neste dia" APÓS a
+ * seleção atual do formulário. Reutiliza o `remainingMinutes` já derivado
+ * pelo dia-view (necessidade disponível ANTES do novo uso) e desconta o
+ * total selecionado — derivação de apresentação, SEM fórmula financeira
+ * paralela. Nunca negativo.
+ *
+ *   remainingAfterSelection = max(remainingMinutes − selectedTotal, 0)
+ */
+export function manualRemainingAfterSelection(remainingMinutes: number, selectedTotal: number): number {
+  return Math.max(0, remainingMinutes - selectedTotal);
+}
+
+/**
  * Modal "Completar jornada com [10+]" (Etapa 3E).
  *
  * - Automático (padrão): o sistema retira das origens mais antigas (motor 3C);
@@ -401,9 +414,23 @@ export function SpecialExcessUseModal({ date, onClose }: Props) {
               <span className="font-medium text-slate-600">
                 Total selecionado: <b className="tabular-nums text-slate-900">{formatMinutes(manualTotal)}</b>
               </span>
-              <span className="font-medium text-slate-600">
-                Ainda pode completar neste dia: <b className="tabular-nums text-slate-900">{formatMinutes(view.remainingMinutes)}</b>
-              </span>
+              {/* 3G.1: restante considera a SELEÇÃO ATUAL do formulário
+                  (derivação manualRemainingAfterSelection). Quando a seleção
+                  completa a necessidade, informa isso em vez de "0min". */}
+              {manualRemainingAfterSelection(view.remainingMinutes, manualTotal) > 0 ? (
+                <span className="font-medium text-slate-600">
+                  Ainda pode completar neste dia:{" "}
+                  <b className="tabular-nums text-slate-900">
+                    {formatMinutes(manualRemainingAfterSelection(view.remainingMinutes, manualTotal))}
+                  </b>
+                </span>
+              ) : manualTotal > 0 ? (
+                <span className="font-medium text-emerald-700">Esta seleção completa a jornada.</span>
+              ) : (
+                <span className="font-medium text-slate-600">
+                  Ainda pode completar neste dia: <b className="tabular-nums text-slate-900">{formatMinutes(0)}</b>
+                </span>
+              )}
             </div>
           </div>
         )}
