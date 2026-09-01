@@ -144,7 +144,9 @@ check("D. Resumo mantém o Card 'Barras empilhadas do período' completo (height
 /* ── E. Regras sensíveis intactas (sanidade central) ── */
 check("E. Falta prevista, batida futura bloqueada e 25/08 sem falta — nada de regra alterada", () => {
   reset();
-  const FUT = "2026-09-01";
+  // Data FUTURA absoluta (determinística — a antiga 2026-09-01 foi alcançada
+  // pelo relógio real e deixou de ser futuro; fragilidade temporal relatada):
+  const FUT = "2027-02-01";
   assert.equal(actions.addFalta(FUT).ok, true, "falta prevista continua permitida");
   const punch = actions.addEntry({ date: FUT, time: "08:00", type: "entrada", note: null });
   assert.equal(punch.ok, false, "batida futura continua bloqueada");

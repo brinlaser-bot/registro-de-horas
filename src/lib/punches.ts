@@ -291,6 +291,23 @@ export function explicitLunchGapMinutes(
   return best;
 }
 
+/**
+ * 4D.4.3 — Σ das pausas REAIS do dia: tempo entre cada SAÍDA e a PRÓXIMA
+ * ENTRADA (gaps entre pares consecutivos). Esse tempo já está FORA dos
+ * segmentos trabalhados — é pausa efetivamente representada pelas batidas.
+ */
+export function totalRealBreakMinutes(pairs: PunchPair[]): number {
+  if (pairs.length < 2) return 0;
+  const sorted = [...pairs].sort((a, b) => a.start.localeCompare(b.start));
+  let total = 0;
+  for (let i = 0; i < sorted.length - 1; i++) {
+    const gapStart = toMinutes(sorted[i].end);
+    const gapEnd = toMinutes(sorted[i + 1].start);
+    if (gapEnd > gapStart) total += gapEnd - gapStart;
+  }
+  return total;
+}
+
 /** Deve aplicar o fallback de 1h de almoço? */
 export function shouldAutoDeductLunch(
   analysis: PunchAnalysis,
@@ -308,9 +325,17 @@ export function shouldAutoDeductLunch(
 }
 
 export function lunchDeductionOf(analysis: PunchAnalysis, settings: WorkSettings): number {
+  // Política existente preservada: pausa real DENTRO da faixa de almoço
+  // neutraliza o fallback por completo.
   if (explicitLunchGapMinutes(analysis.pairs, settings) !== null) return 0;
   if (!shouldAutoDeductLunch(analysis, settings)) return 0;
-  return Math.max(0, toMinutes(settings.lunchEnd) - toMinutes(settings.lunchStart));
+  /* 4D.4.3 — REGRA CANÔNICA: tempo entre SAÍDA e PRÓXIMA ENTRADA já é tempo
+   * não trabalhado (ficou fora dos segmentos). O intervalo automático é
+   * FALLBACK para pausa NÃO representada pelas batidas — deduz apenas o que
+   * falta para completar a pausa mínima, NUNCA o mesmo período duas vezes:
+   *   autoIntervalRemaining = max(0, exigido − já representado pelos gaps). */
+  const required = Math.max(0, toMinutes(settings.lunchEnd) - toMinutes(settings.lunchStart));
+  return Math.max(0, required - totalRealBreakMinutes(analysis.pairs));
 }
 
 export function segmentsOf(pairs: PunchPair[]): Segment[] {

@@ -558,7 +558,9 @@ check("W. §30: jornada encerrada com hora extra real ≥ obrigação → conclu
 /* ── X. Crédito retroativo fechado → uso IMEDIATO (sem Pendente) ── */
 check("X. quitação com crédito de dia já encerrado nasce CONCLUÍDA; destino futuro rejeitado", () => {
   reset([...dayDef15(), punch("2026-08-22", "08:00", "entrada"), punch("2026-08-22", "08:40", "saida")]);
-  const future = actions.useRealizedCredit({ sourceDate: "2026-08-21", targetDate: "2026-09-01", minutes: 15 });
+  // Destino FUTURO absoluto (determinístico — 2026-09-01 foi alcançada pelo
+  // relógio real; fragilidade temporal relatada):
+  const future = actions.useRealizedCredit({ sourceDate: "2026-08-21", targetDate: "2027-02-01", minutes: 15 });
   assert.equal(future.ok, false);
   assert.match(future.error ?? "", /dias já realizados/);
   const openDay = actions.useRealizedCredit({ sourceDate: "2026-08-21", targetDate: TODAY, minutes: 15 });
