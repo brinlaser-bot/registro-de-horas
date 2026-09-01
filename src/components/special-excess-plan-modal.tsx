@@ -24,6 +24,11 @@ function translatePlanError(code: string | undefined, fallback?: string): string
   switch (code) {
     case "destination-not-future":
       return "Só é possível reservar [10+] para um dia futuro.";
+    // 4D.3: gate canônico de base efetiva do dia futuro.
+    case "destination-no-planning-capacity":
+      return "Este dia não tem jornada base para completar (feriado, abono, folga ou afastamento) — não aceita planejamento de [10+].";
+    case "requested-exceeds-planning-capacity":
+      return "Esse valor ultrapassa a base efetiva do dia escolhido.";
     case "insufficient-special-balance":
       return "Não há saldo [10+] disponível suficiente neste ciclo para essa reserva.";
     case "cross-cycle":

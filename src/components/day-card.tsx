@@ -154,6 +154,11 @@ interface Props {
   /** 4B: abre o modal "Planejar uso de [10+]" — só passado para dia FUTURO
    *  (a regra destinationDate > hoje continua soberana no store 4A). */
   onPlanSpecial?: () => void;
+  /** 4D.3: BASE EFETIVA do dia futuro (companyDayContext.effectiveExpected —
+   *  resolução central). ≤ 0 ⇒ sem capacidade de planejamento [10+]: o CTA
+   *  "Planejar uso de [10+]" e o convite "Planejar mais" desaparecem (o
+   *  store 4A continua a barreira final). undefined = sem restrição. */
+  planningCapacityMinutes?: number;
   /** 4C: abre o modal "Usar planejamento [10+]" para o plano informado. */
   onResolvePlan?: (planId: string) => void;
 }
@@ -186,6 +191,7 @@ export function DayCard({
   onCompleteJornada,
   specialPlans,
   onPlanSpecial,
+  planningCapacityMinutes,
   onResolvePlan,
 }: Props) {
   const specialActions = useSpecialPunchActions();
@@ -631,6 +637,9 @@ export function DayCard({
               <SpecialExcessPlanSummary
                 plans={specialPlans}
                 isFuture={futureDay}
+                // 4D.3: sem base efetiva positiva, o card não convida a
+                // reservar mais (reservas/cancelamento continuam visíveis).
+                planCapacityMinutes={planningCapacityMinutes ?? null}
                 // 4C: decisão lida dos motores canônicos (specialExcess —
                 // 3A/3G); null quando o dia não tem visão válida (incompleto,
                 // inconsistente, congelado) → "Usar planejamento" oculto.
@@ -646,10 +655,11 @@ export function DayCard({
           )}
 
           {/* 4B — ação discreta de planejamento, SOMENTE para dia FUTURO sem
-              reserva (com reserva, o bloco acima oferece "Planejar mais").
-              A regra destinationDate > hoje continua soberana no store 4A;
-              aqui ela apenas oculta a ação em datas não elegíveis. */}
-          {futureDay && onPlanSpecial && !(specialPlans && specialPlans.length > 0) && (
+              reserva e com BASE EFETIVA POSITIVA (4D.3: feriado/abono
+              integral, férias/afastamento integral, fim de semana comum e
+              COMPENSAR com base 0 não convidam a reservar — a regra
+              destinationDate > hoje continua soberana no store 4A). */}
+          {futureDay && onPlanSpecial && (planningCapacityMinutes === undefined || planningCapacityMinutes > 0) && !(specialPlans && specialPlans.length > 0) && (
             <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2.5">
               <Badge tone="violet" className="shrink-0 py-1">
                 <CalendarClock size={13} aria-hidden /> [10+]

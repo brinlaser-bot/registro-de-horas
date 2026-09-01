@@ -25,6 +25,9 @@ interface Props {
   onResolvePlan?: (planId: string) => void;
   /** Abre o modal "Planejar uso de [10+]" (só passado quando o dia é futuro). */
   onPlan?: () => void;
+  /** 4D.3: base efetiva do destino (companyDayContext.effectiveExpected).
+   *  ≤ 0 ⇒ sem convite a reservar mais (reservas existentes continuam). */
+  planCapacityMinutes?: number | null;
   /**
    * 4C.1B — BANCO [10+] DISPONÍVEL do ciclo (fonte canônica 3C, lida da
    * MESMA visão do dia usada pelos motores). `null` quando não há visão →
@@ -54,7 +57,10 @@ interface Props {
  * - "Concluir"/conversão automática NÃO existem nesta UI (a resolução é
  *   sempre uma decisão explícita pelo modal; PLANO → USO no store 4C).
  */
-export function SpecialExcessPlanSummary({ plans, isFuture, eligible = null, remainingNeedMinutes = null, onResolvePlan, onPlan, bankAvailableMinutes = null }: Props) {
+export function SpecialExcessPlanSummary({ plans, isFuture, eligible = null, remainingNeedMinutes = null, onResolvePlan, onPlan, bankAvailableMinutes = null, planCapacityMinutes = null }: Props) {
+  // 4D.3: capacidade canônica de planejamento do dia futuro (null = sem
+  // restrição conhecida — comportamento anterior).
+  const canPlanMore = planCapacityMinutes === null || planCapacityMinutes > 0;
   const toast = useToast();
   const [cancelTarget, setCancelTarget] = useState<SpecialExcessPlan | null>(null);
   const [busy, setBusy] = useState(false);
@@ -109,7 +115,15 @@ export function SpecialExcessPlanSummary({ plans, isFuture, eligible = null, rem
             </>
           )}
         </p>
-        {isFuture && onPlan && bankAvailableMinutes === 0 && (
+        {isFuture && onPlan && !canPlanMore && (
+          <span
+            className="inline-flex cursor-not-allowed items-center gap-1.5 rounded-lg border border-slate-200 bg-white/60 px-2.5 py-1.5 text-[11px] font-bold text-slate-400"
+            title="Este dia não tem jornada base para completar com [10+]."
+          >
+            <CalendarClock size={13} aria-hidden /> Sem base para [10+]
+          </span>
+        )}
+        {isFuture && onPlan && canPlanMore && bankAvailableMinutes === 0 && (
           <span
             className="inline-flex cursor-not-allowed items-center gap-1.5 rounded-lg border border-slate-200 bg-white/60 px-2.5 py-1.5 text-[11px] font-bold text-slate-400"
             title="O Banco [10+] deste ciclo não tem saldo disponível para novas reservas."
@@ -117,7 +131,7 @@ export function SpecialExcessPlanSummary({ plans, isFuture, eligible = null, rem
             <CalendarClock size={13} aria-hidden /> Sem saldo [10+] disponível
           </span>
         )}
-        {isFuture && onPlan && bankAvailableMinutes !== 0 && (
+        {isFuture && onPlan && canPlanMore && bankAvailableMinutes !== 0 && (
           <Button
             size="sm"
             variant="secondary"

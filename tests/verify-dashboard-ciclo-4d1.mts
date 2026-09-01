@@ -263,7 +263,18 @@ check("TESTE 12 DE 12 — Mobile de Dias recentes preservado + desktop em grid c
   const status = execSync("git status --porcelain", { cwd: root }).toString().split("\n");
   const tocados = status.filter((l) => l.trim().length > 0).map((l) => l.slice(3).trim());
   assert.ok(!tocados.some((f) => f.includes("compensacoes") || f.includes("central")), "Central de Horas sem diff");
-  assert.ok(!tocados.some((f) => f.includes("src/lib/store.ts") || f.includes("backup.ts")), "store/backup intocados (100% derivado)");
+  assert.ok(!tocados.some((f) => f.includes("backup.ts")), "backup intocado (100% derivado)");
+  // 4D.3: store só de forma aditiva (gate canônico de planejamento):
+  const storeDiff12 = execSync("git diff HEAD -- src/lib/store.ts", { cwd: root }).toString();
+  const storeRemovidas12 = storeDiff12.split("\n").filter((l) => l.startsWith("-") && !l.startsWith("---"));
+  // Única remoção sancionada: o fim do union de códigos (gate 4D.3):
+  assert.ok(
+    storeRemovidas12.every((l) => l.includes('"invalid-plan"')),
+    "store: nenhuma linha removida além do fim do union de códigos",
+  );
+  if (storeDiff12.trim().length > 0) {
+    assert.ok(storeDiff12.includes("destination-no-planning-capacity"), "store: única mudança permitida é o gate canônico 4D.3");
+  }
   assert.ok(!tocados.some((f) => f.startsWith("src/lib/special-excess")), "libs de [10+] intocadas");
 });
 

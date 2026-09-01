@@ -216,6 +216,10 @@ function RegistrosBody() {
         return {
           date,
           ctx: cctx.ctx,
+          // 4D.3: BASE EFETIVA canônica do dia (resolução central) — gate do
+          // planejamento [10+] em dias futuros especiais (feriado/abono/
+          // folga/afastamento/COMPENSAR base 0 ⇒ 0; parcial ⇒ a própria base).
+          planningCapacityMinutes: cctx.effectiveExpected,
           calendarLabel: cctx.label,
           falta: falta
             ? { id: falta.id, status: faltaStatus!, jornadaMinutes: cctx.effectiveExpected }
@@ -728,7 +732,7 @@ function RegistrosBody() {
             </div>
           )}
           <div className={missingOnly || pendingOnly ? "space-y-4" : "space-y-2"}>
-          {listedDays.map(({ date, balanceView, displayDay, absence, calendarLabel, falta, workedInAbonoMinutes, abonoParcial, missingExpected, historicalEmpty, compact, specialExcess, specialPlans }) => (
+          {listedDays.map(({ date, balanceView, displayDay, absence, calendarLabel, falta, workedInAbonoMinutes, abonoParcial, missingExpected, historicalEmpty, compact, specialExcess, specialPlans, planningCapacityMinutes }) => (
             <DayCard
               key={date}
               result={displayDay}
@@ -768,8 +772,10 @@ function RegistrosBody() {
               onCompleteJornada={(d) => setCompleteDate(d)}
               specialPlans={specialPlans}
               // 4B: a ação de planejar só é oferecida para dia FUTURO
-              // (destinationDate > hoje); o store 4A continua o gate final.
+              // (destinationDate > hoje); 4D.3 exige base efetiva positiva e
+              // o store 4A continua o gate final.
               onPlanSpecial={date > todayStr ? () => setPlanDate(date) : undefined}
+              planningCapacityMinutes={planningCapacityMinutes}
               // 4C: resolução individual do plano (modal "Usar planejamento").
               onResolvePlan={(planId) => setResolvePlanId(planId)}
             />

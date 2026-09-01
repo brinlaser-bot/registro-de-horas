@@ -382,7 +382,19 @@ check("TESTE 18 DE 20 — Rastreabilidade [10+]: reflow mobile sem mudar dados/r
   // Nenhuma regra/lib alterada:
   const diff = execSync("git diff --name-only", { cwd: root }).toString().split("\n");
   assert.ok(!diff.some((f) => f.startsWith("src/lib/special-excess")), "nenhuma LIB de [10+] alterada (o componente de apresentação é parte da 4D)");
-  assert.ok(!diff.some((f) => f.includes("store.ts")), "store não alterado");
+  // 4D.3: o store pode mudar SOMENTE de forma aditiva (gate canônico de
+  // planejamento) — nenhuma linha removida, nenhum motor reescrito:
+  const storeDiff18 = execSync("git diff HEAD -- src/lib/store.ts", { cwd: root }).toString();
+  const storeRemovidas = storeDiff18.split("\n").filter((l) => l.startsWith("-") && !l.startsWith("---"));
+  // Única remoção sancionada: o fim do union de códigos (para acrescentar os
+  // dois códigos do gate 4D.3). Qualquer outra remoção é rejeitada:
+  assert.ok(
+    storeRemovidas.every((l) => l.includes('"invalid-plan"')),
+    "store: nenhuma linha removida além do fim do union de códigos",
+  );
+  if (storeDiff18.trim().length > 0) {
+    assert.ok(storeDiff18.includes("destination-no-planning-capacity"), "store: única mudança permitida é o gate canônico 4D.3");
+  }
 });
 
 check("TESTE 19 DE 20 — Scroll reset CENTRALIZADO: troca de rota sim; interação na mesma rota não", () => {

@@ -85,7 +85,9 @@ export interface ActionResult {
     | "plan-not-found"
     | "plan-already-cancelled"
     | "plan-already-concluded"
-    | "invalid-plan";
+    | "invalid-plan"
+    | "destination-no-planning-capacity"
+    | "requested-exceeds-planning-capacity";
   /** Capacidade disponível no dia de destino (quando code = over-capacity). */
   available?: number;
   limitMinutes?: number;
@@ -2687,6 +2689,39 @@ export const actions = {
             return d;
           }
         }
+      }
+      // 4D.3 — GATE CANÔNICO DE PLANEJAMENTO: um futuro só aceita reserva
+      // [10+] quando tem BASE EFETIVA POSITIVA que possa receber o uso. A
+      // capacidade vem da resolução central (companyDayContext.effectiveExpected)
+      // — nenhuma regra paralela: feriado/abono integral, férias/afastamento
+      // integral, fim de semana comum e COMPENSAR com jornadaEsperada 0 têm
+      // base 0 ⇒ proibidos (a obrigação de calendário é OUTRA grandeza e
+      // nunca vira necessidade de [10+]). Jornada parcial (ex.: Cinzas 4h)
+      // limita a reserva à própria base. A UI nunca é a única barreira.
+      const planningCapacityMinutes = companyDayContext(
+        p.destinationDate,
+        d.entries,
+        d.absences,
+        d.companyCalendars,
+        settingsOf(d.user),
+      ).effectiveExpected;
+      if (planningCapacityMinutes <= 0) {
+        result = {
+          ok: false,
+          code: "destination-no-planning-capacity",
+          error:
+            "Este dia futuro não tem jornada base para completar (feriado, abono, folga ou afastamento) — não aceita planejamento de [10+].",
+        };
+        return d;
+      }
+      if (requestedTotal > planningCapacityMinutes) {
+        result = {
+          ok: false,
+          code: "requested-exceeds-planning-capacity",
+          error: `Este dia aceita no máximo ${formatMinutes(planningCapacityMinutes)} de planejamento [10+] (base efetiva do dia).`,
+          limitMinutes: planningCapacityMinutes,
+        };
+        return d;
       }
       // Banco canônico 3C com USOS + RESERVAS ativas (disponível líquido, §10/§11).
       const bank = specialBankOf(d, p.destinationDate, asOf, null);

@@ -135,9 +135,11 @@ function loadRichState() {
   // PLANO PLANNED (reserva futura):
   ok(actions.createSpecialExcessPlan({ destinationDate: "2026-09-15", minutes: 30, selectionMode: "automatic", asOfDate: "2026-08-30", now: 4000 }), "plano 15/09");
   // PLANO CANCELLED:
-  ok(actions.createSpecialExcessPlan({ destinationDate: "2026-09-20", minutes: 30, selectionMode: "automatic", asOfDate: "2026-08-30", now: 5000 }), "plano 20/09");
+  // 4D.3: destino em dia ÚTIL (domingo 20/09 não tem base efetiva e deixou
+  // de aceitar planejamento — o exemplo da sentinela move para 22/09):
+  ok(actions.createSpecialExcessPlan({ destinationDate: "2026-09-22", minutes: 30, selectionMode: "automatic", asOfDate: "2026-08-30", now: 5000 }), "plano 22/09");
   const planoCanceladoId = (getAppData().specialExcessPlans ?? []).at(-1)!.id;
-  ok(actions.cancelSpecialExcessPlan({ id: planoCanceladoId, now: 5500 }), "cancela plano 20/09");
+  ok(actions.cancelSpecialExcessPlan({ id: planoCanceladoId, now: 5500 }), "cancela plano 22/09");
 }
 
 const d = () => getAppData();

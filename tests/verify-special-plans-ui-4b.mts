@@ -135,8 +135,10 @@ check("TESTE 01 DE 14 — ENTRADA SOMENTE FUTURA", () => {
     "ação só para destinationDate > hoje civil");
   assert.ok(page.includes("<SpecialExcessPlanModal"), "modal próprio montado em Registros");
   const card = src("src/components/day-card.tsx");
-  assert.ok(card.includes("futureDay && onPlanSpecial && !(specialPlans && specialPlans.length > 0)"),
-    "card exibe 'Planejar uso de [10+]' só em dia futuro sem reserva");
+  // 4D.3: além de futuro e sem reserva, o card exige BASE EFETIVA positiva
+  // (companyDayContext.effectiveExpected via planningCapacityMinutes):
+  assert.ok(card.includes("futureDay && onPlanSpecial && (planningCapacityMinutes === undefined || planningCapacityMinutes > 0) && !(specialPlans && specialPlans.length > 0)"),
+    "card exibe 'Planejar uso de [10+]' só em dia futuro, sem reserva e com base efetiva");
   assert.ok(card.includes("Planejar uso de [10+]"), "rótulo da ação");
   // Funcional: o store continua o gate soberano (hoje/passado rejeitados).
   setState([...gen30("2026-08-28")]);
