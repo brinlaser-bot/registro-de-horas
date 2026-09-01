@@ -97,11 +97,13 @@ function fmtSigned(v: number): string {
 }
 
 /**
- * ETAPA 4V — VISÃO GERAL como visão geral de verdade: hoje, pendências,
- * resumo rápido (saldo regular · projeção · Banco [10+]) e dias recentes.
+ * ETAPA 4V/4D/4D.1 — VISÃO GERAL como visão geral de verdade: ordem
+ * saudação → Atenção agora (condicional) → REGISTRO DE HOJE → Situação do
+ * Ciclo → Período atual → O que vem pela frente → Dias recentes.
  * A página apenas APRESENTA valores já derivados pelas fontes canônicas
  * (dayBalanceContribution, buildResumoPeriodView 3A, buildSpecialExcessBank
- * 3C) — nenhuma nova fórmula. O gerenciamento detalhado permanece nas
+ * 3C, cycle-dashboard/calendar-forecast 4D) — nenhuma nova fórmula. O
+ * gerenciamento detalhado permanece nas
  * páginas próprias (Central de Horas, Registros, Resumo).
  */
 export default function DashboardPage() {
@@ -245,9 +247,12 @@ export default function DashboardPage() {
     [todayStr, entries, absences, companyCalendars, settings, faltas, user, specialExcessUses],
   );
 
-  /* 4D (PARTE F) — PREVISÃO DO CALENDÁRIO: obrigações COMPENSAR futuras do
-   * ciclo ainda não QUITADAS (cobertura concluída reduz; planejada NÃO —
-   * PLANEJADO ≠ REALIZADO). Helper puro calendar-forecast. */
+  /* 4D (PARTE F) / 4D.1 (PARTES A/D/E) — PREVISÃO DO CALENDÁRIO: obrigações
+   * COMPENSAR do ciclo ainda não QUITADAS — FUTURAS, de HOJE e PASSADAS EM
+   * ABERTO (a data do evento diz quando a folga acontece, não quando a
+   * obrigação deixa de existir). Sábado/domingo com entrada EXPLÍCITA é
+   * respeitado; cobertura concluída reduz, planejada NÃO (PLANEJADO ≠
+   * REALIZADO). Helper puro calendar-forecast. */
   const forecast = useMemo(
     () =>
       buildCalendarForecast({
@@ -259,10 +264,20 @@ export default function DashboardPage() {
     [companyCalendars, compensations, cycleSituation.cycle, todayStr],
   );
 
-  /* 4D (PARTE G) — PREVISÃO DO CICLO = saldo projetado do ciclo + impactos
-   * futuros conhecidos ainda descobertos. Rotulada como PREVISÃO — nunca
-   * saldo factual/atual/realizado. */
-  const forecastBalanceMinutes = cycleSituation.projectedBalanceMinutes - forecast.uncoveredFutureMinutes;
+  /* 4D.1 (PARTE C) — PREVISÃO DO CICLO = saldo projetado atual do ciclo −
+   * obrigações de calendário ainda descobertas (futuro + hoje + passado em
+   * aberto). Rotulada como PREVISÃO — nunca saldo factual/atual/realizado. */
+  const forecastBalanceMinutes = cycleSituation.projectedBalanceMinutes - forecast.uncoveredMinutes;
+
+  /* 4D.1 (PARTE F) — "Atenção agora" pode avisar obrigação de calendário
+   * de HOJE ou PASSADA ainda em aberto (sempre total resumido e sempre com
+   * o nome do que é — obrigação de calendário, não saldo do dia). */
+  const calendarTodayUncoveredMinutes = forecast.events
+    .filter((e) => e.status === "today")
+    .reduce((s, e) => s + e.uncoveredMinutes, 0);
+  const calendarOverdueUncoveredMinutes = forecast.events
+    .filter((e) => e.status === "overdue")
+    .reduce((s, e) => s + e.uncoveredMinutes, 0);
 
   /* 4D (PARTE I) — "Atenção agora": somente pendências factuais canônicas. */
   const pendingPlansCount = useMemo(
@@ -529,10 +544,12 @@ export default function DashboardPage() {
         </Link>
       </div>
 
-      {/* B. ATENÇÃO AGORA (4D, Parte I) — SOMENTE pendências factuais
-          canônicas que exigem decisão. Sem linguagem do motor antigo
-          ("déficit a compensar"/"compensações pendentes"). */}
-      {(pendingPunchesCount > 0 || pendingPlansCount > 0) && (
+      {/* B. ATENÇÃO AGORA (4D, Parte I / 4D.1, Parte F) — SOMENTE decisões
+          reais: pendências factuais canônicas + obrigação de calendário de
+          HOJE ou PASSADA ainda em aberto (sempre como "obrigação de
+          calendário", nunca como saldo negativo do dia). Sem tocar o
+          saldo factual. */}
+      {(pendingPunchesCount > 0 || pendingPlansCount > 0 || calendarTodayUncoveredMinutes > 0 || calendarOverdueUncoveredMinutes > 0) && (
         <div className="rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3">
           <p className="text-sm font-extrabold text-amber-800">⚠ Atenção agora</p>
           <ul className="mt-1 space-y-1 text-xs font-medium text-amber-700">
@@ -552,112 +569,17 @@ export default function DashboardPage() {
                 </Link>
               </li>
             )}
+            {calendarTodayUncoveredMinutes > 0 && (
+              <li>Hoje há {formatMinutes(calendarTodayUncoveredMinutes)} de calendário ainda a compensar.</li>
+            )}
+            {calendarOverdueUncoveredMinutes > 0 && (
+              <li>Há {formatMinutes(calendarOverdueUncoveredMinutes)} de obrigação de calendário pendente.</li>
+            )}
           </ul>
         </div>
       )}
 
-      {/* C. SITUAÇÃO DO CICLO (4D, Partes B/C/E) — três grandezas NUNCA
-          misturadas: FACTUAL (sem [10+]) · PROJETADO (com [10+] já aplicado)
-          · BANCO [10+] DISPONÍVEL. Título derivado do ciclo real. */}
-      <div>
-        <h3 className="mb-3 text-sm font-extrabold uppercase tracking-wider text-slate-400">
-          Ciclo {cycleSituation.cycle}
-        </h3>
-        <div className="grid gap-2 sm:grid-cols-3 sm:gap-3">
-          <StatCard
-            label="Saldo factual"
-            value={fmtSigned(cycleSituation.factualBalanceMinutes)}
-            sub="Sem [10+]"
-            tone={cycleSituation.factualBalanceMinutes > 0 ? "emerald" : cycleSituation.factualBalanceMinutes < 0 ? "rose" : "slate"}
-            icon={<Wallet size={16} />}
-          />
-          <StatCard
-            label="Saldo projetado"
-            value={fmtSigned(cycleSituation.projectedBalanceMinutes)}
-            sub="Com [10+] já aplicado"
-            tone={cycleSituation.projectedBalanceMinutes > 0 ? "indigo" : cycleSituation.projectedBalanceMinutes < 0 ? "rose" : "slate"}
-            icon={<TrendingUp size={16} />}
-          />
-          <StatCard
-            label="BANCO [10+] DISPONÍVEL"
-            value={formatMinutes(specialBank.availableMinutes)}
-            sub={specialBank.reservedMinutes > 0 ? `${formatMinutes(specialBank.reservedMinutes)} reservados` : undefined}
-            tone={specialBank.availableMinutes > 0 ? "violet" : "slate"}
-            icon={<Zap size={16} />}
-          />
-        </div>
-      </div>
-
-      {/* D. PERÍODO ATUAL (4D, Parte D) — factual e projetado da MESMA fonte
-          canônica do Resumo (buildResumoPeriodView — nada recalculado aqui),
-          com o fechamento derivado do período real em destaque. */}
-      <div>
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
-          <h3 className="text-sm font-extrabold uppercase tracking-wider text-slate-400">
-            Período atual — {formatDateShortBR(period.from)} a {formatDateShortBR(period.to)}
-          </h3>
-          <Badge tone="slate">Fecha em {formatDateShortBR(period.to)}</Badge>
-        </div>
-        <div className="grid gap-2 sm:grid-cols-2 sm:gap-3">
-          <StatCard
-            label="Saldo factual do período"
-            value={fmtSigned(resumoView.cards.regularBalanceMinutes)}
-            sub="Sem [10+] · a mesma fonte do Resumo"
-            tone={resumoView.cards.regularBalanceMinutes > 0 ? "emerald" : resumoView.cards.regularBalanceMinutes < 0 ? "rose" : "slate"}
-            icon={<Wallet size={16} />}
-          />
-          <StatCard
-            label="Saldo projetado do período"
-            value={fmtSigned(projection.projectedBalanceMinutes)}
-            sub={
-              projApplied > 0
-                ? `Com [10+] já aplicado · inclui ${formatMinutes(projApplied)} em ${projAppliedDays} dia(s).`
-                : "Com [10+] já aplicado · nenhum uso ativo ainda."
-            }
-            tone={projection.projectedBalanceMinutes > 0 ? "indigo" : projection.projectedBalanceMinutes < 0 ? "rose" : "slate"}
-            icon={<TrendingUp size={16} />}
-          />
-        </div>
-      </div>
-
-      {/* E. O QUE VEM PELA FRENTE (4D, Partes F/G) — impactos futuros
-          CONHECIDOS do calendário e a PREVISÃO do ciclo (projetado + impacto
-          descoberto). PREVISÃO ≠ saldo factual/atual/realizado. Estado neutro
-          quando não há obrigações futuras (nunca inventar zero negativo). */}
-      <div>
-        <h3 className="mb-3 text-sm font-extrabold uppercase tracking-wider text-slate-400">
-          O que vem pela frente
-        </h3>
-        {forecast.futureEventCount > 0 ? (
-          <>
-            <div className="grid gap-2 sm:grid-cols-2 sm:gap-3">
-              <StatCard
-                label="Impacto futuro do calendário"
-                value={fmtSigned(-forecast.uncoveredFutureMinutes)}
-                sub={`${forecast.futureEventCount} evento(s) a compensar · desconta o já quitado`}
-                tone={forecast.uncoveredFutureMinutes > 0 ? "rose" : "slate"}
-                icon={<CalendarClock size={16} />}
-              />
-              <StatCard
-                label="Previsão do ciclo"
-                value={fmtSigned(forecastBalanceMinutes)}
-                sub="Saldo projetado + impactos futuros conhecidos"
-                tone={forecastBalanceMinutes > 0 ? "emerald" : forecastBalanceMinutes < 0 ? "rose" : "slate"}
-                icon={<TrendingUp size={16} />}
-              />
-            </div>
-            <p className="mt-2 text-[11px] font-medium text-slate-400">
-              Considera eventos futuros já conhecidos do calendário. Dias normais futuros presumem jornada cumprida; planejamentos de compensação não alteram estes números.
-            </p>
-          </>
-        ) : (
-          <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-500">
-            Sem impactos futuros conhecidos do calendário neste ciclo.
-          </div>
-        )}
-      </div>
-
-      {/* B. REGISTRO DE HOJE — Ponto + Assistente de jornada em UM ÚNICO card
+      {/* C. REGISTRO DE HOJE (4D.1, Parte G — logo após a saudação/atenção) — Ponto + Assistente de jornada em UM ÚNICO card
           (preservado integralmente pela 4V: batidas, jornada em andamento/
           encerrada, saldo do dia, botões e ações já existentes). */}
       <Card
@@ -773,6 +695,114 @@ export default function DashboardPage() {
         )}
       </Card>
 
+      {/* D. SITUAÇÃO DO CICLO (4D, Partes B/C/E) — três grandezas NUNCA
+          misturadas: FACTUAL (sem [10+]) · PROJETADO (com [10+] já aplicado)
+          · BANCO [10+] DISPONÍVEL. Título derivado do ciclo real. */}
+      <div>
+        <h3 className="mb-2 text-sm font-extrabold uppercase tracking-wider text-slate-400">
+          Ciclo {cycleSituation.cycle}
+        </h3>
+        <div className="grid gap-2 sm:grid-cols-3 sm:gap-3">
+          <StatCard
+            compact
+            label="Saldo factual"
+            value={fmtSigned(cycleSituation.factualBalanceMinutes)}
+            sub="Sem [10+]"
+            tone={cycleSituation.factualBalanceMinutes > 0 ? "emerald" : cycleSituation.factualBalanceMinutes < 0 ? "rose" : "slate"}
+            icon={<Wallet size={16} />}
+          />
+          <StatCard
+            compact
+            label="Saldo projetado"
+            value={fmtSigned(cycleSituation.projectedBalanceMinutes)}
+            sub="Com [10+] já aplicado"
+            tone={cycleSituation.projectedBalanceMinutes > 0 ? "indigo" : cycleSituation.projectedBalanceMinutes < 0 ? "rose" : "slate"}
+            icon={<TrendingUp size={16} />}
+          />
+          <StatCard
+            compact
+            label="BANCO [10+] DISPONÍVEL"
+            value={formatMinutes(specialBank.availableMinutes)}
+            sub={specialBank.reservedMinutes > 0 ? `${formatMinutes(specialBank.reservedMinutes)} reservados` : undefined}
+            tone={specialBank.availableMinutes > 0 ? "violet" : "slate"}
+            icon={<Zap size={16} />}
+          />
+        </div>
+      </div>
+
+      {/* E. PERÍODO ATUAL (4D, Parte D) — factual e projetado da MESMA fonte
+          canônica do Resumo (buildResumoPeriodView — nada recalculado aqui),
+          com o fechamento derivado do período real em destaque. */}
+      <div>
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+          <h3 className="text-sm font-extrabold uppercase tracking-wider text-slate-400">
+            Período atual — {formatDateShortBR(period.from)} a {formatDateShortBR(period.to)}
+          </h3>
+          <Badge tone="slate">Fecha em {formatDateShortBR(period.to)}</Badge>
+        </div>
+        <div className="grid gap-2 sm:grid-cols-2 sm:gap-3">
+          <StatCard
+            compact
+            label="Saldo factual do período"
+            value={fmtSigned(resumoView.cards.regularBalanceMinutes)}
+            sub="Sem [10+] · a mesma fonte do Resumo"
+            tone={resumoView.cards.regularBalanceMinutes > 0 ? "emerald" : resumoView.cards.regularBalanceMinutes < 0 ? "rose" : "slate"}
+            icon={<Wallet size={16} />}
+          />
+          <StatCard
+            compact
+            label="Saldo projetado do período"
+            value={fmtSigned(projection.projectedBalanceMinutes)}
+            sub={
+              projApplied > 0
+                ? `Com [10+] já aplicado · inclui ${formatMinutes(projApplied)} em ${projAppliedDays} dia(s).`
+                : "Com [10+] já aplicado · nenhum uso ativo ainda."
+            }
+            tone={projection.projectedBalanceMinutes > 0 ? "indigo" : projection.projectedBalanceMinutes < 0 ? "rose" : "slate"}
+            icon={<TrendingUp size={16} />}
+          />
+        </div>
+      </div>
+
+      {/* F. O QUE VEM PELA FRENTE (4D, Partes F/G · 4D.1, Partes A–E) — impactos futuros
+          CONHECIDOS do calendário e a PREVISÃO do ciclo (projetado + impacto
+          descoberto). PREVISÃO ≠ saldo factual/atual/realizado. Estado neutro
+          quando não há obrigações futuras (nunca inventar zero negativo). */}
+      <div>
+        <h3 className="mb-2 text-sm font-extrabold uppercase tracking-wider text-slate-400">
+          O que vem pela frente
+        </h3>
+        {forecast.openEventCount > 0 ? (
+          <>
+            <div className="grid gap-2 sm:grid-cols-2 sm:gap-3">
+              <StatCard
+                compact
+                label="Obrigações de calendário a compensar"
+                value={fmtSigned(-forecast.uncoveredMinutes)}
+                sub={`Inclui obrigações futuras e ainda não concluídas · ${forecast.openEventCount} evento(s)`}
+                tone={forecast.uncoveredMinutes > 0 ? "rose" : "slate"}
+                icon={<CalendarClock size={16} />}
+              />
+              <StatCard
+                compact
+                label="Previsão do ciclo"
+                value={fmtSigned(forecastBalanceMinutes)}
+                sub="Saldo projetado − obrigações em aberto"
+                tone={forecastBalanceMinutes > 0 ? "emerald" : forecastBalanceMinutes < 0 ? "rose" : "slate"}
+                icon={<TrendingUp size={16} />}
+              />
+            </div>
+            <p className="mt-1.5 text-[11px] font-medium text-slate-400">
+              Considera eventos de calendário já conhecidos. Dias normais futuros presumem jornada cumprida.
+            </p>
+          </>
+        ) : (
+          <div className="rounded-2xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm font-medium text-slate-500">
+            Nenhuma obrigação de calendário em aberto neste ciclo.
+          </div>
+        )}
+      </div>
+
       {/* Dias recentes */}
       <Card title="Dias recentes" subtitle="Seus últimos dias com registro">
         {recentDays.length === 0 ? (
@@ -829,8 +859,11 @@ export default function DashboardPage() {
                       {chip}
                     </div>
                   </div>
-                  {/* DESKTOP: linha única com colunas alinhadas */}
-                  <div className="hidden items-center gap-3 sm:grid sm:grid-cols-[7.5rem_1fr_6rem_auto]">
+                  {/* DESKTOP: MESMAS colunas em todas as linhas —
+                      [Dia/Data · Horas · Saldo · Status] com larguras fixas,
+                      saldo tabular alinhado e status sempre na mesma posição
+                      (4D.1, Parte I). */}
+                  <div className="hidden items-center sm:grid sm:grid-cols-[7.5rem_9rem_1fr_9rem]">
                     <span className="text-sm font-bold text-slate-800">
                       {weekdayShort(d.date).replace(".", "")}
                       <span className="ml-1.5 font-medium text-slate-400">{formatDateShortBR(d.date)}</span>
@@ -838,19 +871,21 @@ export default function DashboardPage() {
                     <span className="text-sm font-extrabold tabular-nums text-slate-900">
                       {worked} <span className="text-xs font-medium text-slate-400">trabalhadas</span>
                     </span>
-                    {frozen ? (
-                      <span className="w-20 text-right text-xs font-bold text-slate-300">—</span>
-                    ) : (
-                      <span
-                        className={`w-20 text-right text-xs font-bold tabular-nums ${
-                          bal > 0 ? "text-emerald-600" : bal < 0 ? "text-rose-600" : "text-slate-400"
-                        }`}
-                      >
-                        {bal >= 0 ? "+" : ""}
-                        {formatMinutes(bal)}
-                      </span>
-                    )}
-                    {chip}
+                    <span>
+                      {frozen ? (
+                        <span className="text-xs font-bold text-slate-300">—</span>
+                      ) : (
+                        <span
+                          className={`text-xs font-bold tabular-nums ${
+                            bal > 0 ? "text-emerald-600" : bal < 0 ? "text-rose-600" : "text-slate-400"
+                          }`}
+                        >
+                          {bal >= 0 ? "+" : ""}
+                          {formatMinutes(bal)}
+                        </span>
+                      )}
+                    </span>
+                    <span className="justify-self-start">{chip}</span>
                   </div>
                 </Link>
               );

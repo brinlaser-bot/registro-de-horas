@@ -183,15 +183,17 @@ check("H. Registro de hoje: ponto+assistente em UM card único, antes do Banco d
   const s = pageSrc.indexOf("<SmartExit");
   const card = pageSrc.indexOf('title="Registro de hoje"');
   // 4V: HourBankCard e StatCard "Hoje" saíram da Visão Geral (reforma UI-only).
-  // 4D: ordem agora é saudação → Atenção/Ciclo/Período → O que vem pela
-  // frente → Registro de hoje → Dias recentes (o "Resumo rápido" saiu).
-  const frente4d = pageSrc.indexOf("O que vem pela frente");
+  // 4D.1: ordem é saudação → Atenção → REGISTRO DE HOJE → Ciclo/Período →
+  // O que vem pela frente → Dias recentes (o "Resumo rápido" saiu na 4D).
+  // Âncora precisa: o comentário F. da seção (não o texto do cabeçalho).
+  const frente4d = pageSrc.indexOf("F. O QUE VEM PELA FRENTE");
+  const registro4d1 = pageSrc.indexOf("C. REGISTRO DE HOJE");
   const recentes4v = pageSrc.indexOf('title="Dias recentes"');
   assert.equal(pageSrc.indexOf("<QuickPunch", q + 1), -1, "uma única instância (§7: sem duplicar componentes)");
   assert.equal(pageSrc.indexOf("<SmartExit", s + 1), -1);
   assert.ok(pageSrc.includes("<HourBankCard") === false, "4V: HourBankCard não renderiza mais na Visão Geral");
-  assert.ok(frente4d > 0 && frente4d < card, "4D: O que vem pela frente antes do Registro de hoje");
-  assert.ok(card < q && q < s && s < recentes4v, "4D: … Registro de hoje (QuickPunch/Assistente) → Dias recentes");
+  assert.ok(registro4d1 > 0 && registro4d1 < card, "4D.1: bloco do Registro de hoje logo após a atenção");
+  assert.ok(card < q && q < s && s < frente4d && frente4d < recentes4v, "4D.1: Registro de hoje → Ciclo/Período → frente → Dias recentes");
   assert.ok(pageSrc.includes(">Ponto<") || pageSrc.includes("\n              Ponto\n"), "área Ponto rotulada");
   assert.ok(pageSrc.includes("Assistente de jornada"), "área Assistente rotulada");
   assert.ok(quickSrc.includes("embedded"), "QuickPunch em modo embutido (sem Card duplo)");
