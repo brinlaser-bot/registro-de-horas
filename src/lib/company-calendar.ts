@@ -457,8 +457,8 @@ export function companyDayContext(
     //    excedente segue [10+] separado);
     //  · ABONADO integral (jornadaEsperada 0) → 0: feriado/folga abonada
     //    NUNCA exige trabalho (em fim de semana o importador deriva
-    //    horasAbonadas 0 — segue folga; trabalho no dia vira crédito, como
-    //    em qualquer folga).
+    //    horasAbonadas 0 — o dia CONTINUA sendo evento ABONADO; trabalho
+    //    no dia permanece SEM crédito automático — 4D.4.1).
     const requiredWorkMinutes = abonoPartial
       ? expectedRegular
       : expectedRegular > 0
@@ -466,9 +466,18 @@ export function companyDayContext(
         : calendarEntry.tratamento === "COMPENSAR"
           ? calendarioACompensar
           : 0;
-    // ABONADO integral com crédito explícito: saldo regular conhecido 0.
+    // 4D.4.1 — QUALQUER evento EXPLICITAMENTE ABONADO pelo calendário (dia
+    // útil, sábado, domingo ou feriado de base ordinária 0) sem jornada a
+    // cumprir é dia ABONADO NEUTRO: o saldo conhecido é 0 e trabalho no dia
+    // NÃO vira crédito automático enquanto a política da empresa não for
+    // definida (batidas preservadas; aviso no card; o dia de semana comum
+    // SEM abono continua credizando normalmente). Não inventar 8h abonadas
+    // quando o contrato importado legítimamente representa 0h (fim de
+    // semana): a neutralidade vem do evento ABONADO, não de horas inventadas.
     const abonadoIntegral =
-      !abonoPartial && calendarioACompensar === 0 && abonadasMinutes > 0;
+      !abonoPartial &&
+      calendarEntry.tratamento === "ABONADO" &&
+      requiredWorkMinutes === 0;
     const abonoStart = calendarEntry.abonoStart ?? "08:00";
     const abonoEnd = calendarEntry.abonoEnd ?? "12:00";
     // CAP OFICIAL: só o que entra no ponto (min(worked, limite diário)) gera
