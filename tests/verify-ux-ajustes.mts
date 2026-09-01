@@ -141,12 +141,20 @@ check("D. Resumo mantém o Card 'Barras empilhadas do período' completo (height
   assert.ok(short.every((d) => d.date >= "2026-05-01" && d.date <= "2026-05-20"), "período 01/05→20/05 respeitado");
 });
 
+/** Data futura DETERMINÍSTICA para testes: derivada do RELÓGIO REAL em runtime
+ * (hoje + offset), clampada ao fim do ciclo do fixture (2026/2027). Nunca
+ * "vence" como as constantes absolutas (a antiga 2026-09-01 fixa foi alcançada
+ * pelo relógio real e quebrou o teste). */
+function futuraDeterministica(offsetDias = 30, limite = "2027-04-23"): string {
+  const d = new Date(Date.now() + offsetDias * 86400000);
+  const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return iso > limite ? limite : iso;
+}
+
 /* ── E. Regras sensíveis intactas (sanidade central) ── */
 check("E. Falta prevista, batida futura bloqueada e 25/08 sem falta — nada de regra alterada", () => {
   reset();
-  // Data FUTURA absoluta (determinística — a antiga 2026-09-01 foi alcançada
-  // pelo relógio real e deixou de ser futuro; fragilidade temporal relatada):
-  const FUT = "2027-02-01";
+  const FUT = futuraDeterministica();
   assert.equal(actions.addFalta(FUT).ok, true, "falta prevista continua permitida");
   const punch = actions.addEntry({ date: FUT, time: "08:00", type: "entrada", note: null });
   assert.equal(punch.ok, false, "batida futura continua bloqueada");

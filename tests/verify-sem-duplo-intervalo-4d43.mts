@@ -13,10 +13,12 @@
  * entre pares.
  *
  * CORREÇÃO CANÔNICA (mesma fonte, sem fórmula na UI):
- *   autoIntervalRemaining = max(0, exigido − já representado pelos gaps)
- * A política existente permanece: pausa real DENTRO da faixa de almoço
- * neutraliza o fallback; dia sem intervalo representado continua com a
- * dedução automática integral.
+ *   4D.4.3 eliminou a dupla contagem; 4D.4.3.1 definiu a regra FINAL:
+ *   existe ≥1 gap explícito entre pares ⇒ dedução automática 0 (o intervalo
+ *   real é respeitado exatamente — nunca completado, reduzido ou limitado);
+ *   sem gap algum ⇒ fallback integral (política consolidada).
+ * A política existente permanece: dia sem intervalo representado continua
+ * com a dedução automática integral.
  *
  * Executar: TZ=America/Sao_Paulo npx tsx tests/verify-sem-duplo-intervalo-4d43.mts
  */
@@ -98,10 +100,13 @@ check("TESTE 02 DE 09 — Gap real de 60min ⇒ a segunda hora automática NÃO 
   ];
   const analysis = analyzePunches(entries);
   assert.equal(totalRealBreakMinutes(analysis.pairs), 60, "pausa real representada: 1h");
-  assert.equal(lunchDeductionOf(analysis, SETTINGS), 0, "autoIntervalRemaining = max(0, 60 − 60) = 0");
-  // Fórmula canônica na FONTE ÚNICA (sem fórmula paralela na UI):
+  assert.equal(lunchDeductionOf(analysis, SETTINGS), 0, "com intervalo real explícito ⇒ auto 0");
+  // 4D.4.3.1 (SUPERADA a fórmula de complemento max(0, exigido − real) da
+  // 4D.4.3 — expectativa atualizada com justificativa, não reverteda à mão):
+  // a regra canônica agora é "qualquer gap explícito entre pares ⇒ fallback
+  // 0; sem gap ⇒ fallback integral". Âncora da FONTE ÚNICA:
   const fonte = src("src/lib/punches.ts");
-  assert.ok(fonte.includes("required - totalRealBreakMinutes(analysis.pairs)"), "dedução = exigido − já representado");
+  assert.ok(fonte.includes("if (analysis.pairs.length >= 2) return 0;"), "gap explícito ⇒ dedução automática 0");
   const d = computeDay(entries, SETTINGS, undefined, CLK_DIA(dia));
   assert.equal(d.workedMinutes, 450);
 });

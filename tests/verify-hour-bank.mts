@@ -555,12 +555,20 @@ check("W. §30: jornada encerrada com hora extra real ≥ obrigação → conclu
   assert.equal(getAppData().compensations[0].status, "concluida");
 });
 
+/** Data futura DETERMINÍSTICA para testes: derivada do RELÓGIO REAL em runtime
+ * (hoje + offset), clampada ao fim do ciclo do fixture (2026/2027). Nunca
+ * "vence" como as constantes absolutas (a antiga 2026-09-01 fixa foi alcançada
+ * pelo relógio real e quebrou o teste). */
+function futuraDeterministica(offsetDias = 30, limite = "2027-04-23"): string {
+  const d = new Date(Date.now() + offsetDias * 86400000);
+  const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return iso > limite ? limite : iso;
+}
+
 /* ── X. Crédito retroativo fechado → uso IMEDIATO (sem Pendente) ── */
 check("X. quitação com crédito de dia já encerrado nasce CONCLUÍDA; destino futuro rejeitado", () => {
   reset([...dayDef15(), punch("2026-08-22", "08:00", "entrada"), punch("2026-08-22", "08:40", "saida")]);
-  // Destino FUTURO absoluto (determinístico — 2026-09-01 foi alcançada pelo
-  // relógio real; fragilidade temporal relatada):
-  const future = actions.useRealizedCredit({ sourceDate: "2026-08-21", targetDate: "2027-02-01", minutes: 15 });
+  const future = actions.useRealizedCredit({ sourceDate: "2026-08-21", targetDate: futuraDeterministica(), minutes: 15 });
   assert.equal(future.ok, false);
   assert.match(future.error ?? "", /dias já realizados/);
   const openDay = actions.useRealizedCredit({ sourceDate: "2026-08-21", targetDate: TODAY, minutes: 15 });

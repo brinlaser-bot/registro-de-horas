@@ -292,9 +292,11 @@ export function explicitLunchGapMinutes(
 }
 
 /**
- * 4D.4.3 — Σ das pausas REAIS do dia: tempo entre cada SAÍDA e a PRÓXIMA
+ * 4D.4.3.1 — Σ das pausas REAIS do dia: tempo entre cada SAÍDA e a PRÓXIMA
  * ENTRADA (gaps entre pares consecutivos). Esse tempo já está FORA dos
- * segmentos trabalhados — é pausa efetivamente representada pelas batidas.
+ * segmentos trabalhados. DISPONÍVEL para informação/UX — NÃO participa mais
+ * de cálculo de dedução (o intervalo automático não completa, reduz nem
+ * limita intervalos reais).
  */
 export function totalRealBreakMinutes(pairs: PunchPair[]): number {
   if (pairs.length < 2) return 0;
@@ -325,17 +327,20 @@ export function shouldAutoDeductLunch(
 }
 
 export function lunchDeductionOf(analysis: PunchAnalysis, settings: WorkSettings): number {
-  // Política existente preservada: pausa real DENTRO da faixa de almoço
-  // neutraliza o fallback por completo.
-  if (explicitLunchGapMinutes(analysis.pairs, settings) !== null) return 0;
+  /* 4D.4.3.1 — REGRA CANÔNICA: o intervalo automático padrão é SOMENTE
+   * FALLBACK — nunca mínimo, complemento ou limite. Havendo QUALQUER
+   * intervalo real explícito entre pares (SAÍDA → tempo sem trabalho →
+   * PRÓXIMA ENTRADA — 1, 2, 3+ gaps), o sistema respeita EXATAMENTE
+   * esse(s) intervalo(s): o tempo já está fora dos segmentos ⇒ dedução
+   * automática 0 — em qualquer posição em relação à faixa configurada e
+   * independentemente de ser menor, igual ou maior que 1h. Sem NENHUM
+   * intervalo explícito (par único contínuo): aplica o fallback INTEGRAL
+   * da faixa, se os gates consolidados permitirem (shouldAutoDeductLunch).
+   * (A lógica de complemento da 4D.4.3 — max(0, exigido − realBreak) — está
+   * SUPERADA e foi removida.) */
+  if (analysis.pairs.length >= 2) return 0;
   if (!shouldAutoDeductLunch(analysis, settings)) return 0;
-  /* 4D.4.3 — REGRA CANÔNICA: tempo entre SAÍDA e PRÓXIMA ENTRADA já é tempo
-   * não trabalhado (ficou fora dos segmentos). O intervalo automático é
-   * FALLBACK para pausa NÃO representada pelas batidas — deduz apenas o que
-   * falta para completar a pausa mínima, NUNCA o mesmo período duas vezes:
-   *   autoIntervalRemaining = max(0, exigido − já representado pelos gaps). */
-  const required = Math.max(0, toMinutes(settings.lunchEnd) - toMinutes(settings.lunchStart));
-  return Math.max(0, required - totalRealBreakMinutes(analysis.pairs));
+  return Math.max(0, toMinutes(settings.lunchEnd) - toMinutes(settings.lunchStart));
 }
 
 export function segmentsOf(pairs: PunchPair[]): Segment[] {
