@@ -394,7 +394,7 @@ function checkSpecialDestination(
     faltas: d.faltas,
     controlStartDate: d.user.controlStartDate,
   });
-  if (!isProjectableDayStatus(row.status)) {
+  if (!isProjectableDayStatus(row.status) || row.calendarEventPendingToday) {
     return {
       error: {
         ok: false,
@@ -408,7 +408,12 @@ function checkSpecialDestination(
       remainingMinutes: 0,
     };
   }
-  const neededMinutes = Math.max(row.expectedMinutes - row.registrableMinutes, 0);
+  /* 4D.4.2 (Parte C): MESMA fonte canônica da view do card
+   * (special-excess-day-view) — o trabalho necessário do dia. Em dia de
+   * calendário integral realizado abaixo do necessário a necessidade NÃO é
+   * 0 (effectiveExpected era o gate de PLANEJAMENTO FUTURO da 4D.3, nunca a
+   * base de uso em dia realizado). */
+  const neededMinutes = Math.max(row.requiredWorkMinutes - row.registrableMinutes, 0);
   const usedHere = (d.specialExcessUses ?? [])
     .filter((u) => u.status === "utilizado" && u.destinationDate === destinationDate && u.id !== excludeUseId)
     .reduce((s, u) => s + specialExcessUseMinutes(u), 0);
@@ -419,9 +424,11 @@ function checkSpecialDestination(
     factualWorkedMinutes: row.workedMinutes,
     factualRegistrableMinutes: row.registrableMinutes,
     factualRegularBalanceMinutes: row.balanceMinutes,
-    effectiveBaseMinutes: row.expectedMinutes,
+    effectiveBaseMinutes: row.requiredWorkMinutes,
     financialValid: isProjectableDayStatus(row.status),
-    realized: row.entryCount > 0 && destinationDate <= asOf,
+    // 4D.4.2: evento explícito do calendário é fato suficiente (mesma fonte
+    // da view do [10+]) — dia-evento passado está "realizado" sem batidas.
+    realized: (row.entryCount > 0 || row.calendarEventDay) && destinationDate <= asOf,
     usedSpecialMinutes: usedHere + requestedMinutes,
   });
   if (!projected.projectable || projected.needsReview) {

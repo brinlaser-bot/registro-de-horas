@@ -26,6 +26,19 @@ export interface ResumoDayRow {
   date: string;
   workedMinutes: number;
   expectedMinutes: number;
+  /** 4D.4/4D.4.2: trabalho NECESSÁRIO do dia — para dias de calendário é o
+   *  conceito canônico do evento (requiredWorkMinutes; ex.: COMPENSAR integral
+   *  8h · Cinzas 4h · ABONADO 0); para os demais dias é a jornada efetiva
+   *  (comportamento inalterado). Fonte única da necessidade [10+] em dia
+   *  realizado e da base da projeção oficial — NUNCA o gate de PLANEJAMENTO
+   *  futuro da 4D.3 (effectiveExpected de evento integral = 0). */
+  requiredWorkMinutes: number;
+  /** 4D.4/4D.4.2: o dia tem entrada EXPLÍCITA do calendário (evento é fato
+   *  suficiente quando passado — mesmo sem batidas). */
+  calendarEventDay: boolean;
+  /** 4D.4 (Parte G): evento do calendário em HOJE ainda sem jornada
+   *  encerrada — permanece previsão (bloqueia elegibilidade de uso). */
+  calendarEventPendingToday: boolean;
   balanceMinutes: number;
   excessMinutes: number;
   registrableMinutes: number;
@@ -119,8 +132,14 @@ export function buildResumoDayRow(p: {
   return {
     date,
     workedMinutes: realized ? ctx.day.workedMinutes : 0,
+    requiredWorkMinutes: cctx.calendarEntry ? cctx.requiredWorkMinutes : cctx.expectedRegular,
+    calendarEventDay: !!cctx.calendarEntry,
+    calendarEventPendingToday: calendarEventPendingToday(cctx, date, today),
     expectedMinutes: cctx.expectedRegular,
-    balanceMinutes: realized ? cctx.regularBalance : 0,
+    // 4D.4 (Parte G)/4D.4.2: evento do calendário em HOJE sem jornada
+    // encerrada permanece previsão — o saldo exibido é 0, nunca −8h prematuro
+    // (mesmo guard canônico da contribuição factual abaixo).
+    balanceMinutes: realized && !calendarEventPendingToday(cctx, date, today) ? cctx.regularBalance : 0,
     excessMinutes: realized ? ctx.day.excessMinutes : 0,
     registrableMinutes: realized ? ctx.day.registrableMinutes : 0,
     status,

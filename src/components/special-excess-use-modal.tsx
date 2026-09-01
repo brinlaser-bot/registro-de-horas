@@ -146,12 +146,15 @@ export function SpecialExcessUseModal({ date, onClose }: Props) {
       factualWorkedMinutes: view.workedMinutes,
       factualRegistrableMinutes: view.registrableMinutes,
       factualRegularBalanceMinutes: view.factualBalanceMinutes,
-      effectiveBaseMinutes: view.expectedMinutes,
+      /* 4D.4.2: base canônica do dia (requiredWorkMinutes) — mesma fonte do
+         motor e da view (Parte D: factual nunca muda; só a projeção). */
+      effectiveBaseMinutes: view.requiredWorkMinutes,
       financialValid: view.eligible,
-      realized: view.workedMinutes > 0 && date <= todayStr,
+      // 4D.4.2: mesmo "realized" canônico da view (evento de calendário é fato).
+      realized: view.realized,
       usedSpecialMinutes: view.usedActiveMinutes + selectedTotal,
     });
-  }, [date, todayStr, view, selectedTotal]);
+  }, [date, view, selectedTotal]);
 
   const confirm = async () => {
     if (busy) return;

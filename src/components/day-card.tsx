@@ -242,7 +242,11 @@ export function DayCard({
   // (só banner + CTA de correção). Sem estado persistido: o status estrutural
   // controla a troca automaticamente.
   const invalidStructure = incompletePast || inconsistent;
-  const noFacts = d.empty && !falta && !absence;
+  /* 4D.4.2 (Parte B): dia com entrada EXPLÍCITA do calendário já realizado
+   * NÃO é "dia sem fatos" só por não ter batidas — o evento é fato conhecido
+   * (mesma isenção canônica de isMissingExpectedRecord): os MiniStats da
+   * semântica do calendário permanecem visíveis. */
+  const noFacts = d.empty && !falta && !absence && !calendarSemantics;
 
   const startEdit = (e: TimeEntryLike) => {
     setEditingId(e.id);
@@ -341,6 +345,10 @@ export function DayCard({
               <Badge tone="amber">Registro incompleto</Badge>
             ) : inconsistent ? (
               <Badge tone="amber">Registro inconsistente</Badge>
+            ) : calendarSemantics ? (
+              /* 4D.4.2 (Parte B): o calendário determina a natureza do dia —
+               * nunca "Sem registros" para evento explícito já realizado. */
+              regularBalance < 0 ? <Badge tone="amber">Abaixo da base</Badge> : <Badge tone="emerald">Dia ok</Badge>
             ) : (
               statusBadge(d)
             )}

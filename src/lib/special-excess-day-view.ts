@@ -52,8 +52,14 @@ export interface SpecialExcessDayView {
   /** Insumos 3A para o preview de projeção no modal. */
   registrableMinutes: number;
   expectedMinutes: number;
+  /** 4D.4.2: base canônica do dia para a projeção oficial no modal (o MESMO
+   *  requiredWorkMinutes da row — fonte única com o motor do store). */
+  requiredWorkMinutes: number;
   /** Projeção 3A com os usos ativos (null quando não há uso ativo). */
   projection: { workedMinutes: number; balanceMinutes: number } | null;
+  /** 4D.4.2: o dia já é fato realizado (batidas OU evento de calendário
+   *  explícito) até o corte — insumo "realized" do motor 3A no modal. */
+  realized: boolean;
   /** Banco do ciclo do dia (alimenta o modal). */
   bank: SpecialExcessBankSummary;
 }
@@ -86,8 +92,16 @@ export function buildSpecialExcessDayView(args: SpecialExcessDayViewInput): Spec
   const row = buildResumoDayRow({
     date, today: asOfDate, entries, absences, calendars, settings, faltas, controlStartDate,
   });
-  const eligible = isProjectableDayStatus(row.status);
-  const neededMinutes = Math.max(row.expectedMinutes - row.registrableMinutes, 0);
+  /* 4D.4.2/4D.4 (Parte E): evento em HOJE sem jornada encerrada ainda não é
+   * fato — não é elegível a uso de [10+] (nunca "completar" um dia que não
+   * terminou). */
+  const eligible = isProjectableDayStatus(row.status) && !row.calendarEventPendingToday;
+  /* 4D.4.2 (Parte C): a necessidade usa o trabalho NECESSÁRIO canônico do
+   * dia (row.requiredWorkMinutes). Em dia de calendário integral realizado
+   * abaixo do necessário (ex.: COMPENSAR 8h sem batidas) NÃO pode aparecer
+   * como 0 só porque effectiveExpected (jornada regular restante) era o
+   * gate de PLANEJAMENTO FUTURO da 4D.3. Dias comuns: valor idêntico. */
+  const neededMinutes = Math.max(row.requiredWorkMinutes - row.registrableMinutes, 0);
   const activeUses = uses.filter((u) => u.status === "utilizado" && u.destinationDate === date);
   const usedActiveMinutes = activeUses.reduce((s, u) => s + specialExcessUseMinutes(u), 0);
   const remainingMinutes = Math.max(neededMinutes - usedActiveMinutes, 0);
@@ -114,9 +128,11 @@ export function buildSpecialExcessDayView(args: SpecialExcessDayViewInput): Spec
             factualWorkedMinutes: row.workedMinutes,
             factualRegistrableMinutes: row.registrableMinutes,
             factualRegularBalanceMinutes: row.balanceMinutes,
-            effectiveBaseMinutes: row.expectedMinutes,
+            effectiveBaseMinutes: row.requiredWorkMinutes,
             financialValid: isProjectableDayStatus(row.status),
-            realized: row.entryCount > 0 && date <= asOfDate,
+            // 4D.4.2: evento explícito do calendário é fato suficiente (o dia
+            // pode estar "realizado" mesmo sem batidas — ex.: COMPENSAR 0h).
+            realized: (row.entryCount > 0 || row.calendarEventDay) && date <= asOfDate,
             usedSpecialMinutes: usedActiveMinutes,
           });
           return { workedMinutes: p.projectedWorkedMinutes, balanceMinutes: p.projectedBalanceMinutes };
@@ -137,6 +153,8 @@ export function buildSpecialExcessDayView(args: SpecialExcessDayViewInput): Spec
     factualBalanceMinutes: row.balanceMinutes,
     registrableMinutes: row.registrableMinutes,
     expectedMinutes: row.expectedMinutes,
+    requiredWorkMinutes: row.requiredWorkMinutes,
+    realized: (row.entryCount > 0 || row.calendarEventDay) && date <= asOfDate,
     projection,
     bank,
   };

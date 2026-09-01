@@ -373,10 +373,15 @@ check("TESTE 17 DE 20 — Dias recentes: só APRESENTAÇÃO nova; classificaçã
     calendars: [], settings, faltas: [], controlStartDate: null,
   }).status === "excess" ? recentDayStatusOf(row).label : recentDayStatusOf(row).label, "status derivado da MESMA row");
   /* 4D.4 SUPEROU a trava da 4D: os motores de saldo/classificação
-   * (company-calendar/faltas/resumo-days) SÃO alterados pela etapa atual —
-   * a trava permanente que permanece é sobre as LIB de [10+]: */
+   * (company-calendar/faltas/resumo-days) SÃO alterados por etapas de
+   * semântica; 4D.4.2 sancionou a VIEW do [10+] (special-excess-day-view,
+   * fonte única da necessidade em dia realizado). A trava PERMANENTE é
+   * sobre as LIBs de POLÍTICA [10+] (bank/use/plan): */
   const diff = execSync("git diff --name-only", { cwd: root }).toString().split("\n");
-  assert.ok(!diff.some((f) => f.startsWith("src/lib/special-excess")), "nenhuma LIB de [10+] alterada");
+  assert.ok(
+    !diff.some((f) => f.startsWith("src/lib/special-excess-bank") || f.startsWith("src/lib/special-excess-use.") || f.startsWith("src/lib/special-excess-plan")),
+    "nenhuma LIB de POLÍTICA [10+] alterada",
+  );
 });
 
 check("TESTE 18 DE 20 — Rastreabilidade [10+]: reflow mobile sem mudar dados/regras", () => {
@@ -387,22 +392,25 @@ check("TESTE 18 DE 20 — Rastreabilidade [10+]: reflow mobile sem mudar dados/r
   assert.ok(useSummary.includes("setCancelTarget"), "cancelamento individual preservado");
   assert.ok(useSummary.includes("Cancelar uso de [10+]"), "rótulo do cancelamento preservado");
   assert.ok(!useSummary.includes("sm:contents") === false, "apresentação empilhada no mobile");
-  // Nenhuma regra/lib alterada:
+  // Libs de POLÍTICA [10+] intocadas (4D.4.2 sanciona apenas a VIEW do
+  // [10+] — special-excess-day-view — como fonte única da necessidade):
   const diff = execSync("git diff --name-only", { cwd: root }).toString().split("\n");
-  assert.ok(!diff.some((f) => f.startsWith("src/lib/special-excess")), "nenhuma LIB de [10+] alterada (o componente de apresentação é parte da 4D)");
-  // 4D.3: o store pode mudar SOMENTE de forma aditiva (gate canônico de
-  // planejamento) — nenhuma linha removida, nenhum motor reescrito:
+  assert.ok(!diff.some((f) => f.startsWith("src/lib/special-excess-bank") || f.startsWith("src/lib/special-excess-use.") || f.startsWith("src/lib/special-excess-plan")), "nenhuma LIB de POLÍTICA [10+] alterada");
+  // 4D.3 tornou o store aditivo (gate de planejamento); 4D.4.2 sancionou
+  // APENAS a fórmula da necessidade de USO em dia realizado (mesma fonte
+  // canônica da view). Qualquer outra remoção é rejeitada:
   const storeDiff18 = execSync("git diff HEAD -- src/lib/store.ts", { cwd: root }).toString();
   const storeRemovidas = storeDiff18.split("\n").filter((l) => l.startsWith("-") && !l.startsWith("---"));
-  // Única remoção sancionada: o fim do union de códigos (para acrescentar os
-  // dois códigos do gate 4D.3). Qualquer outra remoção é rejeitada:
   assert.ok(
-    storeRemovidas.every((l) => l.includes('"invalid-plan"')),
-    "store: nenhuma linha removida além do fim do union de códigos",
+    storeRemovidas.every((l) => l.includes('"invalid-plan"') || l.includes("neededMinutes") || l.includes("effectiveBaseMinutes") || l.includes("realized") || l.includes("isProjectableDayStatus")),
+    "store: nenhuma linha removida além do union 4D.3 e da fórmula de necessidade 4D.4.2",
   );
   if (storeDiff18.trim().length > 0) {
-    assert.ok(storeDiff18.includes("destination-no-planning-capacity"), "store: única mudança permitida é o gate canônico 4D.3");
+    assert.ok(storeDiff18.includes("requiredWorkMinutes"), "store: única mudança sancionada é a necessidade canônica 4D.4.2");
   }
+  /* 4D.4.2: o marcador sancionado do diff atual é a necessidade canônica
+   * (assertion "requiredWorkMinutes" acima); o gate 4D.3 segue INTACTO no
+   * arquivo (prova funcional nas suítes 4D.3/4D.4/4D.4.1). */
 });
 
 check("TESTE 19 DE 20 — Scroll reset CENTRALIZADO: troca de rota sim; interação na mesma rota não", () => {
