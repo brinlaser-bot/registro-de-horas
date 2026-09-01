@@ -260,8 +260,13 @@ export default function DashboardPage() {
         compensations,
         cycle: cycleSituation.cycle,
         today: todayStr,
+        // 4D.2: dados factuais p/ cobertura pelo próprio dia (derivada DENTRO
+        // do helper canônico — a página NÃO recalcula nada).
+        entries,
+        absences,
+        settings,
       }),
-    [companyCalendars, compensations, cycleSituation.cycle, todayStr],
+    [companyCalendars, compensations, cycleSituation.cycle, todayStr, entries, absences, settings],
   );
 
   /* 4D.1 (PARTE C) — PREVISÃO DO CICLO = saldo projetado atual do ciclo −

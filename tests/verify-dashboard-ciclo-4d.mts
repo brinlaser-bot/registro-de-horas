@@ -237,7 +237,7 @@ check("TESTE 09 DE 20 — COMPENSAR 8h em dia útil → obrigação 480min (impa
     date: "2026-09-10", descricao: "Folga a compensar", categoria: "Compensação 8 Horas",
     tratamento: "COMPENSAR", horasACompensar: 8, jornadaEsperadaHoras: 0, horasAbonadas: 0, observacao: null,
   }), compensations: [concluida], cycle: CICLO, today: HOJE });
-  assert.equal(f2.concludedCoverageMinutes, 480, "cobertura concluída reduz");
+  assert.equal(f2.concludedExternalCoverageMinutes, 480, "cobertura concluída reduz");
   assert.equal(f2.uncoveredMinutes, 0, "obrigação quitada: impacto descoberto 0");
 });
 
@@ -292,7 +292,7 @@ check("TESTE 14 DE 20 — Futuro não vira déficit factual nem 'Sem registro': 
   const pendente: Compensation = { id: 1, sourceDate: "2026-09-10", targetDate: "2026-08-20", minutes: 480, status: "pendente", kind: "calendario" };
   const f = buildCalendarForecast({ calendars: cal1(entry), compensations: [pendente], cycle: CICLO, today: HOJE });
   assert.equal(f.plannedCoverageMinutes, 480, "planejada aparece separada");
-  assert.equal(f.concludedCoverageMinutes, 0, "planejada não é quitação");
+  assert.equal(f.concludedExternalCoverageMinutes, 0, "planejada não é quitação");
   assert.equal(f.uncoveredMinutes, 480, "leitura conservadora: só concluída reduz");
   // E a previsão NUNCA contamina o factual/projetado do ciclo:
   assert.equal(comCal.projectedBalanceMinutes, semCal.projectedBalanceMinutes);

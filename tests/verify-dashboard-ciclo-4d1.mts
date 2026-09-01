@@ -111,16 +111,19 @@ check("TESTE 02 DE 12 — COMPENSAR cuja data === today permanece no total", () 
 });
 
 check("TESTE 03 DE 12 — COMPENSAR passado ainda aberto permanece no total", () => {
-  const f = fc(cal1(COMP8("2026-08-20")));
+  // 4D.2: 19/08 é passado SEM batidas (nada cobre) — continua no total.
+  const f = fc(cal1(COMP8("2026-08-19")));
   assert.equal(f.openEventCount, 1, "passada e aberta continua contabilizada");
   assert.equal(f.uncoveredMinutes, 480);
   assert.equal(f.events[0]?.status, "overdue", "status temporal overdue (passada em aberto)");
 });
 
 check("TESTE 04 DE 12 — COMPENSAR passado integralmente concluído sai do uncovered", () => {
-  const concluida: Compensation = { id: 1, sourceDate: "2026-08-20", targetDate: "2026-08-21", minutes: 480, status: "concluida", kind: "calendario" };
-  const f = fc(cal1(COMP8("2026-08-20")), [concluida]);
-  assert.equal(f.concludedCoverageMinutes, 480, "cobertura concluída registrada");
+  // 4D.2: evento em 19/08 (sem batidas) — aqui a quitação vem SÓ da
+  // cobertura externa; a cobertura pelo próprio dia tem suíte própria.
+  const concluida: Compensation = { id: 1, sourceDate: "2026-08-19", targetDate: "2026-08-21", minutes: 480, status: "concluida", kind: "calendario" };
+  const f = fc(cal1(COMP8("2026-08-19")), [concluida]);
+  assert.equal(f.concludedExternalCoverageMinutes, 480, "cobertura concluída registrada");
   assert.equal(f.obligationMinutes, 480, "original permanece no histórico do ciclo");
   assert.equal(f.uncoveredMinutes, 0, "uncovered zerado");
   assert.equal(f.openEventCount, 0, "sai do total em aberto");
@@ -128,10 +131,10 @@ check("TESTE 04 DE 12 — COMPENSAR passado integralmente concluído sai do unco
 });
 
 check("TESTE 05 DE 12 — Cobertura planejada NÃO reduz uncovered", () => {
-  const pendente: Compensation = { id: 1, sourceDate: "2026-08-20", targetDate: "2026-08-21", minutes: 480, status: "pendente", kind: "calendario" };
-  const f = fc(cal1(COMP8("2026-08-20")), [pendente]);
+  const pendente: Compensation = { id: 1, sourceDate: "2026-08-19", targetDate: "2026-08-21", minutes: 480, status: "pendente", kind: "calendario" };
+  const f = fc(cal1(COMP8("2026-08-19")), [pendente]);
   assert.equal(f.plannedCoverageMinutes, 480, "planejada aparece separada");
-  assert.equal(f.concludedCoverageMinutes, 0, "planejada não é quitação");
+  assert.equal(f.concludedExternalCoverageMinutes, 0, "planejada não é quitação");
   assert.equal(f.uncoveredMinutes, 480, "leitura conservadora: só concluída reduz");
   assert.equal(f.openEventCount, 1);
   // Vínculo canônico preservado: kind="calendario" + sourceDate === data da obrigação.
@@ -176,8 +179,8 @@ check("TESTE 08 DE 12 — Feriado/abono com 0h a compensar permanece neutro", ()
 });
 
 check("TESTE 09 DE 12 — Previsão do ciclo = saldo projetado − total uncovered (futuro + hoje + passado aberto)", () => {
-  const cals = cal1(COMP8("2026-08-20"));
-  // Três obrigações: passada em aberto (20/08), hoje (28/08) e futura (10/09):
+  const cals = cal1(COMP8("2026-08-19"));
+  // Três obrigações: passada em aberto (19/08, sem batidas), hoje (28/08) e futura (10/09):
   cals[0].entries.push(
     { id: 2, ...COMP8(HOJE) },
     { id: 3, ...COMP8("2026-09-10") },
