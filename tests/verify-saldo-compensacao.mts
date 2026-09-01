@@ -67,7 +67,9 @@ check("B. linha do destino 07/09 (feriado abonado +2h): saldo +2h, sufixo 'em fe
   const line = compDayLineView("2026-09-07", hol2h, [], both, settings);
   assert.ok(line);
   assert.equal(line.workedMinutes, 120);
-  assert.equal(line.balanceMinutes, 120, "nunca calcular 8h − 2h");
+  // 4D.4 (Parte C): trabalho em abonado integral não gera saldo automático
+  // (e nunca calculou 8h − 2h — a linha apenas reflete o saldo do dia).
+  assert.equal(line.balanceMinutes, 0, "trabalho em abonado: saldo 0 — nunca 8h − 2h");
   assert.equal(line.contextSuffix, "em feriado");
   assert.equal(compDayLineView("2026-09-07", [], [], both, settings), null, "sem batidas → linha oculta (como antes)");
 });

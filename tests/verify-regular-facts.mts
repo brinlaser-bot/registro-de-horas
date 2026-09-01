@@ -208,8 +208,10 @@ check("K. seed 21/08→20/09 → crédito 7h, déficit 45min, líquido +6h15", (
     settings: s, faltas: seed.faltas, controlStartDate: seed.user.controlStartDate,
   });
   assert.equal(f.generatedCreditMinutes, 420, "crédito 7h (22/08 +2h · 23/08 +1h · 24/08 +2h · 28/08 +2h)");
-  assert.equal(f.generatedDeficitMinutes, 45, "déficit 45min (21/08 −15 · 26/08 −30)");
-  assert.equal(f.netBalanceMinutes, 375, "líquido +6h15");
+  /* 4D.4: a folga a compensar 25/08 realizada sem trabalho é −8h FACTUAL
+   * (o saldo do dia carrega o efeito — mesma fonte do Resumo). */
+  assert.equal(f.generatedDeficitMinutes, 525, "45min comuns (21/08 −15 · 26/08 −30) + 8h folga 25/08");
+  assert.equal(f.netBalanceMinutes, -105, "líquido: 420 − 525 (folga −8h no factual)");
 
   // Fatos por dia (MESMA fonte do Resumo)
   const dayFact = (date: string) =>
@@ -222,7 +224,9 @@ check("K. seed 21/08→20/09 → crédito 7h, déficit 45min, líquido +6h15", (
   assert.equal(dayFact("2026-08-22"), 120, "22/08 sábado 2h → +2h");
   assert.equal(dayFact("2026-08-23"), 60, "23/08 domingo 1h → +1h");
   assert.equal(dayFact("2026-08-24"), 120, "24/08 11h → +2h ([10+] 1h fora)");
-  assert.equal(dayFact("2026-08-25"), 0, "25/08 COMPENSAR sem batidas → 0");
+  // 4D.4 (Parte D/G/I): folga integral PASSADA sem batidas ⇒ −8h factual
+  // (evento explícito é fato suficiente — nunca "saldo 0" nem Sem registro).
+  assert.equal(dayFact("2026-08-25"), -480, "25/08 COMPENSAR passado sem batidas → −8h factual");
   assert.equal(dayFact("2026-08-26"), -30, "26/08 7h30 → −30min");
   assert.equal(dayFact("2026-08-27"), 0, "27/08 Sem registro → 0");
   assert.equal(dayFact("2026-08-28"), 120, "28/08 11h30 → +2h ([10+] 1h30 fora)");

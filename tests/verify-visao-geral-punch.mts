@@ -134,7 +134,11 @@ check("A. cenário canônico ⇒ mesmo cálculo por dia + corte temporal central
   // futura entra EXATAMENTE quando chega.
   actions.replaceAll({ ...getAppData(), faltas: [] });
   assert.equal(visaoGeralBalance(period, "2026-08-24"), 170, "chegando 24/08: entra +5min → +2h50");
-  assert.equal(visaoGeralBalance(period, "2026-09-07"), 290, "chegando 07/09: entra +2h → +4h50");
+  /* 4D.4: em 25/08 a folga a compensar (evento explícito, sem batidas) entra
+   * como −8h FACTUAL; e o +2h do feriado abonado 07/09 não gera mais crédito
+   * automático (Parte C) → 170 − 480 + 0 = −310. */
+  assert.equal(visaoGeralBalance(period, "2026-08-26"), -310, "chegando 25/08: folga −8h entra no saldo do ciclo");
+  assert.equal(visaoGeralBalance(period, "2026-09-07"), -310, "chegando 07/09: feriado abonado com 2h ⇒ saldo 0 (sem crédito automático)");
   // Bug original documentado: soma diária "trabalhado − 8h" sem calendário
   // (só dias com batidas) dava −19h10 para o mesmo cenário.
   const st = getAppData();

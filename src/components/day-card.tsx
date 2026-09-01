@@ -159,6 +159,17 @@ interface Props {
    *  "Planejar uso de [10+]" e o convite "Planejar mais" desaparecem (o
    *  store 4A continua a barreira final). undefined = sem restrição. */
   planningCapacityMinutes?: number;
+  /** 4D.4 (Parte M): semântica do calendário do dia (base de referência ·
+   *  crédito do calendário · trabalho necessário). Presente quando o dia tem
+   *  entrada do calendário importado. */
+  calendarSemantics?: {
+    referenceBaseMinutes: number;
+    calendarCreditMinutes: number;
+    requiredWorkMinutes: number;
+    abonadoIntegral: boolean;
+    workedOnAbonadoIntegral: boolean;
+    pendingToday?: boolean;
+  } | null;
   /** 4C: abre o modal "Usar planejamento [10+]" para o plano informado. */
   onResolvePlan?: (planId: string) => void;
 }
@@ -192,6 +203,7 @@ export function DayCard({
   specialPlans,
   onPlanSpecial,
   planningCapacityMinutes,
+  calendarSemantics,
   onResolvePlan,
 }: Props) {
   const specialActions = useSpecialPunchActions();
@@ -263,7 +275,12 @@ export function DayCard({
 
   // Visão central de apresentação do saldo regular do dia.
   const regularExpected = balanceView?.effectiveExpected ?? effectiveExpected ?? d.expectedMinutes;
-  const regularBalance = balanceView?.adjustedBalance ?? d.balanceMinutes;
+  // 4D.4 (Parte G): evento do calendário em HOJE sem jornada encerrada =
+  // previsão — o card exibe saldo 0 (o −8h só nasce quando o dia fecha).
+  // Dias passados com evento explícito: saldo normal do dia.
+  const regularBalance = calendarSemantics?.pendingToday
+    ? 0
+    : (balanceView?.adjustedBalance ?? d.balanceMinutes);
 
   const balanceTone = regularBalance > 0 ? "text-emerald-600" : regularBalance < 0 ? "text-rose-600" : "text-slate-500";
   /* Dia encerrado acima do limite diário: o excedente é um valor já realizado e
@@ -588,11 +605,22 @@ export function DayCard({
               value={formatMinutes(d.workedMinutes)}
               tone="text-slate-900"
             />
+            {/* 4D.4 (Parte M): em dia de calendário, a base exibida é a BASE
+                DE REFERÊNCIA (normalmente 8h) e o crédito do calendário fica
+                explícito — nunca base 0min numa folga integral. */}
             <MiniStat
-              label="Base regular"
-              value={formatMinutes(regularExpected)}
+              label={calendarSemantics ? "Base de referência" : "Base regular"}
+              value={formatMinutes(calendarSemantics ? calendarSemantics.referenceBaseMinutes : regularExpected)}
               tone="text-slate-500"
             />
+            {calendarSemantics && (
+              <MiniStat
+                label="Crédito calendário"
+                value={formatMinutes(calendarSemantics.calendarCreditMinutes)}
+                tone="text-sky-600"
+                sub={calendarSemantics.requiredWorkMinutes > 0 ? `Jornada a cumprir: ${formatMinutes(calendarSemantics.requiredWorkMinutes)}` : undefined}
+              />
+            )}
             <MiniStat
               label="Saldo regular"
               value={`${regularBalance >= 0 ? "+" : ""}${formatMinutes(regularBalance)}`}
@@ -612,6 +640,13 @@ export function DayCard({
               sub={futureDay ? "ainda não realizado" : d.excessMinutes > 0 ? "limitado a 10h" : undefined}
             />
           </div>
+          )}
+          {/* 4D.4 (Parte C): trabalho em dia TOTALMENTE abonado — política da
+              empresa pendente; sem crédito automático, sem soma artificial. */}
+          {calendarSemantics?.workedOnAbonadoIntegral && (
+            <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-[11px] font-medium text-amber-800">
+              Há trabalho registrado em um dia abonado. O tratamento dessas horas depende da regra da empresa e ainda não foi definido.
+            </p>
           )}
 
           {/* [10+] (3E/3E.2): bloco único de [10+] no card — o uso nunca altera

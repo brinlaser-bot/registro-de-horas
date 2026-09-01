@@ -197,10 +197,11 @@ check("H. seed 21/08→20/09 → histórico 45min, coberto 45min, sem cobertura 
   assert.equal(period.from, "2026-08-21");
   assert.equal(period.to, "2026-09-20");
   assert.equal(f.generatedCreditMinutes, 420, "crédito regular 7h (Etapa 2A intacta)");
-  assert.equal(f.generatedDeficitMinutes, 45, "déficit histórico 45min");
-  assert.equal(f.coveredByRegularMinutes, 45, "mesmo ciclo → integralmente coberto pelo regular");
-  assert.equal(f.uncoveredByRegularMinutes, 0, "déficit sem cobertura regular = 0min");
-  assert.equal(f.netBalanceMinutes, 375, "saldo factual líquido +6h15 (inalterado)");
+  /* 4D.4: folga 25/08 realizada sem trabalho = −8h factual (45 + 480). */
+  assert.equal(f.generatedDeficitMinutes, 525, "déficit factual 8h45 (45min comuns + folga 25/08)");
+  assert.equal(f.coveredByRegularMinutes, 420, "cobertura regular sobre o déficit factual");
+  assert.equal(f.uncoveredByRegularMinutes, 105, "descoberto = 525 − 420 (= líquido negativo)");
+  assert.equal(f.netBalanceMinutes, -105, "saldo factual líquido −1h45 (folga −8h no factual)");
   const byCycle = regularCoverageByCycle({
     from: period.from, to: period.to, today: TODAY,
     entries: seed.entries, absences: seed.absences, calendars: seed.companyCalendars,

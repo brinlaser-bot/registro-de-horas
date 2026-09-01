@@ -103,7 +103,9 @@ check("C. calendário COMPENSAR: work reduz obrigação; só o extra vira crédi
   assert.equal(v4.effectiveObligationMinutes, 240);
   assert.equal(v4.openMinutes, 240);
   assert.equal(v4.regularCreditMinutes, 0);
-  assert.equal(companyDayContext(d25, w4, [], cals, settings).adjustedBalance, 0);
+  // 4D.4 (Parte D): trabalho no próprio dia realiza a folga pelo SALDO
+  // FACTUAL (4h de 8h ⇒ −4h) — a obrigação original permanece 8h na Central.
+  assert.equal(companyDayContext(d25, w4, [], cals, settings).adjustedBalance, -240);
 
   const w9 = [punch(d25, "08:00", "entrada"), punch(d25, "12:00", "saida"), punch(d25, "13:00", "entrada"), punch(d25, "18:00", "saida")];
   const v9 = compensarObligationOnDate(d25, w9, [], [], cals, settings, "2026-08-26")!;

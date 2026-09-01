@@ -19,6 +19,7 @@ import {
   dayContext,
 } from "@/lib/absences";
 import {
+  calendarEventPendingToday,
   companyDayBalanceView,
   companyDayContext,
   companyDeficitContribution,
@@ -204,7 +205,9 @@ function RegistrosBody() {
           excessSpecial: creditView.excessSpecial,
         });
         const empty = cctx.ctx.day.empty;
-        const noFacts = empty && !falta && !cctx.ctx.absence;
+        // 4D.4 (Parte I): dia com entrada do calendário NUNCA é "sem fatos" —
+        // o evento explícito é fato conhecido (a situação vem do calendário).
+        const noFacts = empty && !falta && !cctx.ctx.absence && !cctx.calendarEntry;
         const historicalEmpty = noFacts && isHistoricalEmptyDate(date, todayStr, user.controlStartDate);
         const compact =
           empty &&
@@ -220,6 +223,20 @@ function RegistrosBody() {
           // planejamento [10+] em dias futuros especiais (feriado/abono/
           // folga/afastamento/COMPENSAR base 0 ⇒ 0; parcial ⇒ a própria base).
           planningCapacityMinutes: cctx.effectiveExpected,
+          // 4D.4 (Parte M): semântica factual do calendário para o card
+          // (base de referência · crédito do calendário · trabalho necessário).
+          calendarSemantics: cctx.calendarEntry
+            ? {
+                referenceBaseMinutes: cctx.referenceBaseMinutes,
+                calendarCreditMinutes: cctx.calendarCreditMinutes,
+                requiredWorkMinutes: cctx.requiredWorkMinutes,
+                abonadoIntegral: cctx.abonadoIntegral,
+                workedOnAbonadoIntegral: cctx.abonadoIntegral && cctx.ctx.day.workedMinutes > 0,
+                // 4D.4 (Parte G): hoje sem jornada encerrada = previsão (o
+                // card exibe saldo 0, nunca −8h prematuro).
+                pendingToday: calendarEventPendingToday(cctx, date, todayStr),
+              }
+            : null,
           calendarLabel: cctx.label,
           falta: falta
             ? { id: falta.id, status: faltaStatus!, jornadaMinutes: cctx.effectiveExpected }
@@ -246,8 +263,15 @@ function RegistrosBody() {
           // Contribuição CENTRAL (dayBalanceContribution) — MESMA soma da
           // Visão geral e do Resumo do período (falta efetiva conta; prevista 0).
           balanceContribution: dayBalanceContribution(cctx, faltas, date, todayStr),
+          // 4D.4 (Parte G): evento em HOJE sem jornada encerrada = previsão.
           deficitContribution:
-            missingExpected || noFacts || date > todayStr || faltaStatus === "prevista" ? 0 : companyDeficitContribution(cctx),
+            missingExpected ||
+            noFacts ||
+            date > todayStr ||
+            faltaStatus === "prevista" ||
+            calendarEventPendingToday(cctx, date, todayStr)
+              ? 0
+              : companyDeficitContribution(cctx),
           absence: absenceOnDate(absences, date),
           missingExpected,
           historicalEmpty,
@@ -732,7 +756,7 @@ function RegistrosBody() {
             </div>
           )}
           <div className={missingOnly || pendingOnly ? "space-y-4" : "space-y-2"}>
-          {listedDays.map(({ date, balanceView, displayDay, absence, calendarLabel, falta, workedInAbonoMinutes, abonoParcial, missingExpected, historicalEmpty, compact, specialExcess, specialPlans, planningCapacityMinutes }) => (
+          {listedDays.map(({ date, balanceView, displayDay, absence, calendarLabel, falta, workedInAbonoMinutes, abonoParcial, missingExpected, historicalEmpty, compact, specialExcess, specialPlans, planningCapacityMinutes, calendarSemantics }) => (
             <DayCard
               key={date}
               result={displayDay}
@@ -776,6 +800,7 @@ function RegistrosBody() {
               // o store 4A continua o gate final.
               onPlanSpecial={date > todayStr ? () => setPlanDate(date) : undefined}
               planningCapacityMinutes={planningCapacityMinutes}
+              calendarSemantics={calendarSemantics}
               // 4C: resolução individual do plano (modal "Usar planejamento").
               onResolvePlan={(planId) => setResolvePlanId(planId)}
             />

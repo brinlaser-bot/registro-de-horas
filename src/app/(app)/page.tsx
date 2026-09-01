@@ -257,32 +257,25 @@ export default function DashboardPage() {
     () =>
       buildCalendarForecast({
         calendars: companyCalendars,
-        compensations,
         cycle: cycleSituation.cycle,
         today: todayStr,
-        // 4D.2: dados factuais p/ cobertura pelo próprio dia (derivada DENTRO
-        // do helper canônico — a página NÃO recalcula nada).
+        // 4D.4 (Parte G): dados factuais para saber se o HOJE já foi
+        // realizado (realizado ⇒ saiu da previsão e virou saldo factual —
+        // derivação DENTRO do helper canônico, nada recalculado aqui).
         entries,
         absences,
         settings,
       }),
-    [companyCalendars, compensations, cycleSituation.cycle, todayStr, entries, absences, settings],
+    [companyCalendars, cycleSituation.cycle, todayStr, entries, absences, settings],
   );
 
-  /* 4D.1 (PARTE C) — PREVISÃO DO CICLO = saldo projetado atual do ciclo −
-   * obrigações de calendário ainda descobertas (futuro + hoje + passado em
-   * aberto). Rotulada como PREVISÃO — nunca saldo factual/atual/realizado. */
-  const forecastBalanceMinutes = cycleSituation.projectedBalanceMinutes - forecast.uncoveredMinutes;
-
-  /* 4D.1 (PARTE F) — "Atenção agora" pode avisar obrigação de calendário
-   * de HOJE ou PASSADA ainda em aberto (sempre total resumido e sempre com
-   * o nome do que é — obrigação de calendário, não saldo do dia). */
-  const calendarTodayUncoveredMinutes = forecast.events
-    .filter((e) => e.status === "today")
-    .reduce((s, e) => s + e.uncoveredMinutes, 0);
-  const calendarOverdueUncoveredMinutes = forecast.events
-    .filter((e) => e.status === "overdue")
-    .reduce((s, e) => s + e.uncoveredMinutes, 0);
+  /* 4D.4 (PARTE L) — PREVISÃO DO CICLO = saldo projetado atual do ciclo +
+   * impacto futuro conhecido do calendário (impacto ≤ 0 ⇒ previsão menor ou
+   * igual ao projetado). Rotulada como PREVISÃO — nunca saldo
+   * factual/atual/realizado. Impactos de dias JÁ REALIZADOS vivem no saldo
+   * do ciclo (uma única contribuição — sem obrigação paralela nem dupla
+   * contagem), portanto NÃO entram aqui. */
+  const forecastBalanceMinutes = cycleSituation.projectedBalanceMinutes + forecast.futureImpactMinutes;
 
   /* 4D (PARTE I) — "Atenção agora": somente pendências factuais canônicas. */
   const pendingPlansCount = useMemo(
@@ -549,12 +542,11 @@ export default function DashboardPage() {
         </Link>
       </div>
 
-      {/* B. ATENÇÃO AGORA (4D, Parte I / 4D.1, Parte F) — SOMENTE decisões
-          reais: pendências factuais canônicas + obrigação de calendário de
-          HOJE ou PASSADA ainda em aberto (sempre como "obrigação de
-          calendário", nunca como saldo negativo do dia). Sem tocar o
-          saldo factual. */}
-      {(pendingPunchesCount > 0 || pendingPlansCount > 0 || calendarTodayUncoveredMinutes > 0 || calendarOverdueUncoveredMinutes > 0) && (
+      {/* B. ATENÇÃO AGORA (4D, Parte I / 4D.4) — SOMENTE decisões reais:
+          registros pendentes e planos [10+] que chegaram ao dia. Impactos de
+          calendário de dias realizados JÁ ESTÃO no saldo do ciclo (4D.4) —
+          são resultado, não aviso externo; não geram alerta aqui. */}
+      {(pendingPunchesCount > 0 || pendingPlansCount > 0) && (
         <div className="rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3">
           <p className="text-sm font-extrabold text-amber-800">⚠ Atenção agora</p>
           <ul className="mt-1 space-y-1 text-xs font-medium text-amber-700">
@@ -573,12 +565,6 @@ export default function DashboardPage() {
                   Abrir Registros
                 </Link>
               </li>
-            )}
-            {calendarTodayUncoveredMinutes > 0 && (
-              <li>Hoje há {formatMinutes(calendarTodayUncoveredMinutes)} de calendário ainda a compensar.</li>
-            )}
-            {calendarOverdueUncoveredMinutes > 0 && (
-              <li>Há {formatMinutes(calendarOverdueUncoveredMinutes)} de obrigação de calendário pendente.</li>
             )}
           </ul>
         </div>
@@ -777,33 +763,33 @@ export default function DashboardPage() {
         <h3 className="mb-2 text-sm font-extrabold uppercase tracking-wider text-slate-400">
           O que vem pela frente
         </h3>
-        {forecast.openEventCount > 0 ? (
+        {forecast.eventCount > 0 ? (
           <>
             <div className="grid gap-2 sm:grid-cols-2 sm:gap-3">
               <StatCard
                 compact
-                label="Obrigações de calendário a compensar"
-                value={fmtSigned(-forecast.uncoveredMinutes)}
-                sub={`Inclui obrigações futuras e ainda não concluídas · ${forecast.openEventCount} evento(s)`}
-                tone={forecast.uncoveredMinutes > 0 ? "rose" : "slate"}
+                label="Impacto futuro conhecido do calendário"
+                value={fmtSigned(forecast.futureImpactMinutes)}
+                sub={`${forecast.eventCount} evento(s) futuro(s) · folgas/recessos integrais`}
+                tone={forecast.futureImpactMinutes < 0 ? "rose" : "slate"}
                 icon={<CalendarClock size={16} />}
               />
               <StatCard
                 compact
                 label="Previsão do ciclo"
                 value={fmtSigned(forecastBalanceMinutes)}
-                sub="Saldo projetado − obrigações em aberto"
+                sub="Saldo projetado + impacto futuro conhecido"
                 tone={forecastBalanceMinutes > 0 ? "emerald" : forecastBalanceMinutes < 0 ? "rose" : "slate"}
                 icon={<TrendingUp size={16} />}
               />
             </div>
             <p className="mt-1.5 text-[11px] font-medium text-slate-400">
-              Considera eventos de calendário já conhecidos. Dias normais futuros presumem jornada cumprida.
+              Dias normais e parciais futuros presumem jornada cumprida; folgas integrais a compensar entram como impacto conhecido. Dias realizados já estão no saldo do ciclo.
             </p>
           </>
         ) : (
           <div className="rounded-2xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm font-medium text-slate-500">
-            Nenhuma obrigação de calendário em aberto neste ciclo.
+            Nenhum impacto futuro conhecido do calendário neste ciclo.
           </div>
         )}
       </div>

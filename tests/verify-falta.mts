@@ -184,8 +184,13 @@ check("H. 07/09 abonado com 08:00–10:00: saldo +2h, déficit 0, falta segue bl
   const cctx = companyDayContext("2026-09-07", e, [], both, settings);
   assert.equal(cctx.type, "evento", "feriado abonado com trabalho é 'evento' (label do feriado)");
   assert.equal(cctx.effectiveExpected, 0);
-  assert.equal(cctx.adjustedBalance, 120, "+2h utilizáveis");
+  /* 4D.4 (Parte C): trabalho em dia TOTALMENTE abonado permanece registrado
+   * (workedMinutes 120) mas NÃO gera saldo automático — as 8h abonadas cumprem
+   * a jornada e o tratamento das horas trabalhadas é política pendente. */
+  assert.equal(cctx.ctx.day.workedMinutes, 120, "batidas preservadas");
+  assert.equal(cctx.adjustedBalance, 0, "saldo regular 0 (sem crédito automático)");
   assert.equal(cctx.adjustedDeficit, 0);
+  assert.equal(cctx.abonadoIntegral, true);
   assert.equal(buildDebtDays(e, [], settings, BOUNDS, [], both).find((x) => x.date === "2026-09-07"), undefined);
   assert.equal(canRegisterFalta("2026-09-07", e, [], both, settings, []).ok, false);
 });

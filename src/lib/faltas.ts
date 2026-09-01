@@ -4,6 +4,7 @@
 // (companyDayContext.effectiveExpected) — nunca uma fórmula paralela de 8h.
 import { absenceLabel, type Absence } from "./absences";
 import {
+  calendarEventPendingToday,
   companyBalanceContribution,
   companyDayContext,
   isWeekendDate,
@@ -140,6 +141,9 @@ export function dayBalanceContribution(
    * compartilhada (PLANEJADO ≠ REALIZADO). Quando `today` alcança a data, a
    * contagem passa a valer normalmente. */
   if (date > today) return 0;
+  /* 4D.4 (Parte G): evento do calendário em HOJE sem jornada encerrada
+   * permanece previsão — nunca −8h prematuro. */
+  if (calendarEventPendingToday(view, date, today)) return 0;
   const f = faltaOnDate(faltas, date);
   if (f) return f.date <= today ? view.adjustedBalance : 0;
   return companyBalanceContribution(view);

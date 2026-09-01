@@ -467,7 +467,9 @@ export default function ConfiguracoesPage() {
               <>
                 <p className="mt-1 text-xs text-emerald-700">
                   Ciclo detectado: <b>{calPreview.cycle?.label}</b> ({calPreview.cycle ? `${formatDateBR(calPreview.cycle.start)} → ${formatDateBR(calPreview.cycle.end)}` : ""})
-                  {" · "}{calPreview.stats.count} datas · {calPreview.stats.compensar} com obrigação · A compensar {formatMinutes(calPreview.stats.totalCompensar)} · Abonadas {formatMinutes(calPreview.stats.totalAbonado)}
+                  {/* 4D.4 (Parte N): METADADO BRUTO do arquivo importado —
+                      não é saldo atual nem obrigação recalculada. */}
+                  {" · "}{calPreview.stats.count} datas · {formatMinutes(calPreview.stats.totalCompensar)} marcadas como COMPENSAR · {formatMinutes(calPreview.stats.totalAbonado)} abonadas
                 </p>
                 <div className="mt-3 max-h-48 overflow-auto rounded-lg bg-white/70 ring-1 ring-emerald-200">
                   <table className="w-full min-w-[640px] text-xs">

@@ -116,7 +116,11 @@ check("10. ABONO PARCIAL posterior ao início continua funcionando", () => {
   const cinzas = "2026-02-18";
   const v = companyDayContext(cinzas, [], [], sebrae, S);
   assert.equal(v.effectiveExpected, 240);
-  assert.equal(isMissingExpectedRecord(cinzas, TODAY, v, [], "2026-02-01"), true);
+  /* 4D.4 (Parte I): dia com entrada do calendário NUNCA é "Sem registro" —
+   * o evento explícito é fato conhecido: crédito 4h + jornada 4h ⇒ −4h
+   * factual quando o dia passou sem as 4h regulares. */
+  assert.equal(isMissingExpectedRecord(cinzas, TODAY, v, [], "2026-02-01"), false, "evento de calendário não é Sem registro");
+  assert.equal(v.regularBalance, -240, "−4h factual (0h de 4h)");
   assert.equal(isMissingExpectedRecord(cinzas, TODAY, v, [], "2026-08-29"), false);
 });
 

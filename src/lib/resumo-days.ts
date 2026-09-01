@@ -1,7 +1,7 @@
 // Classificação da tabela do Resumo — reutiliza Sem registro, isAbaixoDaBase
 // e a resolução central. NÃO inventa saldo/déficit a partir de dia sem fatos.
 import { absenceLabel, absenceOnDate, type Absence } from "./absences";
-import { companyDayContext, companyDeficitContribution, type CompanyCalendars } from "./company-calendar";
+import { calendarEventPendingToday, companyDayContext, companyDeficitContribution, type CompanyCalendars } from "./company-calendar";
 import { isAbaixoDaBase } from "./day-situation";
 import { dayBalanceContribution, faltaOnDate, faltaStatusOf } from "./faltas";
 import { isMissingExpectedRecord } from "./missing-records";
@@ -66,6 +66,24 @@ export function resumoTableStatus(p: {
   if (date < today && day.financialPending && day.entries.length > 0) return "incomplete";
   if (day.open) return "in-progress";
   if (day.excessMinutes > 0) return "excess";
+  // 4D.4 (Partes D/G/I): o evento EXPLÍCITO do calendário é fato suficiente.
+  // Realizado o dia: folga/recesso integral com resultado negativo é déficit
+  // factual (nunca "Sem registro"); ABONADO integral é dia ok (saldo 0).
+  if (
+    realized &&
+    view.calendarEntry &&
+    !day.open &&
+    !day.financialPending &&
+    view.abonadoIntegral
+  ) return "ok";
+  if (
+    realized &&
+    view.calendarEntry &&
+    !day.open &&
+    !day.financialPending &&
+    view.requiredWorkMinutes > 0 &&
+    view.regularBalance < 0
+  ) return "deficit";
   if (isAbaixoDaBase({ date, today, view, missingExpected })) return "deficit";
   if (day.entries.length > 0) return "ok";
   return "empty";
@@ -112,8 +130,14 @@ export function buildResumoDayRow(p: {
       (absence ? absenceLabel(absence) : null) ??
       (faltaStatus === "efetiva" ? "Falta" : faltaStatus === "prevista" ? "Falta prevista" : null),
     balanceContribution: dayBalanceContribution(cctx, faltas, date, today),
+    // 4D.4 (Parte G): evento do calendário em HOJE sem jornada encerrada
+    // permanece previsão — déficit factual só quando o dia é fato.
     deficitContribution:
-      missingExpected || date > today || faltaStatus === "prevista" || noFacts
+      missingExpected ||
+      date > today ||
+      faltaStatus === "prevista" ||
+      noFacts ||
+      calendarEventPendingToday(cctx, date, today)
         ? 0
         : companyDeficitContribution(cctx),
     faltaStatus,

@@ -204,13 +204,16 @@ check("H. seed → histórico 45 · [10+] realizado 40 · regular 5 · aberto 0 
     compensations: seed.compensations,
   };
   const f = summarizeOpenDeficit(input);
-  assert.equal(f.generatedDeficitMinutes, 45, "histórico 45min (21/08 −15 · 26/08 −30)");
+  /* 4D.4: a decomposição factual agora inclui a folga a compensar 25/08
+   * realizada sem trabalho (−8h — evento explícito é fato suficiente). */
+  assert.equal(f.generatedDeficitMinutes, 525, "45min de dias comuns (21/08 −15 · 26/08 −30) + 8h da folga 25/08 (fato)");
   assert.equal(f.rawSettledExcessMinutes, 40, "[10+] realizado no período: 21/08 10min + 26/08 30min");
   assert.equal(f.settledByExcessMinutes, 40, "todos dentro da dívida factual (sem inconsistência)");
-  assert.equal(f.coveredByRegularMinutes, 5, "restante 5min coberto pelo regular (de 7h)");
-  assert.equal(f.openDeficitMinutes, 0, "déficit aberto = 0");
+  assert.equal(f.coveredByRegularMinutes, 420, "cobertura natural do banco regular sobre a dívida factual");
+  assert.equal(f.openDeficitMinutes, 65, "aberto = 105 líquido − 40 já destinados");
   assert.equal(f.generatedCreditMinutes, 420, "crédito factual 7h intacto");
-  assert.equal(f.netBalanceMinutes, 375, "saldo factual +6h15 intacto");
+  /* 4D.4: líquido passa a −1h45 (folga 25/08 −8h no saldo factual). */
+  assert.equal(f.netBalanceMinutes, -105, "líquido factual = 420 − 525");
 
   // Vínculo por dia: cada settlement aplicado ao déficit do próprio sourceDate
   const byCycle = openDeficitByCycle(input);
@@ -255,7 +258,7 @@ check("I. invariantes: settled≤déficit, settled+covered≤déficit, aberto=d�
 });
 
 /* ── J. Regressão: 2A e 2B intactas no seed ────────────────── */
-check("J. 2A/2B intactas: seed → fatos 7h/45min/+6h15 e cobertura regular 45min/0", () => {
+check("J. 2A/2B intactas: seed → fatos 7h/8h45/−1h45 e cobertura regular (4D.4: folga 25/08 −8h factual)", () => {
   const seed = buildLegacyDemoScenario();
   const s = settingsOf(seed.user);
   const period = getPointPeriod(TODAY);
@@ -266,11 +269,12 @@ check("J. 2A/2B intactas: seed → fatos 7h/45min/+6h15 e cobertura regular 45mi
   };
   const facts = summarizeRegularFacts(base);
   assert.equal(facts.generatedCreditMinutes, 420);
-  assert.equal(facts.generatedDeficitMinutes, 45);
-  assert.equal(facts.netBalanceMinutes, 375);
+  /* 4D.4: folga a compensar 25/08 realizada sem trabalho ⇒ −8h factual. */
+  assert.equal(facts.generatedDeficitMinutes, 525);
+  assert.equal(facts.netBalanceMinutes, -105);
   const cov = summarizeRegularCoverage(base);
-  assert.equal(cov.coveredByRegularMinutes, 45);
-  assert.equal(cov.uncoveredByRegularMinutes, 0);
+  assert.equal(cov.coveredByRegularMinutes, 420);
+  assert.equal(cov.uncoveredByRegularMinutes, 105);
 });
 
 console.log(`\nDÉFICIT ABERTO (ÉTAPA 2C) — OK (${passed} testes)`);

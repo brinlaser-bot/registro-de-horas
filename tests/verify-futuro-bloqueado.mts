@@ -169,7 +169,9 @@ check("I. sábado +2h, feriado abonado +2h e obrigação 25/08 (8h) intactos", (
     { id: 3, date: "2026-09-07", time: "08:00", type: "entrada" as const, note: null },
     { id: 4, date: "2026-09-07", time: "10:00", type: "saida" as const, note: null },
   ];
-  assert.equal(companyDayContext("2026-09-07", hol, [], both, settings).adjustedBalance, 120, "abonado +2h");
+  // 4D.4 (Parte C): trabalho em abonado integral NÃO gera saldo automático:
+  assert.equal(companyDayContext("2026-09-07", hol, [], both, settings).adjustedBalance, 0, "abonado com trabalho: saldo 0, batidas preservadas");
+  assert.equal(companyDayContext("2026-09-07", hol, [], both, settings).ctx.day.workedMinutes, 120);
   const debts = buildDebtDays([], [], settings, annualCycleBounds(getAnnualPointCycle("2026-08-23")), [], both);
   assert.equal(debts.find((d) => d.date === "2026-08-25" && d.kind === "calendario")?.debtMinutes, 480, "obrigação 25/08 = 8h");
 });

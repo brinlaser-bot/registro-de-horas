@@ -101,8 +101,19 @@ export interface CalendarDayView {
    * Mesma semântica validada na correção de sábado/domingo:
    * folga → esperado 0, saldo = trabalhado, déficit 0, "Folga hoje". */
   type: CompanyDayType;
-  /** Jornada esperada efetiva do dia (0 em folga; jornada do calendário em eventos). */
+  /** Jornada esperada efetiva do dia (0 em folga; jornada do calendário em eventos).
+   *  4D.3/4D.4: quantidade de JORNADA REGULAR A CUMPRIR (gate de planejamento
+   *  [10+]) — NÃO é a base financeira do dia. */
   effectiveExpected: number;
+  /* ── 4D.4 — SEMÂNTICA FACTUAL DO CALENDÁRIO (conceitos separados) ── */
+  /** Base de referência do dia (normalmente a jornada padrão — 8h). */
+  referenceBaseMinutes: number;
+  /** Crédito do calendário: horas que a empresa reconhece sem trabalho. */
+  calendarCreditMinutes: number;
+  /** Trabalho necessário para saldo 0 (COMPENSAR integral = horasACompensar). */
+  requiredWorkMinutes: number;
+  /** ABONADO integral: crédito cumpre a jornada — saldo regular conhecido 0. */
+  abonadoIntegral: boolean;
   /** Saldo ajustado para apresentação. */
   adjustedBalance: number;
   /** Déficit comum para apresentação (0 em folga). */
@@ -422,6 +433,42 @@ export function companyDayContext(
     const calendarioACompensar = calendarEntry.tratamento === "COMPENSAR" ? Math.max(0, calendarEntry.horasACompensar * 60) : 0;
     const pending = day.open || day.financialPending;
     const abonoPartial = calendarEntry.tratamento === "ABONADO_PARCIAL";
+    /* ── 4D.4 — SEMÂNTICA FACTUAL DO CALENDÁRIO (regra-mãe) ──
+     * ANTES da data o evento é PREVISÃO (não altera saldo factual); DEPOIS
+     * que o dia é realizado, o efeito real do calendário passa a fazer parte
+     * do SALDO FACTUAL — sem dívida paralela. Conceitos separados: */
+    const referenceBaseMinutes = expectedMinutesOf(settings);
+    // CRÉDITO DO CALENDÁRIO — horas reconhecidas sem trabalho:
+    //  · ABONADO/ABONADO_PARCIAL: horasAbonadas da entrada;
+    //  · COMPENSAR com jornadaEsperada > 0 (dia PARCIAL, ex.: Cinzas 4h+4h):
+    //    a parte da base que não precisa ser trabalhada (implícita);
+    //  · COMPENSAR integral (jornadaEsperada = 0): 0 — a folga inteira é
+    //    paga com trabalho no próprio dia quando realizado.
+    const calendarCreditMinutes = abonoPartial
+      ? abonadasMinutes
+      : calendarioACompensar > 0
+        ? (expectedRegular > 0 ? Math.max(0, referenceBaseMinutes - expectedRegular - abonadasMinutes) : abonadasMinutes)
+        : abonadasMinutes;
+    // TRABALHO NECESSÁRIO para saldo 0:
+    //  · jornadaEsperada > 0 (parcial) → jornadaEsperada (regra normal de
+    //    jornada regular);
+    //  · COMPENSAR integral → horasACompensar (0h ⇒ −8h factual · 3h ⇒ −5h ·
+    //    8h ⇒ 0 · 9h ⇒ +1h; entre 8h e 10h crédito regular; acima do teto o
+    //    excedente segue [10+] separado);
+    //  · ABONADO integral (jornadaEsperada 0) → 0: feriado/folga abonada
+    //    NUNCA exige trabalho (em fim de semana o importador deriva
+    //    horasAbonadas 0 — segue folga; trabalho no dia vira crédito, como
+    //    em qualquer folga).
+    const requiredWorkMinutes = abonoPartial
+      ? expectedRegular
+      : expectedRegular > 0
+        ? expectedRegular
+        : calendarEntry.tratamento === "COMPENSAR"
+          ? calendarioACompensar
+          : 0;
+    // ABONADO integral com crédito explícito: saldo regular conhecido 0.
+    const abonadoIntegral =
+      !abonoPartial && calendarioACompensar === 0 && abonadasMinutes > 0;
     const abonoStart = calendarEntry.abonoStart ?? "08:00";
     const abonoEnd = calendarEntry.abonoEnd ?? "12:00";
     // CAP OFICIAL: só o que entra no ponto (min(worked, limite diário)) gera
@@ -430,11 +477,20 @@ export function companyDayContext(
     const workedInAbono = abonoPartial ? minutesInWindow(day.segments, abonoStart, abonoEnd) : 0;
     const workedRegular = abonoPartial ? Math.max(0, workedCap - Math.min(workedInAbono, workedCap)) : workedCap;
     const cargaConsiderada = Math.min(workedRegular, expectedRegular) + abonadasMinutes;
-    // COMPENSAR: trabalho no próprio dia reduz a OBRIGAÇÃO, não gera crédito
-    // até ultrapassar o original. Déficit comum = 0 (a dívida é a obrigação).
-    const compensarSurplus =
-      calendarEntry.tratamento === "COMPENSAR" ? Math.max(0, workedCap - calendarioACompensar) : null;
-    const regularBalance = compensarSurplus ?? regularBalanceMinutes(workedRegular, expectedRegular, settings.maxDailyMinutes);
+    // 4D.4 — SALDO REGULAR: UMA única contribuição factual do dia (a regra
+    // antiga do surplus deixou a folga integral realizada com saldo 0 e
+    // empurrava o efeito para uma obrigação paralela — SUPERADA):
+    //  · ABONADO integral: 0 — crédito cumpre a jornada; trabalho no dia NÃO
+    //    gera crédito automático (política da empresa pendente; o card exibe
+    //    observação) e as batidas permanecem preservadas;
+    //  · ABONADO_PARCIAL: regra existente (janela de abono neutralizada);
+    //  · demais eventos (COMPENSAR integral/parcial, ABONADO com jornada):
+    //    trabalho realizado contra o trabalho necessário do dia — teto 10h.
+    const regularBalance = abonadoIntegral
+      ? 0
+      : abonoPartial
+        ? regularBalanceMinutes(workedRegular, expectedRegular, settings.maxDailyMinutes)
+        : regularBalanceMinutes(workedCap, requiredWorkMinutes, settings.maxDailyMinutes);
     const isHoliday = calendarEntry.categoria.includes("Feriado") || calendarEntry.categoria.includes("Aniversário") || calendarEntry.descricao.toLowerCase().includes("natal");
     const marker = abonoPartial
       ? "abono-parcial"
@@ -466,9 +522,15 @@ export function companyDayContext(
       type: "evento",
       effectiveExpected: expectedRegular,
       adjustedBalance: pending ? 0 : regularBalance,
-      adjustedDeficit: pending ? 0 : Math.max(0, expectedRegular - workedRegular),
+      // 4D.4: o déficit do dia é contra o TRABALHO NECESSÁRIO do evento (o
+      // próprio saldo já carrega o efeito — nunca um segundo "-8h").
+      adjustedDeficit: pending ? 0 : abonadoIntegral ? 0 : Math.max(0, requiredWorkMinutes - (abonoPartial ? workedRegular : workedCap)),
       displayDay: { ...day, expectedMinutes: expectedRegular, balanceMinutes: pending ? 0 : regularBalance, status: statusOf() },
       workedInAbonoMinutes: workedInAbono,
+      referenceBaseMinutes,
+      calendarCreditMinutes,
+      requiredWorkMinutes,
+      abonadoIntegral,
     };
   }
 
@@ -494,6 +556,10 @@ export function companyDayContext(
       adjustedBalance: credit,
       adjustedDeficit: 0,
       displayDay: { ...day, expectedMinutes: 0, balanceMinutes: credit, status: statusOf() },
+      referenceBaseMinutes: 0,
+      calendarCreditMinutes: 0,
+      requiredWorkMinutes: 0,
+      abonadoIntegral: false,
     };
   }
 
@@ -513,6 +579,10 @@ export function companyDayContext(
       adjustedBalance: baseCtx.adjustedBalance,
       adjustedDeficit: baseCtx.adjustedDeficit,
       displayDay: { ...day, expectedMinutes: baseCtx.effectiveExpected, balanceMinutes: baseCtx.adjustedBalance, status: statusOf() },
+      referenceBaseMinutes: 0,
+      calendarCreditMinutes: 0,
+      requiredWorkMinutes: 0,
+      abonadoIntegral: false,
     };
   }
 
@@ -531,6 +601,10 @@ export function companyDayContext(
     adjustedBalance: baseCtx.adjustedBalance,
     adjustedDeficit: baseCtx.adjustedDeficit,
     displayDay: { ...day, expectedMinutes: baseCtx.effectiveExpected, balanceMinutes: baseCtx.adjustedBalance, status: day.status },
+    referenceBaseMinutes: 0,
+    calendarCreditMinutes: 0,
+    requiredWorkMinutes: 0,
+    abonadoIntegral: false,
   };
 }
 
@@ -589,6 +663,22 @@ export function calendarMonthlyTotals(entries: CompanyCalendarEntry[]): Record<s
  * demais dias usam o agregador clássico de dayContext (sem dados/jornada
  * aberta = 0). Não altera a matemática validada de férias/saúde/acordo.
  */
+/**
+ * 4D.4 (PARTE G) — um evento do calendário em HOJE só integra o saldo
+ * factual quando o dia já tem registro e a jornada está encerrada (fato
+ * completo). Folga a compensar HOJE ainda sem batidas (ou com jornada em
+ * aberto) NÃO vira −8h prematuro: permanece previsão/pendência até o dia
+ * fechar. Dias PASSADOS com evento explícito são fato suficiente (o
+ * calendário é fato conhecido da empresa).
+ */
+export function calendarEventPendingToday(view: CalendarDayView, date: string, today: string): boolean {
+  return (
+    date === today &&
+    !!view.calendarEntry &&
+    (view.ctx.day.entries.length === 0 || view.ctx.day.open || view.ctx.day.financialPending)
+  );
+}
+
 export function companyBalanceContribution(view: CalendarDayView): number {
   if (view.ctx.day.financialPending) return 0;
   if (view.calendarEntry || view.isWeekend) return view.regularBalance;

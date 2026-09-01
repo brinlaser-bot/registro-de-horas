@@ -121,11 +121,14 @@ check("10. falta prevista: não Sem registro", () => {
   assert.equal(isMissingExpectedRecord(futura, TODAY, v, faltas), false);
 });
 
-check("11. ABONO PARCIAL passado base efetiva 4h vazio: Sem registro", () => {
+check("11. ABONO PARCIAL passado base efetiva 4h vazio: evento de calendário NUNCA é Sem registro (4D.4)", () => {
   const cinzas = "2026-02-18";
   const v = companyDayContext(cinzas, [], [], sebraeCals, S);
   assert.equal(v.effectiveExpected, 240);
-  assert.equal(isMissingExpectedRecord(cinzas, TODAY, v, []), true);
+  /* 4D.4 (Parte I): a natureza do dia vem do calendário importado (crédito
+   * 4h + jornada 4h) — evento explícito é fato conhecido da empresa. */
+  assert.equal(isMissingExpectedRecord(cinzas, TODAY, v, []), false, "calendário determina a situação");
+  assert.equal(v.regularBalance, -240, "−4h factual (0h de 4h)");
 });
 
 check("12. entrada isolada: Registro pendente, não Sem registro", () => {

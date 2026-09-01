@@ -89,63 +89,60 @@ const USE_20: SpecialExcessUse = {
   allocations: [{ originDate: "2026-08-20", minutes: 20 }],
   allocationStrategy: "fifo", status: "utilizado", createdAt: 1,
 };
-const fc = (calendars: CompanyCalendars | undefined, compensations: Compensation[] = [], today = HOJE) =>
-  buildCalendarForecast({ calendars, compensations, cycle: CICLO, today });
+const fc = (calendars: CompanyCalendars | undefined, today = HOJE) =>
+  buildCalendarForecast({ calendars, cycle: CICLO, today });
 
 /* ════════════════ TESTES 01–12 ════════════════ */
 
-check("TESTE 01 DE 12 — COMPENSAR futuro aberto entra no total", () => {
+check("TESTE 01 DE 12 — COMPENSAR futuro entra na previsão (impacto conhecido −8h)", () => {
   const f = fc(cal1(COMP8("2026-09-10")));
-  assert.equal(f.openEventCount, 1);
-  assert.equal(f.obligationMinutes, 480, "obrigação original 8h");
-  assert.equal(f.uncoveredMinutes, 480, "sem cobertura: 8h em aberto");
+  assert.equal(f.eventCount, 1);
+  assert.equal(f.futureImpactMinutes, -480, "impacto futuro conhecido 8h");
   assert.equal(f.events[0]?.status, "future", "status temporal future");
-  assert.equal(f.events[0]?.originalMinutes, 480, "originalMinutes derivado da entrada");
+  assert.equal(f.events[0]?.impactMinutes, -480, "impactMinutes derivado da entrada");
 });
 
-check("TESTE 02 DE 12 — COMPENSAR cuja data === today permanece no total", () => {
+check("TESTE 02 DE 12 — COMPENSAR cuja data === today permanece na previsão (não realizada)", () => {
   const f = fc(cal1(COMP8(HOJE)));
-  assert.equal(f.openEventCount, 1, "NÃO desaparece na data (bug 1 da 4D)");
-  assert.equal(f.uncoveredMinutes, 480, "obrigação de hoje em aberto");
-  assert.equal(f.events[0]?.status, "today", "status temporal today");
+  assert.equal(f.eventCount, 1, "NÃO desaparece na data (bug 1 da 4D)");
+  assert.equal(f.futureImpactMinutes, -480, "hoje pendente: permanece previsão (nunca −8h prematuro no factual)");
+  assert.equal(f.events[0]?.status, "today-pending", "status temporal today-pending");
 });
 
-check("TESTE 03 DE 12 — COMPENSAR passado ainda aberto permanece no total", () => {
-  // 4D.2: 19/08 é passado SEM batidas (nada cobre) — continua no total.
+check("TESTE 03 DE 12 — COMPENSAR passado SAI da previsão (virou saldo factual — 4D.4)", () => {
+  /* 4D.4 (Partes G/J): dia passado com evento explícito é fato suficiente —
+   * o efeito está no SALDO FACTUAL (−8h); previsão NUNCA dupla-conta. */
   const f = fc(cal1(COMP8("2026-08-19")));
-  assert.equal(f.openEventCount, 1, "passada e aberta continua contabilizada");
-  assert.equal(f.uncoveredMinutes, 480);
-  assert.equal(f.events[0]?.status, "overdue", "status temporal overdue (passada em aberto)");
+  assert.equal(f.eventCount, 0, "passado não está na previsão");
+  assert.equal(f.futureImpactMinutes, 0);
 });
 
-check("TESTE 04 DE 12 — COMPENSAR passado integralmente concluído sai do uncovered", () => {
-  // 4D.2: evento em 19/08 (sem batidas) — aqui a quitação vem SÓ da
-  // cobertura externa; a cobertura pelo próprio dia tem suíte própria.
+check("TESTE 04 DE 12 — COMPENSAR passado sai da previsão (realizado ⇒ factual, com ou sem quitação)", () => {
+  /* 4D.4: a previsão é PURA — não lê compensações da Central; o passado
+   * inteiro é fato (saldo factual) e a quitação pelo próprio dia acontece
+   * no saldo do dia (suíte 4D.4, testes 03–06). */
   const concluida: Compensation = { id: 1, sourceDate: "2026-08-19", targetDate: "2026-08-21", minutes: 480, status: "concluida", kind: "calendario" };
-  const f = fc(cal1(COMP8("2026-08-19")), [concluida]);
-  assert.equal(f.concludedExternalCoverageMinutes, 480, "cobertura concluída registrada");
-  assert.equal(f.obligationMinutes, 480, "original permanece no histórico do ciclo");
-  assert.equal(f.uncoveredMinutes, 0, "uncovered zerado");
-  assert.equal(f.openEventCount, 0, "sai do total em aberto");
-  assert.equal(f.events[0]?.status, "settled", "status settled (quitada)");
+  const f = buildCalendarForecast({ calendars: cal1(COMP8("2026-08-19")), cycle: CICLO, today: HOJE });
+  assert.equal(f.eventCount, 0, "passado não está na previsão (independe de quitação)");
+  assert.equal(f.futureImpactMinutes, 0);
 });
 
-check("TESTE 05 DE 12 — Cobertura planejada NÃO reduz uncovered", () => {
-  const pendente: Compensation = { id: 1, sourceDate: "2026-08-19", targetDate: "2026-08-21", minutes: 480, status: "pendente", kind: "calendario" };
-  const f = fc(cal1(COMP8("2026-08-19")), [pendente]);
-  assert.equal(f.plannedCoverageMinutes, 480, "planejada aparece separada");
-  assert.equal(f.concludedExternalCoverageMinutes, 0, "planejada não é quitação");
-  assert.equal(f.uncoveredMinutes, 480, "leitura conservadora: só concluída reduz");
-  assert.equal(f.openEventCount, 1);
-  // Vínculo canônico preservado: kind="calendario" + sourceDate === data da obrigação.
-  assert.ok(forecastSrc.includes('c.sourceDate !== date'), "cobertura específica por sourceDate");
-  assert.ok(forecastSrc.includes('!== "calendario"'), "só kind calendario cobre obrigação de calendário");
+check("TESTE 05 DE 12 — Plano NÃO reduz a previsão futura (PLANEJADO ≠ REALIZADO)", () => {
+  /* 4D.4 (Parte K): previsão pura — plano é informativo da Central e nunca
+   * quita; o impacto futuro conhecido permanece. */
+  const pendente: Compensation = { id: 1, sourceDate: "2026-09-10", targetDate: "2026-08-21", minutes: 480, status: "pendente", kind: "calendario" };
+  const f = fc(cal1(COMP8("2026-09-10")));
+  const fComPlano = buildCalendarForecast({ calendars: cal1(COMP8("2026-09-10")), cycle: CICLO, today: HOJE });
+  assert.equal(f.eventCount, 1);
+  assert.equal(fComPlano.futureImpactMinutes, -480, "plano não reduz a previsão");
+  // Sem dupla contagem com a Central: o forecast não lê compensações.
+  assert.ok(!forecastSrc.includes("compensations"), "forecast não consome compensações (fluxo legado fica na Central)");
 });
 
 check("TESTE 06 DE 12 — COMPENSAR explícito em sábado/domingo com horasACompensar > 0 é respeitado", () => {
   const f = fc(cal1(COMP8("2026-08-29"))); // 2026-08-29 é sábado
-  assert.equal(f.openEventCount, 1, "entrada explícita do calendário vale no fim de semana (bug 2 da 4D)");
-  assert.equal(f.uncoveredMinutes, 480, "obrigação = horasACompensar da entrada (nada inferido)");
+  assert.equal(f.eventCount, 1, "entrada explícita do calendário vale no fim de semana (bug 2 da 4D)");
+  assert.equal(f.futureImpactMinutes, -480, "impacto = horasACompensar da entrada (nada inferido)");
   assert.equal(f.events[0]?.status, "future");
 });
 
@@ -154,12 +151,12 @@ check("TESTE 07 DE 12 — Sábado/domingo comum permanece neutro", () => {
     date: "2026-08-30", descricao: "Abono", categoria: "Abono",
     tratamento: "ABONADO", horasACompensar: 0, jornadaEsperadaHoras: 8, horasAbonadas: 8, observacao: null,
   }));
-  assert.equal(f.openEventCount, 0, "domingo sem COMPENSAR em aberto: neutro");
-  assert.equal(f.uncoveredMinutes, 0);
+  assert.equal(f.eventCount, 0, "domingo sem COMPENSAR: neutro");
+  assert.equal(f.futureImpactMinutes, 0);
   // E sem NENHUMA entrada também (fim de semana comum de verdade):
   const vazio = fc(undefined);
-  assert.equal(vazio.openEventCount, 0);
-  assert.equal(vazio.uncoveredMinutes, 0);
+  assert.equal(vazio.eventCount, 0);
+  assert.equal(vazio.futureImpactMinutes, 0);
 });
 
 check("TESTE 08 DE 12 — Feriado/abono com 0h a compensar permanece neutro", () => {
@@ -167,36 +164,38 @@ check("TESTE 08 DE 12 — Feriado/abono com 0h a compensar permanece neutro", ()
     date: "2026-09-07", descricao: "Feriado Nacional", categoria: "Feriado Nacional",
     tratamento: "ABONADO", horasACompensar: 0, jornadaEsperadaHoras: 8, horasAbonadas: 8, observacao: null,
   }));
-  assert.equal(f.openEventCount, 0);
-  assert.equal(f.obligationMinutes, 0);
-  assert.equal(f.uncoveredMinutes, 0);
+  assert.equal(f.eventCount, 0);
+  assert.equal(f.futureImpactMinutes, 0);
   // COMPENSAR com horasACompensar <= 0 também é neutro:
   const f2 = fc(cal1({
     date: "2026-09-08", descricao: "Entrada zerada", categoria: "Compensação 4 Horas",
     tratamento: "COMPENSAR", horasACompensar: 0, jornadaEsperadaHoras: 4, horasAbonadas: 0, observacao: null,
   }));
-  assert.equal(f2.openEventCount, 0, "COMPENSAR com 0h não gera obrigação");
+  assert.equal(f2.eventCount, 0, "COMPENSAR com 0h não gera impacto");
 });
 
-check("TESTE 09 DE 12 — Previsão do ciclo = saldo projetado − total uncovered (futuro + hoje + passado aberto)", () => {
+check("TESTE 09 DE 12 — Previsão do ciclo = projetado + impacto futuro (passado virou factual — 4D.4)", () => {
   const cals = cal1(COMP8("2026-08-19"));
-  // Três obrigações: passada em aberto (19/08, sem batidas), hoje (28/08) e futura (10/09):
+  // Três eventos: passado (19/08), hoje (28/08, não realizado) e futuro (10/09):
   cals[0].entries.push(
     { id: 2, ...COMP8(HOJE) },
     { id: 3, ...COMP8("2026-09-10") },
   );
   const f = fc(cals);
-  assert.equal(f.openEventCount, 3);
-  assert.equal(f.uncoveredMinutes, 1440, "8h + 8h + 8h em aberto");
+  /* 4D.4 (Partes G/J/K): o passado SAIU da previsão (é saldo factual —
+   * −8h do 19/08 entram no factual); a previsão só tem futuro + hoje pendente. */
+  assert.equal(f.eventCount, 2, "hoje pendente + futuro");
+  assert.equal(f.futureImpactMinutes, -960, "8h (hoje) + 8h (futuro)");
   const sit = buildCycleSituation({
     today: HOJE, entries: st().entries, absences: st().absences,
     calendars: cals, settings, faltas: st().faltas,
     controlStartDate: st().user.controlStartDate ?? null, uses: [USE_20],
   });
-  const previsao = sit.projectedBalanceMinutes - f.uncoveredMinutes;
-  assert.equal(previsao, sit.projectedBalanceMinutes - 1440, "previsão usa o TOTAL (futuro+hoje+passado aberto)");
+  assert.equal(sit.factualBalanceMinutes < 0, true, "o −8h do passado está no saldo factual do ciclo");
+  const previsao = sit.projectedBalanceMinutes + f.futureImpactMinutes;
+  assert.equal(previsao, sit.projectedBalanceMinutes - 960, "previsão = projetado + impacto futuro conhecido");
   // A página aplica a MESMA matemática e rotula PREVISÃO:
-  assert.ok(page.includes("forecastBalanceMinutes = cycleSituation.projectedBalanceMinutes - forecast.uncoveredMinutes"), "previsão = projetado − obrigações em aberto (na página)");
+  assert.ok(page.includes("projectedBalanceMinutes + forecast.futureImpactMinutes"), "previsão = projetado + impacto futuro (na página)");
   const frente = page.slice(page.indexOf("F. O QUE VEM PELA FRENTE"), page.indexOf('title="Dias recentes"'));
   assert.ok(frente.includes('label="Previsão do ciclo"'), "card rotulado PREVISÃO");
   assert.ok(!/saldo (factual|atual|realizado)/i.test(frente.slice(frente.indexOf("Previsão do ciclo"))), "nunca rotulada como saldo factual/atual/realizado");
@@ -209,11 +208,11 @@ check("TESTE 10 DE 12 — Isolamento absoluto do ciclo em 30/04", () => {
     entries: [{ id: 1, ...COMP8(date) }],
   }];
   const cals = [...mk("2026-04-30", "2025-05-01", "2026-04-30"), ...mk("2026-05-01", "2026-05-01", "2027-04-30")];
-  const fev = buildCalendarForecast({ calendars: cals, compensations: [], cycle: "2025/2026", today: "2026-01-10" });
-  assert.equal(fev.openEventCount, 1, "só 30/04 no ciclo 2025/2026");
+  const fev = buildCalendarForecast({ calendars: cals, cycle: "2025/2026", today: "2026-01-10" });
+  assert.equal(fev.eventCount, 1, "só 30/04 no ciclo 2025/2026");
   assert.equal(fev.events[0]?.date, "2026-04-30", "30/04 é limite absoluto incluso");
-  const f27 = buildCalendarForecast({ calendars: cals, compensations: [], cycle: "2026/2027", today: "2026-01-10" });
-  assert.equal(f27.openEventCount, 1, "o ciclo seguinte só enxerga 01/05");
+  const f27 = buildCalendarForecast({ calendars: cals, cycle: "2026/2027", today: "2026-01-10" });
+  assert.equal(f27.eventCount, 1, "o ciclo seguinte só enxerga 01/05");
   assert.equal(f27.events[0]?.date, "2026-05-01");
 });
 
@@ -233,15 +232,17 @@ check("TESTE 11 DE 12 — Ordem da Visão Geral: saudação → atenção → Re
   assert.ok(saudacao < atencao && atencao < registro, "saudação → atenção → Registro de hoje");
   assert.ok(registro < ciclo && ciclo < periodo, "Registro de hoje → Situação do ciclo → Período atual");
   assert.ok(periodo < frente && frente < recentes, "Período atual → O que vem pela frente → Dias recentes");
-  // Parte B: indicador renomeado (obrigação não é só "futura" anymore):
-  assert.ok(page.includes('label="Obrigações de calendário a compensar"'), "nomenclatura precisa do total");
-  assert.ok(!page.includes("Impacto futuro do calendário"), "rótulo antigo removido");
-  assert.ok(page.includes("Inclui obrigações futuras e ainda não concluídas"), "subtexto do total");
+  // 4D.4 (Parte L): indicador da frente = impacto futuro conhecido:
+  assert.ok(page.includes('label="Impacto futuro conhecido do calendário"'), "nomenclatura precisa do impacto futuro");
+  assert.ok(!page.includes("Obrigações de calendário a compensar"), "rótulo da semântica paralela removido");
+  assert.ok(page.includes("Saldo projetado + impacto futuro conhecido"), "subtexto da previsão");
   assert.ok(!/déficit factual|saldo negativo atual|dívida factual/i.test(page), "sem vocabulário proibido");
-  // Parte F: Atenção agora informa obrigação de hoje/passada aberta:
-  assert.ok(page.includes("de calendário ainda a compensar"), "aviso de hoje");
-  assert.ok(page.includes("de obrigação de calendário pendente"), "aviso de passada em aberto");
-  assert.ok(page.includes("calendarTodayUncoveredMinutes > 0 || calendarOverdueUncoveredMinutes > 0"), "condicional (só quando existe)");
+  /* 4D.4 (Parte J): o aviso de "obrigação pendente" sai da Atenção agora —
+   * dias realizados estão no saldo factual (uma única contribuição); a
+   * Atenção agora voltou a ser só registros pendentes + planos do dia. */
+  assert.ok(!page.includes("de obrigação de calendário pendente"), "aviso da semântica paralela removido");
+  assert.ok(!page.includes("calendarOverdueUncoveredMinutes"), "derivação de pendência paralela removida");
+  assert.ok(page.includes("(pendingPunchesCount > 0 || pendingPlansCount > 0)"), "Atenção agora: só decisões reais");
 });
 
 check("TESTE 12 DE 12 — Mobile de Dias recentes preservado + desktop em grid consistente + Central de Horas sem diff", () => {

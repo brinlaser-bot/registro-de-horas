@@ -117,28 +117,33 @@ check("§5 Tiradentes 21/04/2026: card saldo 0, abonado 8h, carga 8h; período d
   assert.equal(ciclo.balance, 0, "saldo do período = 0");
 });
 
-check("§6 Dia do Trabalho 01/05/2025: saldo +0min, déficit 0 (nunca -8h)", () => {
+check("§6 Dia do Trabalho 01/05/2025: abonado integral ⇒ saldo 0, déficit 0 (4D.4)", () => {
   const d = pageDay("2025-05-01", [], [], CALS);
   assert.equal(d.calendarLabel, "Feriado — Dia do Trabalho");
   assert.equal(d.cctx.abonadasMinutes, 480);
   assert.equal(d.cctx.cargaConsiderada, 480);
-  assert.equal(d.balanceView.adjustedBalance, 0);
+  assert.equal(d.balanceView.adjustedBalance, 0, "crédito 8h cumpre a jornada (nunca -8h)");
   assert.equal(d.balanceView.adjustedDeficit, 0);
   const per = registrosPeriodSummary({ from: "2025-04-21", to: "2025-05-20" }, [], [], CALS);
-  assert.equal(per.get(getAnnualPointCycle("2025-05-01"))!.deficit, 0);
+  /* 4D.4 (Partes D/G/I): no período há UMA folga a compensar passada sem
+   * trabalho (02/05) — −8h FACTUAL (evento explícito é fato suficiente;
+   * não é "Sem registro" nem obrigação paralela). */
+  assert.equal(per.get(getAnnualPointCycle("2025-05-01"))!.deficit, 480);
 });
 
-check("§7 Folga a compensar 02/05/2025: saldo 0, déficit comum 0, obrigação calendário 8h separada", () => {
+check("§7 Folga a compensar 02/05/2025: saldo factual −8h, déficit do dia 8h, obrigação calendário 8h na Central", () => {
   const d = pageDay("2025-05-02", [], [], CALS);
   assert.equal(d.calendarLabel, "Folga a compensar — Calendário");
   assert.equal(d.balanceView.effectiveExpected, 0, "jornada esperada regular 0");
-  assert.equal(d.balanceView.adjustedBalance, 0, "NUNCA saldo -8h");
-  assert.equal(d.deficitContribution, 0, "NUNCA déficit comum 8h");
+  /* 4D.4 (Parte D): folga integral realizada sem trabalho ⇒ saldo −8h
+   * (uma única contribuição factual — nunca saldo 0 + obrigação paralela). */
+  assert.equal(d.balanceView.adjustedBalance, -480, "saldo factual −8h");
+  assert.equal(d.deficitContribution, 480, "déficit do dia = 8h necessárias não trabalhadas");
   const debts = buildDebtDays([], [], settings, { from: "2025-05-02", to: "2025-05-02" }, [], CALS);
   assert.deepEqual(
     debts.map((x) => [x.kind, x.debtMinutes]),
     [["calendario", 480]],
-    "somente obrigação de calendário = 8h",
+    "obrigação original segue na Central (SEM dupla contagem: sem kind deficit)",
   );
 });
 
@@ -153,7 +158,9 @@ check("§8 Sábado com evento 10/05/2025: tudo 0, label preservado (nunca -8h)",
   assert.equal(d.balanceView.adjustedBalance, 0);
   assert.equal(d.balanceView.adjustedDeficit, 0);
   const per = registrosPeriodSummary({ from: "2025-04-21", to: "2025-05-20" }, [], [], CALS);
-  assert.equal(per.get(getAnnualPointCycle("2025-05-10"))!.deficit, 0);
+  /* 4D.4: mesmo período da §6 — a folga 02/05 passada sem trabalho é −8h
+   * factual (o sábado 10/05 em si continua tudo 0). */
+  assert.equal(per.get(getAnnualPointCycle("2025-05-10"))!.deficit, 480);
 });
 
 check("§9a Feriado em domingo 07/09/2025: tudo 0", () => {
@@ -176,12 +183,14 @@ check("§9b Abono em dia útil 24/12/2025: abonado 8h, carga 8h, saldo 0, défic
   assert.equal(d.deficitContribution, 0);
 });
 
-check("§9c Recesso 22/12/2025: saldo 0, déficit comum 0, calendário a compensar 8h", () => {
+check("§9c Recesso 22/12/2025: saldo factual −8h (4D.4), obrigação original 8h na Central", () => {
   const d = pageDay("2025-12-22", [], [], CALS);
   assert.match(d.calendarLabel ?? "", /^Recesso de final de ano/);
   assert.equal(d.balanceView.effectiveExpected, 0);
-  assert.equal(d.balanceView.adjustedBalance, 0);
-  assert.equal(d.deficitContribution, 0);
+  /* 4D.4 (Parte D): recesso integral passado sem trabalho ⇒ −8h factual
+   * (uma única contribuição; a obrigação original segue na Central). */
+  assert.equal(d.balanceView.adjustedBalance, -480);
+  assert.equal(d.deficitContribution, 480);
   const debts = buildDebtDays([], [], settings, { from: "2025-12-22", to: "2025-12-22" }, [], CALS);
   assert.deepEqual(debts.map((x) => x.kind), ["calendario"]);
   assert.equal(debts[0].debtMinutes, 480);
@@ -228,10 +237,11 @@ check("§10 Igualdade card↔resumo: saldo diário agregado === resumo; déficit
   const ciclo = per.get(getAnnualPointCycle("2025-05-01"))!;
   assert.equal(ciclo.balance, sumBalance, "saldo: resumo === soma dos cards");
   assert.equal(ciclo.deficit, sumDeficit, "déficit: resumo === soma dos cards");
-  // sanidade do valor: +30 −15 +240 (fds) +0 (01/05 feriado) +0 (02/05 folga compensar) = 255min
-  assert.equal(sumBalance, 255);
-  // déficit: somente os 15min reais (feriados/folgas/fds não geram déficit)
-  assert.equal(sumDeficit, 15);
+  // sanidade do valor: +30 −15 +240 (fds) +0 (01/05 abonado) −480 (02/05 folga
+  // compensar passada sem trabalho — 4D.4: fato suficiente) = −225min
+  assert.equal(sumBalance, -225);
+  // déficit: 15min reais + 8h da folga 02/05 (déficit do dia = necessário não cumprido)
+  assert.equal(sumDeficit, 495);
 });
 
 check("§15 Resumo do período principal usa a mesma resolução central (resumo/page.tsx)", () => {

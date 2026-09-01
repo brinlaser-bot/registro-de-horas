@@ -223,41 +223,44 @@ check("TESTE 08 DE 20 — Período atual: saldo projetado é a official-projecti
   assert.ok(!page.includes("projectRealizedDayOfficial("), "a página NÃO chama o motor dia a dia");
 });
 
-check("TESTE 09 DE 20 — COMPENSAR 8h em dia útil → obrigação 480min (impacto −8h na previsão)", () => {
+check("TESTE 09 DE 20 — COMPENSAR 8h em dia útil → impacto futuro conhecido −8h (previsão pura 4D.4)", () => {
   const f = buildCalendarForecast({ calendars: cal1({
     date: "2026-09-10", descricao: "Folga a compensar", categoria: "Compensação 8 Horas",
     tratamento: "COMPENSAR", horasACompensar: 8, jornadaEsperadaHoras: 0, horasAbonadas: 0, observacao: null,
-  }), compensations: [], cycle: CICLO, today: HOJE });
-  assert.equal(f.openEventCount, 1);
-  assert.equal(f.obligationMinutes, 480, "obrigação 8h");
-  assert.equal(f.uncoveredMinutes, 480, "sem cobertura: impacto descoberto 8h");
-  // Cobertura QUITADA (kind="calendario", mesma matcher canônica do compensar):
+  }), cycle: CICLO, today: HOJE });
+  assert.equal(f.eventCount, 1);
+  assert.equal(f.futureImpactMinutes, -480, "impacto futuro conhecido −8h");
+  assert.equal(f.events[0]?.impactMinutes, -480);
+  /* 4D.4 (Parte K): a previsão é PURA — não lê compensações da Central
+   * (kind="calendario" segue no fluxo legado da Central; o dia futuro
+   * presume jornada cumprida e o trabalho do próprio dia, quando realizado,
+   * quita pelo SALDO FACTUAL — ver suíte 4D.4, testes 03–06). */
   const concluida: Compensation = { id: 1, sourceDate: "2026-09-10", targetDate: "2026-08-20", minutes: 480, status: "concluida", kind: "calendario" };
   const f2 = buildCalendarForecast({ calendars: cal1({
     date: "2026-09-10", descricao: "Folga a compensar", categoria: "Compensação 8 Horas",
     tratamento: "COMPENSAR", horasACompensar: 8, jornadaEsperadaHoras: 0, horasAbonadas: 0, observacao: null,
-  }), compensations: [concluida], cycle: CICLO, today: HOJE });
-  assert.equal(f2.concludedExternalCoverageMinutes, 480, "cobertura concluída reduz");
-  assert.equal(f2.uncoveredMinutes, 0, "obrigação quitada: impacto descoberto 0");
+  }), cycle: CICLO, today: HOJE });
+  assert.equal(f2.futureImpactMinutes, -480, "previsão não dupla-conta com a Central");
 });
 
 check("TESTE 10 DE 20 — Jornada parcial (Cinzas 4h+4h) → obrigação = horasACompensar (240min)", () => {
   const f = buildCalendarForecast({ calendars: cal1({
     date: "2026-09-10", descricao: "Quarta-feira de Cinzas", categoria: "Compensação 4 Horas",
     tratamento: "COMPENSAR", horasACompensar: 4, jornadaEsperadaHoras: 4, horasAbonadas: 0, observacao: null,
-  }), compensations: [], cycle: CICLO, today: HOJE });
-  assert.equal(f.openEventCount, 1);
-  assert.equal(f.obligationMinutes, 240, "obrigação da PRÓPRIA data (4h), não 8h");
+  }), cycle: CICLO, today: HOJE });
+  /* 4D.4 (Parte F/K): dia PARCIAL futuro presume a jornada regular cumprida
+   * ⇒ SEM impacto na previsão (o não-cumprimento vira saldo factual no dia). */
+  assert.equal(f.eventCount, 0);
+  assert.equal(f.futureImpactMinutes, 0, "Cinzas futuro ⇒ 0");
 });
 
 check("TESTE 11 DE 20 — Feriado ÚTIL abonado → impacto 0 (não é evento a compensar)", () => {
   const f = buildCalendarForecast({ calendars: cal1({
     date: "2026-09-07", descricao: "Feriado Nacional", categoria: "Feriado Nacional",
     tratamento: "ABONADO", horasACompensar: 0, jornadaEsperadaHoras: 8, horasAbonadas: 8, observacao: null,
-  }), compensations: [], cycle: CICLO, today: HOJE });
-  assert.equal(f.openEventCount, 0, "sem obrigação");
-  assert.equal(f.obligationMinutes, 0);
-  assert.equal(f.uncoveredMinutes, 0);
+  }), cycle: CICLO, today: HOJE });
+  assert.equal(f.eventCount, 0, "sem impacto (crédito cumpre a base)");
+  assert.equal(f.futureImpactMinutes, 0);
 });
 
 check("TESTE 12 DE 20 — Fim de semana COMUM (sem entrada do calendário) permanece neutro", () => {
@@ -267,20 +270,20 @@ check("TESTE 12 DE 20 — Fim de semana COMUM (sem entrada do calendário) perma
   const f = buildCalendarForecast({ calendars: cal1({
     date: "2026-09-07", descricao: "Segunda comum", categoria: "Feriado Nacional",
     tratamento: "ABONADO", horasACompensar: 0, jornadaEsperadaHoras: 8, horasAbonadas: 8, observacao: null,
-  }), compensations: [], cycle: CICLO, today: HOJE });
-  assert.equal(f.openEventCount, 0, "sem entrada COMPENSAR não há obrigação");
+  }), cycle: CICLO, today: HOJE });
+  assert.equal(f.eventCount, 0, "sem entrada COMPENSAR não há impacto");
 });
 
 check("TESTE 13 DE 20 — Abono integral → impacto 0", () => {
   const f = buildCalendarForecast({ calendars: cal1({
     date: "2026-10-12", descricao: "Abono", categoria: "Abono",
     tratamento: "ABONADO", horasACompensar: 0, jornadaEsperadaHoras: 8, horasAbonadas: 8, observacao: null,
-  }), compensations: [], cycle: CICLO, today: HOJE });
-  assert.equal(f.openEventCount, 0);
-  assert.equal(f.uncoveredMinutes, 0);
+  }), cycle: CICLO, today: HOJE });
+  assert.equal(f.eventCount, 0);
+  assert.equal(f.futureImpactMinutes, 0);
 });
 
-check("TESTE 14 DE 20 — Futuro não vira déficit factual nem 'Sem registro': PLANEJADO ≠ REALIZADO", () => {
+check("TESTE 14 DE 20 — Futuro não vira saldo factual: PLANEJADO ≠ REALIZADO (4D.4)", () => {
   const entry = {
     date: "2026-09-10", descricao: "Folga a compensar", categoria: "Compensação 8 Horas",
     tratamento: "COMPENSAR", horasACompensar: 8, jornadaEsperadaHoras: 0, horasAbonadas: 0, observacao: null,
@@ -288,12 +291,13 @@ check("TESTE 14 DE 20 — Futuro não vira déficit factual nem 'Sem registro': 
   const semCal = buildCycleSituation({ today: HOJE, entries: st().entries, absences: [], calendars: [], settings, faltas: [], uses: [] });
   const comCal = buildCycleSituation({ today: HOJE, entries: st().entries, absences: [], calendars: cal1(entry), settings, faltas: [], uses: [] });
   assert.equal(comCal.factualBalanceMinutes, semCal.factualBalanceMinutes, "evento futuro não altera o factual (corte temporal)");
-  // Cobertura PLANEJADA fica separada e NÃO reduz o impacto descoberto:
+  /* 4D.4 (Parte K): a previsão é PURA — o futuro fica na previsão, mesmo
+   * que haja plano na Central (plano NUNCA quita; e o trabalho do próprio
+   * dia, quando realizado, quita pelo saldo factual). */
   const pendente: Compensation = { id: 1, sourceDate: "2026-09-10", targetDate: "2026-08-20", minutes: 480, status: "pendente", kind: "calendario" };
-  const f = buildCalendarForecast({ calendars: cal1(entry), compensations: [pendente], cycle: CICLO, today: HOJE });
-  assert.equal(f.plannedCoverageMinutes, 480, "planejada aparece separada");
-  assert.equal(f.concludedExternalCoverageMinutes, 0, "planejada não é quitação");
-  assert.equal(f.uncoveredMinutes, 480, "leitura conservadora: só concluída reduz");
+  const f = buildCalendarForecast({ calendars: cal1(entry), cycle: CICLO, today: HOJE });
+  assert.equal(f.eventCount, 1, "evento futuro permanece na previsão");
+  assert.equal(f.futureImpactMinutes, -480, "plano não reduz a previsão (PLANEJADO ≠ REALIZADO)");
   // E a previsão NUNCA contamina o factual/projetado do ciclo:
   assert.equal(comCal.projectedBalanceMinutes, semCal.projectedBalanceMinutes);
 });
@@ -312,15 +316,16 @@ check("TESTE 15 DE 20 — Isolamento 30/04: previsão só enxerga o ciclo inform
   // 2026-04-30 é a última data do ciclo 2025/2026; 2026-05-01 já é do 2026/2027:
   const fev = buildCalendarForecast({
     calendars: [...mk("2026-04-30", "2025-05-01", "2026-04-30"), ...mk("2026-05-01", "2026-05-01", "2027-04-30")],
-    compensations: [], cycle: "2025/2026", today: "2026-01-10",
+    cycle: "2025/2026", today: "2026-01-10",
   });
-  assert.equal(fev.openEventCount, 1, "só 30/04 (30/04 é limite absoluto incluso)");
+  assert.equal(fev.eventCount, 1, "só 30/04 (30/04 é limite absoluto incluso)");
   assert.equal(fev.events[0]?.date, "2026-04-30");
+  assert.equal(fev.futureImpactMinutes, -480);
   const f2700 = buildCalendarForecast({
     calendars: [...mk("2026-04-30", "2025-05-01", "2026-04-30"), ...mk("2026-05-01", "2026-05-01", "2027-04-30")],
-    compensations: [], cycle: "2026/2027", today: "2026-01-10",
+    cycle: "2026/2027", today: "2026-01-10",
   });
-  assert.equal(f2700.openEventCount, 1, "o ciclo seguinte só enxerga 01/05");
+  assert.equal(f2700.eventCount, 1, "o ciclo seguinte só enxerga 01/05");
   assert.equal(f2700.events[0]?.date, "2026-05-01");
 });
 
@@ -330,20 +335,21 @@ check("TESTE 16 DE 20 — Previsão do ciclo = projetado − impactos futuros de
     tratamento: "COMPENSAR", horasACompensar: 8, jornadaEsperadaHoras: 0, horasAbonadas: 0, observacao: null,
   } as const;
   const sit = buildCycleSituation({ today: HOJE, entries: st().entries, absences: [], calendars: cal1(entry), settings, faltas: [], uses: [USE_20] });
-  const f = buildCalendarForecast({ calendars: cal1(entry), compensations: [], cycle: CICLO, today: HOJE });
-  const previsao = sit.projectedBalanceMinutes - f.uncoveredMinutes;
-  assert.equal(previsao, sit.projectedBalanceMinutes - 480, "matemática da previsão (página: projected − uncovered)");
+  const f = buildCalendarForecast({ calendars: cal1(entry), cycle: CICLO, today: HOJE });
+  /* 4D.4 (Parte L): previsão = projetado + impacto futuro conhecido (≤ 0). */
+  const previsao = sit.projectedBalanceMinutes + f.futureImpactMinutes;
+  assert.equal(previsao, sit.projectedBalanceMinutes - 480, "matemática da previsão (página: projetado + impacto futuro)");
   // A página rotula como PREVISÃO e nunca como saldo factual/atual/realizado:
   const frente = page.slice(page.indexOf("O QUE VEM PELA FRENTE"), page.indexOf('title="Dias recentes"'));
   assert.ok(frente.toLowerCase().includes("previsão"), "seção rotulada PREVISÃO");
-  assert.ok(frente.includes("Considera eventos de calendário já conhecidos. Dias normais futuros presumem jornada cumprida."), "disclaimer do que a previsão considera");
+  assert.ok(frente.includes("Dias normais e parciais futuros presumem jornada cumprida; folgas integrais a compensar entram como impacto conhecido. Dias realizados já estão no saldo do ciclo."), "disclaimer do que a previsão considera");
   assert.ok(!/saldo (factual|atual|realizado) do ciclo/i.test(frente), "previsão não usa rótulo de saldo factual");
-  assert.ok(page.includes("forecast.uncoveredMinutes"), "obrigações descobertas da fonte canônica");
-  assert.ok(page.includes("projectedBalanceMinutes - forecast.uncoveredMinutes"), "previsão = projetado − obrigações em aberto");
+  assert.ok(page.includes("forecast.futureImpactMinutes"), "impacto futuro da fonte canônica");
+  assert.ok(page.includes("projectedBalanceMinutes + forecast.futureImpactMinutes"), "previsão = projetado + impacto futuro conhecido");
   // Estado neutro quando não há eventos (nunca −0 inventado):
-  assert.ok(page.includes("forecast.openEventCount > 0 ?"), "neutro quando não há eventos em aberto (condicional)");
-  // 4D.1: status TEMPORAL existe, mas nunca é condição financeira:
-  assert.ok(forecastSrc.includes("date > p.today") && forecastSrc.includes('"overdue"'), "status temporal derivado (future/today/overdue)");
+  assert.ok(page.includes("forecast.eventCount > 0 ?"), "neutro quando não há eventos (condicional)");
+  // 4D.4: status temporal existe (future/today-pending), nunca condição financeira:
+  assert.ok(forecastSrc.includes("date < p.today") && forecastSrc.includes('"today-pending"'), "status temporal derivado (future/today-pending)");
 });
 
 check("TESTE 17 DE 20 — Dias recentes: só APRESENTAÇÃO nova; classificação/saldo/[10+] intactos", () => {
@@ -366,9 +372,11 @@ check("TESTE 17 DE 20 — Dias recentes: só APRESENTAÇÃO nova; classificaçã
     date: "2026-08-21", today: HOJE, entries: st().entries, absences: [],
     calendars: [], settings, faltas: [], controlStartDate: null,
   }).status === "excess" ? recentDayStatusOf(row).label : recentDayStatusOf(row).label, "status derivado da MESMA row");
-  // Nenhum motor alterado pela 4D:
+  /* 4D.4 SUPEROU a trava da 4D: os motores de saldo/classificação
+   * (company-calendar/faltas/resumo-days) SÃO alterados pela etapa atual —
+   * a trava permanente que permanece é sobre as LIB de [10+]: */
   const diff = execSync("git diff --name-only", { cwd: root }).toString().split("\n");
-  assert.ok(!diff.some((f) => f.includes("resumo-days.ts") || f.includes("company-calendar.ts") || f.includes("faltas.ts")), "nenhum arquivo de classificação alterado");
+  assert.ok(!diff.some((f) => f.startsWith("src/lib/special-excess")), "nenhuma LIB de [10+] alterada");
 });
 
 check("TESTE 18 DE 20 — Rastreabilidade [10+]: reflow mobile sem mudar dados/regras", () => {

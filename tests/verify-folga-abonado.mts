@@ -106,13 +106,16 @@ check("§13a feriado abonado SEM trabalho: abonado 8h cumpre a obrigação (sald
   assert.equal(c.adjustedDeficit, 0);
 });
 
-check("§13b/§14 feriado abonado COM 2h: trabalhado 2h, +2h saldo, déficit 0, NÃO vira 10h", () => {
+check("§13b/§14 feriado abonado COM 2h: trabalhado 2h, saldo 0 (4D.4), déficit 0, NÃO vira 10h", () => {
   const c = companyDayContext("2026-09-07", hol2h, [], both, settings);
   assert.equal(c.label, "Trabalho em feriado — Independência do Brasil", "mantém o feriado + indica o trabalho");
   assert.equal(c.displayDay.workedMinutes, 120, "trabalhado real = 2h (nunca 8h abonadas + 2h)");
   assert.equal(c.abonadasMinutes, 480, "abonado = 8h");
   assert.equal(c.cargaConsiderada, 480, "carga considerada = 8h (não 10h)");
-  assert.equal(c.adjustedBalance, 120, "saldo positivo = +2h");
+  /* 4D.4 (Parte C): trabalho em dia TOTALMENTE abonado não gera saldo
+   * automático — crédito 8h cumpre a jornada; política das horas pendente. */
+  assert.equal(c.abonadoIntegral, true);
+  assert.equal(c.adjustedBalance, 0, "saldo regular 0 (sem crédito automático — 4D.4)");
   assert.equal(c.adjustedDeficit, 0, "8h − 2h = 6h de déficit NUNCA");
   const debts = buildDebtDays(hol2h, [], settings, RANGE, [], both);
   assert.equal(debts.find((d) => d.date === "2026-09-07" && d.kind === "deficit"), undefined);
@@ -166,14 +169,19 @@ check("H. dia útil 19/08 8h30: saldo +30, sem déficit", () => {
   assert.equal(c.displayDay.expectedMinutes, 480);
 });
 
-check("I. 25/08 folga a compensar: obrigação 8h / déficit comum 0 / saldo 0", () => {
+check("I. 25/08 folga a compensar: obrigação 8h / saldo factual −8h (4D.4) / uma única contribuição", () => {
   const c = companyDayContext("2026-08-25", [], [], both, settings);
   assert.equal(c.calendarioACompensar, 480);
-  assert.equal(c.adjustedDeficit, 0);
-  assert.equal(c.adjustedBalance, 0);
+  /* 4D.4 (Partes D/G/I): dia passado com evento explícito é fato suficiente —
+   * folga integral realizada sem trabalho ⇒ −8h NO SALDO FACTUAL (não
+   * "obrigação paralela": uma única contribuição; o resultado negativo é o
+   * próprio saldo, e o déficit do dia é contra as 8h necessárias). */
+  assert.equal(c.regularBalance, -480, "saldo factual −8h (0h de 8h)");
+  assert.equal(c.adjustedBalance, -480);
+  assert.equal(c.adjustedDeficit, 480, "déficit do dia = trabalho necessário não cumprido");
   const debts = buildDebtDays([], [], settings, RANGE, [], both);
-  assert.ok(debts.find((d) => d.date === "2026-08-25" && d.kind === "calendario" && d.debtMinutes === 480));
-  assert.equal(debts.find((d) => d.date === "2026-08-25" && d.kind === "deficit"), undefined);
+  assert.ok(debts.find((d) => d.date === "2026-08-25" && d.kind === "calendario" && d.debtMinutes === 480), "obrigação original segue na Central (kind calendario)");
+  assert.equal(debts.find((d) => d.date === "2026-08-25" && d.kind === "deficit"), undefined, "SEM dupla contagem: déficit comum não é criado para dia com evento COMPENSAR");
 });
 
 check("J. férias integral (10–14/08): déficit 0 em todos os dias", () => {

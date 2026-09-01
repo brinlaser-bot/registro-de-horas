@@ -13,6 +13,7 @@ import { readFileSync } from "node:fs";
 
 import {
   buildCompanyCalendar,
+  calendarEventPendingToday,
   companyDayContext,
   parseCompanyCalendarCsv,
 } from "../src/lib/company-calendar.ts";
@@ -160,7 +161,12 @@ check("F. card HOJE: base efetiva 0min e saldo +0min em 25/08 (mesa jornada do R
   const cctx = companyDayContext("2026-08-25", [], [], both, settings);
   assert.equal(cctx.effectiveExpected, 0, "base efetiva central = 0min");
   assert.equal(cctx.displayDay.expectedMinutes, 0);
-  assert.equal(cctx.displayDay.balanceMinutes, 0, "saldo +0min — nunca −8h");
+  /* 4D.4 (Parte G): folga a compensar em HOJE sem jornada encerrada é
+   * PREVISÃO — nunca −8h prematuro. O corte canônico está no agregador
+   * compartilhado (dayBalanceContribution) e no card (pendingToday), não
+   * no contexto bruto. */
+  assert.equal(calendarEventPendingToday(cctx, "2026-08-25", "2026-08-25"), true, "hoje pendente = previsão");
+  assert.equal(dayBalanceContribution(cctx, [], "2026-08-25", "2026-08-25"), 0, "contribuição +0min — nunca −8h");
   // 4V: o StatCard "Hoje" saiu da Visão Geral; a base efetiva central segue
   // alimentando o Registro de hoje (jornada do Registro rápido).
   assert.ok(pageSrc.includes("jornadaMinutes={todayCtx.effectiveExpected}"), "4V: Registro de hoje consome a base efetiva central");

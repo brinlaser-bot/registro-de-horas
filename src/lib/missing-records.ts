@@ -40,6 +40,11 @@ export function isMissingExpectedRecord(
   if (controlStartDate && /^\d{4}-\d{2}-\d{2}$/.test(controlStartDate) && date < controlStartDate) {
     return false;
   }
+  // 4D.4 (Partes G/I): dia cuja natureza é determinada pelo calendário
+  // importado NUNCA é "Sem registro" — o evento explícito é fato conhecido
+  // da empresa (ex.: folga a compensar passada com 0h ⇒ −8h factual) e o
+  // próprio calendário determina a situação do dia.
+  if (view.calendarEntry) return false;
   if (view.ctx.day.entries.length > 0) return false;
   if (view.effectiveExpected <= 0) return false;
   if (faltaOnDate(faltas, date)) return false;

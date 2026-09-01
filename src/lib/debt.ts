@@ -1,7 +1,8 @@
 // Matemática de dívida de horas: abatimento fracionado + sugestões inteligentes.
 import { computeDay, expectedMinutesOf, formatDateBR, formatMinutes, isRealizedDate, nowMinutesLocal, regularBalanceMinutes, todayString } from "./time";
 import { type Absence } from "./absences";
-import { calendarCycleOf, companyDayContext, type CompanyCalendars } from "./company-calendar";
+import { calendarCycleOf, calendarEventPendingToday,
+  companyDayContext, type CompanyCalendars } from "./company-calendar";
 import { compensarObligationOnDate } from "./compensar";
 import { sameAnnualCycle } from "./periods";
 import type {
@@ -151,7 +152,9 @@ export function buildDebtDays(
     // Dia com ponto aberto: déficit só é definitivo após a saída final.
     // O déficit comum vem SEMPRE da RESOLUÇÃO CENTRAL (folga/abonado/recesso/
     // compensar com jornada 0 e fins de semana não geram déficit comum).
-    const deficit = day.open || day.financialPending
+    // 4D.4 (Parte G): evento do calendário em HOJE sem jornada encerrada
+    // permanece previsão — não vira déficit prematuro.
+    const deficit = day.open || day.financialPending || calendarEventPendingToday(cctx, date, today ?? "")
       ? 0
       : Math.max(0, cctx.adjustedDeficit - coveredByEarlyExit);
 
@@ -175,17 +178,25 @@ export function buildDebtDays(
     };
 
     // Cutoff temporal central: batidas futuras não geram déficit/excedente.
-    if ((today === undefined || isRealizedDate(date, today)) && !day.financialPending) {
-      push("excedente", excess);
-      push("deficit", deficit);
-    }
-    // COMPENSAR: original IMUTÁVEL; open = efetiva − concluído (trabalho no
-    // próprio dia reduz a efetiva, não o original). Aparece mesmo no futuro
-    // para planejamento; o gating realizado fica no banco/hour-bank.
     const todayRef = today ?? date;
     const obl = compensarObligationOnDate(
       date, entries, comps, absences, companyCalendars, settings, todayRef,
     );
+    // 4D.4 (Parte J — SEM DUPLA CONTABILIDADE): em dia com evento COMPENSAR
+    // realizado, o efeito factual do calendário é representado UMA única vez
+    // pela obrigação (kind "calendario"), cujo open = efetiva − concluído é
+    // exatamente o déficit factual líquido de alocações — não criar também o
+    // push de déficit comum para o mesmo dia. O excedente [10+] segue à parte.
+    const eventoCompensar = !!cctx.calendarEntry && cctx.calendarEntry.tratamento === "COMPENSAR";
+    if ((today === undefined || isRealizedDate(date, today)) && !day.financialPending) {
+      push("excedente", excess);
+      if (!(eventoCompensar && obl && obl.originalMinutes > 0)) {
+        push("deficit", deficit);
+      }
+    }
+    // COMPENSAR: original IMUTÁVEL; open = efetiva − concluído (trabalho no
+    // próprio dia reduz a efetiva, não o original). Aparece mesmo no futuro
+    // para planejamento; o gating realizado fica no banco/hour-bank.
     if (obl && obl.originalMinutes > 0) {
       const allocated = allocatedForSource(comps, date, obl.compKind);
       out.push({

@@ -285,7 +285,9 @@ check("I4. falta prevista (futura) neutra; falta efetiva entra com o saldo do di
 check("I5. COMPENSAR (25/08 folga a compensar 8h): trabalho reduz a obrigação; só o surplus vira crédito até o teto", () => {
   const date = "2026-08-25";
   const w4 = [punch(date, "08:00", "entrada"), punch(date, "12:00", "saida")];
-  assert.equal(companyDayContext(date, w4, [], [cal2627], settings).adjustedBalance, 0, "4h → crédito 0");
+  // 4D.4 (Parte D): o trabalho do dia realiza a folga PELO SALDO FACTUAL
+  // (4h de 8h ⇒ −4h); acima do necessário o extra vira crédito regular.
+  assert.equal(companyDayContext(date, w4, [], [cal2627], settings).adjustedBalance, -240, "4h de 8h ⇒ −4h factual");
   const w1030 = day10h30(date);
   const c = companyDayContext(date, w1030, [], [cal2627], settings);
   assert.equal(c.regularBalance, 120, "10h30 → regular +2h");

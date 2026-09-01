@@ -91,7 +91,11 @@ check("C/D. companyCalendarForDate e companyDayContext resolvem o ciclo pela dat
   const v = companyDayContext("2026-08-25", [], [], both, settings);
   assert.equal(v.label, "Folga a compensar — Calendário");
   assert.equal(v.calendarioACompensar, 480);
-  assert.equal(v.adjustedDeficit, 0, "déficit comum 0");
+  /* 4D.4 (Parte D/I): folga integral realizada sem trabalho ⇒ −8h NO SALDO
+   * FACTUAL; o déficit do dia é o trabalho necessário não cumprido (a
+   * obrigação original segue na Central como kind "calendario"). */
+  assert.equal(v.regularBalance, -480, "saldo factual −8h");
+  assert.equal(v.adjustedDeficit, 480, "déficit do dia = 8h necessárias não trabalhadas");
   // 07/09/2026 Independência → 8h abonadas; 15/11/2026 domingo → 0h
   assert.equal(companyDayContext("2026-09-07", [], [], both, settings).abonadasMinutes, 480);
   const dom = companyDayContext("2026-11-15", [], [], both, settings);
