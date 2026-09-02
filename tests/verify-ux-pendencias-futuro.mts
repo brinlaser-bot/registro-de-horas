@@ -60,11 +60,17 @@ check("3. inferência inequívoca não exige dropdown de tipo", () => {
   assert.ok(m.includes("será registrado como"));
 });
 
-check("4. CTA Ver pendências em destaque de alerta (âmbar)", () => {
+check("4. CTAs das faixas de atenção em destaque de alerta (âmbar) — 4D.5", () => {
   const home = srcOf("src/app/(app)/page.tsx");
-  // 4D (Parte I): o CTA mora no bloco "Atenção agora" (âmbar) como link:
+  // 4D (Parte I): o CTA mora no bloco "Atenção agora" (âmbar) como link.
+  // 4D.5 (SUPERADO o CTA único "Ver pendências" — expectativa atualizada com
+  // justificativa): cada faixa independente tem seu próprio CTA direcionado
+  // (filtro da categoria + escopo ciclo; 1 item ⇒ foco na data):
   assert.ok(home.includes("Atenção agora"), "bloco de alerta presente");
-  assert.ok(home.includes("Ver pendências"));
+  assert.ok(home.includes("Ver inconsistências") || home.includes("Ver inconsistência"));
+  assert.ok(home.includes("Ver registros incompletos") || home.includes("Ver registro incompleto"));
+  assert.ok(home.includes("Ver dias sem registro") || home.includes("Ver dia sem registro"));
+  assert.ok(home.includes("Revisar planejamento") || home.includes("Revisar planejamentos"));
   assert.ok(home.includes("text-amber-800 underline"));
   const reg = srcOf("src/app/(app)/registros/page.tsx");
   assert.ok(reg.includes('variant="warning"'));

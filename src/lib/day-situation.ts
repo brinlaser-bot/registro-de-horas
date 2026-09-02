@@ -3,6 +3,7 @@
 // existentes. NÃO cria status, NÃO altera Banco/COMPENSAR/[10+]/saldo.
 // ─────────────────────────────────────────────────────────────
 import { isMissingExpectedRecord } from "./missing-records";
+import { attentionCategoriesForDay, attentionDayOf } from "./attention-now";
 import { dayCreditView } from "./hour-bank";
 import { faltaOnDate, faltaStatusOf } from "./faltas";
 import { companyDayContext, type CalendarDayView, type CompanyCalendars } from "./company-calendar";
@@ -23,7 +24,10 @@ export type DaySituationId =
   | "dispensado"
   | "abono"
   | "abono-parcial"
-  | "folga-compensar";
+  | "folga-compensar"
+  | "registro-inconsistente"
+  | "registro-incompleto"
+  | "sem-registro";
 
 export interface DaySituationOption {
   id: DaySituationId;
@@ -32,6 +36,14 @@ export interface DaySituationOption {
 }
 
 export const DAY_SITUATION_GROUPS: { title: string; options: DaySituationOption[] }[] = [
+  {
+    title: "Registros",
+    options: [
+      { id: "registro-inconsistente", label: "Registro inconsistente", chip: "Registro inconsistente" },
+      { id: "registro-incompleto", label: "Registro incompleto", chip: "Registro incompleto" },
+      { id: "sem-registro", label: "Sem registro", chip: "Sem registro" },
+    ],
+  },
   {
     title: "Resultado da jornada",
     options: [
@@ -153,6 +165,22 @@ export function situationsFromView(p: {
   ) {
     ids.push("folga-compensar");
   }
+
+  // 4D.5: pendências de registro vêm da MESMA classificação das faixas
+  // "Atenção agora" (fonte única attention-now — sem 2ª matemática).
+  // inconsistente vence incompleto; hoje em andamento não é pendência.
+  // (Plano [10+] aguardando NÃO é "Situação do dia" — usa o filtro
+  // especializado ?atencao=plano-10, opção B da 4D.5.)
+  const attention = attentionCategoriesForDay({
+    date,
+    today,
+    day: attentionDayOf(view),
+    missingExpected: p.missingExpected,
+    hasArrivedPlan: false,
+  });
+  if (attention.includes("inconsistente")) ids.push("registro-inconsistente");
+  if (attention.includes("incompleto")) ids.push("registro-incompleto");
+  if (attention.includes("sem-registro")) ids.push("sem-registro");
 
   return ids;
 }

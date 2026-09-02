@@ -4,8 +4,12 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   Cake,
+  AlertTriangle,
   CalendarClock,
+  CalendarOff,
   Clock3,
+  FileWarning,
+  Hourglass,
   TrendingUp,
   Wallet,
   Zap,
@@ -30,7 +34,7 @@ import { compensarObligationOnDate, isAbonadoDay } from "@/lib/compensar";
 import { getAnnualPointCycle, getPointPeriod } from "@/lib/periods";
 import { canRegisterFalta, faltaOnDate } from "@/lib/faltas";
 import { excessReasonOnDate, shouldPromptExcessReason } from "@/lib/hour-bank";
-import { pendingPunchDatesInCycle } from "@/lib/pending-punches";
+import { attentionNowSummary, type AttentionCategory } from "@/lib/attention-now";
 import { buildResumoDayRow, resumoFinancialFrozen, type ResumoDayRow } from "@/lib/resumo-days";
 import { buildCalendarForecast } from "@/lib/calendar-forecast";
 import { buildCycleSituation } from "@/lib/cycle-dashboard";
@@ -277,12 +281,34 @@ export default function DashboardPage() {
    * contagem), portanto NÃO entram aqui. */
   const forecastBalanceMinutes = cycleSituation.projectedBalanceMinutes + forecast.futureImpactMinutes;
 
-  /* 4D (PARTE I) — "Atenção agora": somente pendências factuais canônicas. */
-  const pendingPlansCount = useMemo(
-    () => (specialExcessPlans ?? []).filter((pl) => pl.status === "planned" && pl.destinationDate <= todayStr).length,
-    [specialExcessPlans, todayStr],
+  /* 4D (PARTE I) — "Atenção agora": somente pendências factuais canônicas.
+   * 4D.5 — QUATRO faixas INDEPENDENTES (fonte única attention-now: a MESMA
+   * classificação consumida pelo filtro de Registros aberto pelos CTAs).
+   * Escopo: ciclo anual atual — pendência de período de ponto anterior
+   * continua visível enquanto existir no ciclo. Contagens nunca somadas
+   * numa faixa genérica "Registros pendentes". */
+  const attention = useMemo(
+    () =>
+      attentionNowSummary({
+        today: todayStr,
+        entries,
+        absences,
+        calendars: companyCalendars,
+        settings,
+        faltas,
+        controlStartDate: user.controlStartDate ?? null,
+        plans: specialExcessPlans ?? [],
+      }),
+    [todayStr, entries, absences, companyCalendars, settings, faltas, user.controlStartDate, specialExcessPlans],
   );
-  const pendingPunchesCount = useMemo(() => pendingPunchDatesInCycle(entries, settings, todayStr).length, [entries, settings, todayStr]);
+
+  /** 4D.5 — CTA direcionado: 2+ itens ⇒ filtro da categoria no escopo do
+   *  ciclo; exatamente 1 item ⇒ mesmo filtro + foco na data (card expandido). */
+  const atencaoHref = (cat: AttentionCategory, filtro: string) => {
+    const dates = attention[cat];
+    const base = `/registros?situacao=${filtro}&escopo=ciclo`;
+    return dates.length === 1 ? `${base}&data=${dates[0]}` : base;
+  };
 
   /** Falta "hoje": a jornada vem SEMPRE da resolução central (nunca 8h fixas). */
   const faltaHojeGate = useMemo(
@@ -546,28 +572,116 @@ export default function DashboardPage() {
           registros pendentes e planos [10+] que chegaram ao dia. Impactos de
           calendário de dias realizados JÁ ESTÃO no saldo do ciclo (4D.4) —
           são resultado, não aviso externo; não geram alerta aqui. */}
-      {(pendingPunchesCount > 0 || pendingPlansCount > 0) && (
-        <div className="rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3">
+      {(attention.inconsistente.length > 0 ||
+        attention.incompleto.length > 0 ||
+        attention["sem-registro"].length > 0 ||
+        attention["plano-10"].length > 0) && (
+        <section aria-label="Atenção agora" className="space-y-2">
           <p className="text-sm font-extrabold text-amber-800">⚠ Atenção agora</p>
-          <ul className="mt-1 space-y-1 text-xs font-medium text-amber-700">
-            {pendingPunchesCount > 0 && (
-              <li>
-                Registros pendentes: {pendingPunchesCount} — dias que precisam de correção antes do saldo ser definitivo.{" "}
-                <Link href="/registros?pendentes=1" className="font-bold text-amber-800 underline underline-offset-2">
-                  Ver pendências
-                </Link>
-              </li>
-            )}
-            {pendingPlansCount > 0 && (
-              <li>
-                Planejamentos [10+] aguardando confirmação: {pendingPlansCount} — resolva ou libere nos dias de Registros.{" "}
-                <Link href="/registros" className="font-bold text-amber-800 underline underline-offset-2">
-                  Abrir Registros
-                </Link>
-              </li>
-            )}
-          </ul>
-        </div>
+
+          {/* 4D.5 — faixas INDEPENDENTES (uma por natureza de atenção; só
+              aparecem com contagem > 0; diferenciação por título, ícone e
+              quantidade — nunca só por cor). */}
+          {attention.inconsistente.length > 0 && (
+            <div className="flex flex-col gap-2 rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-start gap-2">
+                <AlertTriangle size={18} aria-hidden className="mt-0.5 shrink-0 text-amber-600" />
+                <div>
+                  <p className="text-sm font-bold text-amber-900">
+                    Registro inconsistente: {attention.inconsistente.length}
+                  </p>
+                  <p className="text-xs font-medium text-amber-700">
+                    {attention.inconsistente.length === 1
+                      ? "Há uma sequência de batidas que precisa ser corrigida."
+                      : "Há sequências de batidas que precisam de correção."}
+                  </p>
+                </div>
+              </div>
+              <Link
+                href={atencaoHref("inconsistente", "registro-inconsistente")}
+                className="shrink-0 text-sm font-bold text-amber-800 underline underline-offset-2 hover:text-amber-900"
+              >
+                {attention.inconsistente.length === 1 ? "Ver inconsistência" : "Ver inconsistências"}
+              </Link>
+            </div>
+          )}
+
+          {attention.incompleto.length > 0 && (
+            <div className="flex flex-col gap-2 rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-start gap-2">
+                <FileWarning size={18} aria-hidden className="mt-0.5 shrink-0 text-amber-600" />
+                <div>
+                  <p className="text-sm font-bold text-amber-900">
+                    Registro incompleto: {attention.incompleto.length}
+                  </p>
+                  <p className="text-xs font-medium text-amber-700">
+                    {attention.incompleto.length === 1
+                      ? "Há uma jornada encerrada com batida faltando."
+                      : "Há jornadas encerradas com batida faltando."}
+                  </p>
+                </div>
+              </div>
+              <Link
+                href={atencaoHref("incompleto", "registro-incompleto")}
+                className="shrink-0 text-sm font-bold text-amber-800 underline underline-offset-2 hover:text-amber-900"
+              >
+                {attention.incompleto.length === 1 ? "Ver registro incompleto" : "Ver registros incompletos"}
+              </Link>
+            </div>
+          )}
+
+          {attention["sem-registro"].length > 0 && (
+            <div className="flex flex-col gap-2 rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-start gap-2">
+                <CalendarOff size={18} aria-hidden className="mt-0.5 shrink-0 text-amber-600" />
+                <div>
+                  <p className="text-sm font-bold text-amber-900">
+                    Dia sem registro: {attention["sem-registro"].length}
+                  </p>
+                  <p className="text-xs font-medium text-amber-700">
+                    {attention["sem-registro"].length === 1
+                      ? "Há um dia regular já encerrado sem ponto ou justificativa."
+                      : "Há dias regulares já encerrados sem ponto ou justificativa."}
+                  </p>
+                </div>
+              </div>
+              <Link
+                href={atencaoHref("sem-registro", "sem-registro")}
+                className="shrink-0 text-sm font-bold text-amber-800 underline underline-offset-2 hover:text-amber-900"
+              >
+                {attention["sem-registro"].length === 1 ? "Ver dia sem registro" : "Ver dias sem registro"}
+              </Link>
+            </div>
+          )}
+
+          {attention["plano-10"].length > 0 && (
+            <div className="flex flex-col gap-2 rounded-2xl border border-violet-300 bg-violet-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-start gap-2">
+                <Hourglass size={18} aria-hidden className="mt-0.5 shrink-0 text-violet-600" />
+                <div>
+                  <p className="text-sm font-bold text-violet-900">
+                    Planejamento [10+] aguardando confirmação: {attention["plano-10"].length}
+                  </p>
+                  <p className="text-xs font-medium text-violet-700">
+                    {attention["plano-10"].length === 1
+                      ? "Há uma reserva que chegou ao dia e precisa de decisão."
+                      : "Há reservas que chegaram ao dia e precisam de decisão."}
+                  </p>
+                </div>
+              </div>
+              <Link
+                href={
+                  attention["plano-10"].length === 1
+                    ? `/registros?atencao=plano-10&escopo=ciclo&data=${attention["plano-10"][0]}`
+                    : "/registros?atencao=plano-10&escopo=ciclo"
+                }
+                className="shrink-0 text-sm font-bold text-violet-700 underline underline-offset-2 hover:text-violet-900"
+              >
+                {attention["plano-10"].length === 1 ? "Revisar planejamento" : "Revisar planejamentos"}
+              </Link>
+            </div>
+          )}
+        </section>
       )}
 
       {/* C. REGISTRO DE HOJE (4D.1, Parte G — logo após a saudação/atenção) — Ponto + Assistente de jornada em UM ÚNICO card

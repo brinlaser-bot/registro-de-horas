@@ -201,9 +201,14 @@ check("N. corrigir último pendente zera contador e Banco recalcula", () => {
   assert.equal(after.realizedBalance, 60);
 });
 
-check("O. Ver pendências aponta /registros?pendentes=1", () => {
+check("O. CTAs da VG apontam Registros direcionado (4D.5); fluxo ?pendentes=1 permanece nos Registros", () => {
   const home = srcOf("src/app/(app)/page.tsx");
-  assert.ok(home.includes("/registros?pendentes=1"));
+  // 4D.5 (SUPERADO o CTA único "/registros?pendentes=1" na VG — expectativa
+  // atualizada com justificativa): as faixas independentes apontam para o
+  // filtro da categoria com escopo do ciclo anual:
+  assert.ok(home.includes("/registros?situacao="));
+  assert.ok(home.includes("escopo=ciclo"));
+  assert.ok(!home.includes("/registros?pendentes=1"));
   const reg = srcOf("src/app/(app)/registros/page.tsx");
   assert.ok(reg.includes("pendingOnly"));
   assert.ok(reg.includes("Voltar aos registros do período"));

@@ -172,6 +172,9 @@ interface Props {
   } | null;
   /** 4C: abre o modal "Usar planejamento [10+]" para o plano informado. */
   onResolvePlan?: (planId: string) => void;
+  /** 4D.5: estado inicial EXPANDIDO — foco vindo de "Atenção agora"
+   *  (CTA com exatamente 1 item abre Registros na data do problema). */
+  initiallyExpanded?: boolean;
 }
 
 export function DayCard({
@@ -205,10 +208,12 @@ export function DayCard({
   planningCapacityMinutes,
   calendarSemantics,
   onResolvePlan,
+  initiallyExpanded,
 }: Props) {
   const specialActions = useSpecialPunchActions();
-  // Regra: todos os dias iniciam RECOLHIDOS — o usuário expande apenas o dia desejado.
-  const [expanded, setExpanded] = useState(false);
+  // Regra: todos os dias iniciam RECOLHIDOS — o usuário expande apenas o dia
+  // desejado. Exceção 4D.5: foco vindo de "Atenção agora" (CTA de 1 item).
+  const [expanded, setExpanded] = useState(initiallyExpanded ?? false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editForm, setEditForm] = useState<{ type: EntryType; time: string; note: string }>({
     type: "entrada",

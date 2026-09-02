@@ -267,9 +267,17 @@ check("TESTE 07 DE 10 — Blocos legados removidos da renderização (motores in
   ]) {
     assert.ok(!page.includes(removido), `fora da Visão Geral: ${removido}`);
   }
-  // Pendências RELEVANTES permanecem (registros pendentes, aviso âmbar):
-  assert.ok(page.includes("Registros pendentes"), "aviso de registros pendentes preservado");
-  assert.ok(page.includes("pendingPunchDatesInCycle"), "fonte de pendências existente preservada");
+  // Pendências RELEVANTES permanecem como aviso âmbar. 4D.5 (SUPERADO o
+  // texto genérico "Registros pendentes" e a fonte pendingPunchDatesInCycle
+  // na página — expectativa atualizada com justificativa): agora são faixas
+  // independentes (Registro inconsistente/Registro incompleto/Dia sem
+  // registro/Planejamento [10+]) com fonte única attention-now:
+  assert.ok(page.includes("Atenção agora"), "bloco de atenção preservado");
+  assert.ok(page.includes("attentionNowSummary"), "fonte canônica das faixas independentes");
+  assert.ok(page.includes("Registro inconsistente: "), "faixa inconsistente");
+  assert.ok(page.includes("Registro incompleto: "), "faixa incompleto");
+  assert.ok(page.includes("Dia sem registro: "), "faixa sem registro");
+  assert.ok(page.includes("Planejamento [10+] aguardando confirmação: "), "faixa de planos [10+]");
   // NENHUM motor/código legado foi apagado:
   for (const arquivo of [
     "src/components/excess-panel.tsx",

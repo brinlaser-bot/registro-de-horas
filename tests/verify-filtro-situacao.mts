@@ -169,22 +169,31 @@ check("14. Folga a compensar retorna COMPENSAR/calendário correspondente", () =
   assert.ok(!classify("2026-08-21").includes("folga-compensar"));
 });
 
-check("15. Sem registro NÃO aparece no seletor", () => {
-  const labels = DAY_SITUATION_OPTIONS.map((o) => o.label).join(" | ").toLowerCase();
-  assert.ok(!labels.includes("sem registro"));
+check("15. 4D.5: 'Sem registro' (e pendências de registro) AGORA aparecem no seletor", () => {
+  // 4D.5 (SUPERADA a ausência — expectativa atualizada com justificativa): a
+  // etapa ampliou o filtro "Situação do dia" com Registro inconsistente /
+  // Registro incompleto / Sem registro, vindos da MESMA classificação das
+  // faixas "Atenção agora" (fonte única attention-now). O fluxo rápido
+  // ?semRegistro=1 permanece como navegação legada distinta (UX validada).
+  const labels = DAY_SITUATION_OPTIONS.map((o) => o.label);
+  assert.ok(labels.includes("Registro inconsistente"));
+  assert.ok(labels.includes("Registro incompleto"));
+  assert.ok(labels.includes("Sem registro"));
   const ui = srcOf("src/components/day-situation-filter.tsx");
-  const block = ui.slice(ui.indexOf("DAY_SITUATION_GROUPS"), ui.length);
-  assert.ok(!block.includes("Sem registro"));
+  // O seletor renderiza os grupos canônicos — a opção nova aparece sozinha:
+  assert.ok(ui.includes("DAY_SITUATION_GROUPS.map"));
 });
 
-check("16. incompleto NÃO aparece no seletor", () => {
-  const labels = DAY_SITUATION_OPTIONS.map((o) => o.label.toLowerCase()).join(" ");
-  assert.ok(!labels.includes("incompleto"));
+check("16. 4D.5: 'Registro incompleto' aparece no seletor", () => {
+  // 4D.5 (SUPERADA a ausência — justificativa no check 15): pendências de
+  // registro agora são opções canônicas do filtro "Situação do dia".
+  const labels = DAY_SITUATION_OPTIONS.map((o) => o.label);
+  assert.ok(labels.includes("Registro incompleto"));
 });
 
-check("17. inconsistente NÃO aparece no seletor", () => {
-  const labels = DAY_SITUATION_OPTIONS.map((o) => o.label.toLowerCase()).join(" ");
-  assert.ok(!labels.includes("inconsistente"));
+check("17. 4D.5: 'Registro inconsistente' aparece no seletor", () => {
+  const labels = DAY_SITUATION_OPTIONS.map((o) => o.label);
+  assert.ok(labels.includes("Registro inconsistente"));
 });
 
 check("18. múltiplas situações usam OR", () => {
@@ -203,7 +212,10 @@ check("18. múltiplas situações usam OR", () => {
 check("19. filtro sem DE/ATÉ usa período atual", () => {
   const page = srcOf("src/app/(app)/registros/page.tsx");
   assert.ok(page.includes("registrosTimelineDates(range)"));
-  assert.ok(page.includes("const range = query ?? period"));
+  // 4D.5 (SUPERADA a expressão literal const range = query ?? period —
+  // expectativa atualizada com justificativa): o range virou memo com o
+  // MESMO default (período) e a opção ?escopo=ciclo (ciclo anual):
+  assert.ok(page.includes("let r = wantCycleScope ? cycleRange : query ?? period;"));
   const dates = filterDatesBySituation(registrosTimelineDates(PERIOD), ["trabalho-folga"], classify);
   assert.ok(dates.every((d) => d >= PERIOD.from && d <= PERIOD.to));
   assert.ok(dates.includes("2026-08-22"));

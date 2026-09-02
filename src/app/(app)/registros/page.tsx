@@ -25,6 +25,7 @@ import {
   companyDeficitContribution,
 } from "@/lib/company-calendar";
 import {
+  annualCycleBounds,
   getAnnualPointCycle,
   getNextPointPeriod,
   getPointPeriod,
@@ -130,6 +131,17 @@ function RegistrosBody() {
   const situationIds = parseSituationParam(
     wantPending || wantMissing ? null : situacaoRaw,
   );
+  /* 4D.5 — destino dos CTAs "Atenção agora" (Visão Geral):
+   *  ?atencao=plano-10  → planejamentos [10+] que chegaram ao dia;
+   *  ?escopo=ciclo      → consulta o CICLO ANUAL atual (mesmo escopo das
+   *                       faixas — pendência de período anterior continua
+   *                       visível; a coerência é por escopo, não por
+   *                       redução de contagem);
+   *  ?data=YYYY-MM-DD   → foco com exatamente 1 item: card expandido. */
+  const atencaoPlano = searchParams.get("atencao") === "plano-10";
+  const wantCycleScope = searchParams.get("escopo") === "ciclo";
+  const focusDateRaw = searchParams.get("data");
+  const focusDate = focusDateRaw && /^\d{4}-\d{2}-\d{2}$/.test(focusDateRaw) ? focusDateRaw : null;
 
   // Faltas que JÁ valem (date <= hoje) — previstas não geram déficit/saldo
   const effectiveFaltaList = useMemo(() => effectiveFaltas(faltas, todayStr), [faltas, todayStr]);
@@ -142,7 +154,18 @@ function RegistrosBody() {
   }, []);
   const nowMinutes = nowMinutesLocal();
 
-  const range = query ?? period;
+  /* 4D.5: escopo da listagem. Padrão: período do ponto. Com ?escopo=ciclo:
+   * ciclo ANUAL atual — MESMO escopo das faixas "Atenção agora" (a coerência
+   * VG→Registros vem do escopo compartilhado, nunca de reduzir a contagem).
+   * ?data= foco: garante que a data pedida esteja no intervalo. */
+  const cycleRange = useMemo(() => annualCycleBounds(getAnnualPointCycle(todayStr)), [todayStr]);
+  const range = useMemo(() => {
+    let r = wantCycleScope ? cycleRange : query ?? period;
+    if (focusDate && (focusDate < r.from || focusDate > r.to)) {
+      r = { from: focusDate < r.from ? focusDate : r.from, to: focusDate > r.to ? focusDate : r.to };
+    }
+    return r;
+  }, [wantCycleScope, cycleRange, query, period, focusDate]);
 
   // NOVO [10+] (Etapa 3E): banco 3C por ciclo presente no intervalo (uma vez
   // por ciclo, reutilizado por todos os dias do ciclo). Fonte de saldo/lotes.
@@ -280,6 +303,10 @@ function RegistrosBody() {
           specialExcess,
           // 4B: planos/reservas ATIVAS do dia (badge + detalhe + cancelamento).
           specialPlans: activeSpecialPlansForDate(specialExcessPlans ?? [], date),
+          // 4D.5: reserva [10+] deste dia JÁ CHEGOU e segue aguardando
+          // confirmação (futuro puro não gera faixa de atenção).
+          planoAguardando:
+            date <= todayStr && activeSpecialPlansForDate(specialExcessPlans ?? [], date).length > 0,
           situations,
         };
       });
@@ -353,13 +380,19 @@ function RegistrosBody() {
 
   const pendingCount = days.filter((d) => d.displayDay.financialPending || !d.displayDay.consistent).length;
   const missingCount = days.filter((d) => d.missingExpected).length;
+  // 4D.5: planejamentos [10+] aguardando confirmação (contagem de DIAS com
+  // reserva chegada — MESMA fonte das faixas da Visão Geral).
+  const planoCount = days.filter((d) => d.planoAguardando).length;
   const pendingOnly = wantPending && !wantMissing && pendingCount > 0;
   const missingOnly = wantMissing && !wantPending && missingCount > 0;
-  const situationActive = situationIds.length > 0 && !pendingOnly && !missingOnly;
+  const planoOnly = atencaoPlano && !pendingOnly && !missingOnly;
+  const situationActive = situationIds.length > 0 && !pendingOnly && !missingOnly && !planoOnly;
   const listedDays = pendingOnly
     ? days.filter((d) => d.displayDay.financialPending || !d.displayDay.consistent)
     : missingOnly
     ? days.filter((d) => d.missingExpected)
+    : planoOnly
+    ? days.filter((d) => d.planoAguardando)
     : situationActive
     ? days.filter((d) => dayMatchesSituations(d.situations, situationIds))
     : days;
@@ -387,7 +420,9 @@ function RegistrosBody() {
     }
     if (wantPending && pendingCount === 0) router.replace("/registros");
     if (wantMissing && missingCount === 0) router.replace("/registros");
-  }, [wantPending, wantMissing, pendingCount, missingCount, router, situacaoRaw]);
+    // 4D.5: CTA de planejamento sem nenhum aguardando ⇒ nada a mostrar.
+    if (planoOnly && planoCount === 0) router.replace("/registros");
+  }, [wantPending, wantMissing, pendingCount, missingCount, planoOnly, planoCount, router, situacaoRaw]);
 
   /* ── Handlers (preservam comportamento validado) ── */
 
@@ -671,6 +706,37 @@ function RegistrosBody() {
         />
       )}
 
+      {/* 4D.5 — destino do CTA "Planejamento [10+] aguardando confirmação". */}
+      {planoOnly && (
+        <div className="sticky top-16 z-20 flex flex-wrap items-center gap-3 rounded-xl border border-violet-300 bg-violet-50 px-4 py-2.5 shadow-sm">
+          <p className="min-w-0 flex-1 text-xs font-bold text-violet-800">
+            ⏱ Planejamento [10+] aguardando confirmação: {planoCount} · filtro aplicado
+            <span className="mt-0.5 block font-medium">
+              {wantCycleScope
+                ? "Escopo: ciclo anual atual — somente os dias com reserva que chegou ao dia."
+                : "Somente os dias com reserva que chegou ao dia."}
+            </span>
+          </p>
+          <Button size="sm" variant="secondary" onClick={() => router.replace("/registros")}>
+            Limpar filtro
+          </Button>
+        </div>
+      )}
+
+      {/* 4D.5 — indicador do escopo amplo vindo das faixas "Atenção agora". */}
+      {wantCycleScope && !planoOnly && !pendingOnly && !missingOnly && (
+        <div className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5">
+          <p className="min-w-0 flex-1 text-xs font-bold text-slate-600">
+            Escopo: ciclo anual {getAnnualPointCycle(todayStr)} (01/05 → 30/04)
+            {focusDate ? ` · foco em ${focusDate.split("-").reverse().join("/")}` : ""}
+            <span className="mt-0.5 block font-medium">Inclui pendências de períodos anteriores do mesmo ciclo.</span>
+          </p>
+          <Button size="sm" variant="secondary" onClick={() => router.replace("/registros")}>
+            Voltar ao período
+          </Button>
+        </div>
+      )}
+
       {pendingCount > 0 && (
         <div className="sticky top-16 z-20 flex flex-wrap items-center gap-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-2.5 shadow-sm">
           {pendingOnly ? (
@@ -755,7 +821,7 @@ function RegistrosBody() {
               </p>
             </div>
           )}
-          <div className={missingOnly || pendingOnly ? "space-y-4" : "space-y-2"}>
+          <div className={missingOnly || pendingOnly || planoOnly ? "space-y-4" : "space-y-2"}>
           {listedDays.map(({ date, balanceView, displayDay, absence, calendarLabel, falta, workedInAbonoMinutes, abonoParcial, missingExpected, historicalEmpty, compact, specialExcess, specialPlans, planningCapacityMinutes, calendarSemantics }) => (
             <DayCard
               key={date}
@@ -764,6 +830,7 @@ function RegistrosBody() {
               allComps={compensations}
               nowMinutes={nowMinutes}
               isToday={date === todayStr}
+              initiallyExpanded={focusDate === date}
               absence={absence}
               calendarLabel={calendarLabel}
               falta={falta}

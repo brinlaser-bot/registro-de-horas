@@ -242,7 +242,10 @@ check("TESTE 11 DE 12 — Ordem da Visão Geral: saudação → atenção → Re
    * Atenção agora voltou a ser só registros pendentes + planos do dia. */
   assert.ok(!page.includes("de obrigação de calendário pendente"), "aviso da semântica paralela removido");
   assert.ok(!page.includes("calendarOverdueUncoveredMinutes"), "derivação de pendência paralela removida");
-  assert.ok(page.includes("(pendingPunchesCount > 0 || pendingPlansCount > 0)"), "Atenção agora: só decisões reais");
+  // 4D.5 (SUPERADA a condição genérica — expectativa atualizada com
+  // justificativa): quatro faixas independentes, fonte única attention-now.
+  assert.ok(!page.includes("(pendingPunchesCount > 0 || pendingPlansCount > 0)"), "Atenção agora: faixa genérica removida");
+  assert.ok(page.includes("attentionNowSummary"), "Atenção agora: faixas independentes canônicas");
 });
 
 check("TESTE 12 DE 12 — Mobile de Dias recentes preservado + desktop em grid consistente + Central de Horas sem diff", () => {

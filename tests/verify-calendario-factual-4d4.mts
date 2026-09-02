@@ -335,8 +335,14 @@ check("TESTE 17 DE 18 — 'obrigação pendente' sai da Atenção agora (já est
   assert.ok(!page.includes("de obrigação de calendário pendente"), "mensagem antiga removida");
   assert.ok(!page.includes("calendarOverdueUncoveredMinutes"), "derivação da pendência paralela removida");
   assert.ok(!page.includes("calendarTodayUncoveredMinutes"), "derivação de 'hoje pendente' removida (hoje realizado ⇒ factual)");
-  // Atenção agora voltou a ser só decisões reais:
-  assert.ok(page.includes("(pendingPunchesCount > 0 || pendingPlansCount > 0)"), "atenção agora: registros pendentes + planos [10+] que chegaram ao dia");
+  // Atenção agora voltou a ser só decisões reais. 4D.5 (SUPERADA a faixa
+  // genérica única com a condição (pendingPunchesCount > 0 || pendingPlansCount
+  // > 0) — expectativa atualizada com justificativa): agora são QUATRO faixas
+  // independentes com fonte única attention-now (inconsistente/incompleto/
+  // sem-registro/plano-10), nunca somadas:
+  assert.ok(!page.includes("(pendingPunchesCount > 0 || pendingPlansCount > 0)"), "faixa genérica única removida");
+  assert.ok(page.includes("attentionNowSummary"), "fonte única das quatro faixas independentes");
+  assert.ok(page.includes('aria-label="Atenção agora"'), "bloco Atention agora presente");
   // E a frente usa a previsão pura:
   assert.ok(page.includes("forecast.futureImpactMinutes"), "frente usa o forecast canônico");
 });
