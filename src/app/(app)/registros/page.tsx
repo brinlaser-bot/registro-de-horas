@@ -2,7 +2,8 @@
 
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Ban, CalendarClock, ChevronLeft, ChevronRight, Clock3, Search, X } from "lucide-react";
+import Link from "next/link";
+import { AlertTriangle, Ban, CalendarClock, CalendarOff, ChevronLeft, ChevronRight, Clock3, FileWarning, Hourglass, Search, X } from "lucide-react";
 import { actions, getAppData, settingsOf, useAppData, useIsClient, useIsStoreReady } from "@/lib/store";
 import { useSpecialPunchActions } from "@/components/special-release-confirm";
 import {
@@ -49,6 +50,7 @@ import {
 import { buildSpecialExcessBank, type SpecialExcessBankSummary } from "@/lib/special-excess-bank";
 import { buildSpecialExcessDayView } from "@/lib/special-excess-day-view";
 import { activeSpecialPlansForDate } from "@/lib/special-excess-plan";
+import { attentionNowSummary } from "@/lib/attention-now";
 import type { WorkSettings } from "@/lib/types";
 import { DayCard } from "@/components/day-card";
 import { ManualEntryModal, type ManualPairData } from "@/components/manual-entry-modal";
@@ -387,6 +389,35 @@ function RegistrosBody() {
   const missingOnly = wantMissing && !wantPending && missingCount > 0;
   const planoOnly = atencaoPlano && !pendingOnly && !missingOnly;
   const situationActive = situationIds.length > 0 && !pendingOnly && !missingOnly && !planoOnly;
+
+  /* 4D.5.1 — as MESMAS quatro faixas "Atenção agora" da Visão Geral: MESMA
+   * fonte única (attention-now) e MESMO escopo (ciclo anual). As faixas da
+   * página NÃO recalculam classificação — consomem este memo. */
+  const attention = useMemo(
+    () =>
+      attentionNowSummary({
+        today: todayStr,
+        entries,
+        absences,
+        calendars: companyCalendars,
+        settings,
+        faltas,
+        controlStartDate: user.controlStartDate ?? null,
+        plans: specialExcessPlans ?? [],
+      }),
+    [todayStr, entries, absences, companyCalendars, settings, faltas, user.controlStartDate, specialExcessPlans],
+  );
+  /** CTA da faixa: aplica o filtro NA PRÓPRIA página (compartilhável via
+   *  URL). 2+ itens ⇒ filtro + escopo ciclo; 1 item ⇒ + foco na data. */
+  const faixaHref = (dates: string[], filtro: string) =>
+    `/registros?situacao=${filtro}&escopo=ciclo${dates.length === 1 ? `&data=${dates[0]}` : ""}`;
+  const planoFaixaHref = (dates: string[]) =>
+    `/registros?atencao=plano-10&escopo=ciclo${dates.length === 1 ? `&data=${dates[0]}` : ""}`;
+  /** Parte F — "Limpar filtro": remove filtro + foco de data, preservando
+   *  o escopo ciclo quando ativo (nunca deixa query param órfão). */
+  const limparFiltro = () => router.replace(wantCycleScope ? "/registros?escopo=ciclo" : "/registros");
+  /** Parte F — "Voltar ao período": limpa filtro + foco + escopo. */
+  const voltarAoPeriodo = () => router.replace("/registros");
   const listedDays = pendingOnly
     ? days.filter((d) => d.displayDay.financialPending || !d.displayDay.consistent)
     : missingOnly
@@ -612,6 +643,10 @@ function RegistrosBody() {
               <span>
                 Consulta: {formatDateShortBR(query.from)} → {formatDateShortBR(query.to)}
               </span>
+            ) : wantCycleScope ? (
+              <span>
+                Ciclo {getAnnualPointCycle(todayStr)} — {formatDateShortBR(cycleRange.from)} → {formatDateShortBR(cycleRange.to)}
+              </span>
             ) : (
               <span>
                 Período do ponto: {periodLabel(period)}
@@ -688,6 +723,8 @@ function RegistrosBody() {
                 ? query.from === query.to
                   ? `Consulta ${formatDateShortBR(query.from)}`
                   : `Consulta ${formatDateShortBR(query.from)} → ${formatDateShortBR(query.to)}`
+                : wantCycleScope
+                ? `Ciclo ${getAnnualPointCycle(todayStr)} (${formatDateShortBR(cycleRange.from)} → ${formatDateShortBR(cycleRange.to)})`
                 : `Período ${periodLabel(period)}`}
             </span>
             <span>Saldo <b className={saldo >= 0 ? "text-emerald-600" : "text-rose-600"}>{saldo >= 0 ? "+" : ""}{formatMinutes(saldo)}</b></span>
@@ -717,7 +754,7 @@ function RegistrosBody() {
                 : "Somente os dias com reserva que chegou ao dia."}
             </span>
           </p>
-          <Button size="sm" variant="secondary" onClick={() => router.replace("/registros")}>
+          <Button size="sm" variant="secondary" onClick={limparFiltro}>
             Limpar filtro
           </Button>
         </div>
@@ -731,61 +768,130 @@ function RegistrosBody() {
             {focusDate ? ` · foco em ${focusDate.split("-").reverse().join("/")}` : ""}
             <span className="mt-0.5 block font-medium">Inclui pendências de períodos anteriores do mesmo ciclo.</span>
           </p>
-          <Button size="sm" variant="secondary" onClick={() => router.replace("/registros")}>
+          <Button size="sm" variant="secondary" onClick={voltarAoPeriodo}>
             Voltar ao período
           </Button>
         </div>
       )}
 
-      {pendingCount > 0 && (
+      {/* 4D.5.1 — as MESMAS quatro faixas "Atenção agora" da Visão Geral
+          (fonte única attention-now; mesmo escopo ciclo), no modo normal de
+          Registros. Ocultas quando um filtro específico está ativo (Parte C)
+          e somente com contagem > 0. CTA aplica o filtro na própria página:
+          1 item ⇒ + foco na data (card expandido). */}
+      {!pendingOnly && !missingOnly && !planoOnly && !situationActive && (
+        <section aria-label="Atenção agora" className="space-y-2">
+          {attention.inconsistente.length > 0 && (
+            <div className="flex flex-col gap-2 rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-start gap-2">
+                <AlertTriangle size={16} aria-hidden className="mt-0.5 shrink-0 text-amber-600" />
+                <div>
+                  <p className="text-sm font-bold text-amber-900">
+                    Registro inconsistente: {attention.inconsistente.length}
+                  </p>
+                  <p className="text-xs font-medium text-amber-700">
+                    {attention.inconsistente.length === 1
+                      ? "Há uma sequência de batidas que precisa ser corrigida."
+                      : "Há sequências de batidas que precisam de correção."}
+                  </p>
+                </div>
+              </div>
+              <Link href={faixaHref(attention.inconsistente, "registro-inconsistente")} className="shrink-0 text-sm font-bold text-amber-800 underline underline-offset-2 hover:text-amber-900">
+                {attention.inconsistente.length === 1 ? "Ver inconsistência" : "Ver inconsistências"}
+              </Link>
+            </div>
+          )}
+
+          {attention.incompleto.length > 0 && (
+            <div className="flex flex-col gap-2 rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-start gap-2">
+                <FileWarning size={16} aria-hidden className="mt-0.5 shrink-0 text-amber-600" />
+                <div>
+                  <p className="text-sm font-bold text-amber-900">
+                    Registro incompleto: {attention.incompleto.length}
+                  </p>
+                  <p className="text-xs font-medium text-amber-700">
+                    {attention.incompleto.length === 1
+                      ? "Há uma jornada encerrada com batida faltando."
+                      : "Há jornadas encerradas com batida faltando."}
+                  </p>
+                </div>
+              </div>
+              <Link href={faixaHref(attention.incompleto, "registro-incompleto")} className="shrink-0 text-sm font-bold text-amber-800 underline underline-offset-2 hover:text-amber-900">
+                {attention.incompleto.length === 1 ? "Ver registro incompleto" : "Ver registros incompletos"}
+              </Link>
+            </div>
+          )}
+
+          {attention["sem-registro"].length > 0 && (
+            <div className="flex flex-col gap-2 rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-start gap-2">
+                <CalendarOff size={16} aria-hidden className="mt-0.5 shrink-0 text-amber-600" />
+                <div>
+                  <p className="text-sm font-bold text-amber-900">
+                    Dia sem registro: {attention["sem-registro"].length}
+                  </p>
+                  <p className="text-xs font-medium text-amber-700">
+                    {attention["sem-registro"].length === 1
+                      ? "Há um dia regular já encerrado sem ponto ou justificativa."
+                      : "Há dias regulares já encerrados sem ponto ou justificativa."}
+                  </p>
+                </div>
+              </div>
+              <Link href={faixaHref(attention["sem-registro"], "sem-registro")} className="shrink-0 text-sm font-bold text-amber-800 underline underline-offset-2 hover:text-amber-900">
+                {attention["sem-registro"].length === 1 ? "Ver dia sem registro" : "Ver dias sem registro"}
+              </Link>
+            </div>
+          )}
+
+          {attention["plano-10"].length > 0 && (
+            <div className="flex flex-col gap-2 rounded-2xl border border-violet-300 bg-violet-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-start gap-2">
+                <Hourglass size={16} aria-hidden className="mt-0.5 shrink-0 text-violet-600" />
+                <div>
+                  <p className="text-sm font-bold text-violet-900">
+                    Planejamento [10+] aguardando confirmação: {attention["plano-10"].length}
+                  </p>
+                  <p className="text-xs font-medium text-violet-700">
+                    {attention["plano-10"].length === 1
+                      ? "Há uma reserva que chegou ao dia e precisa de decisão."
+                      : "Há reservas que chegaram ao dia e precisam de decisão."}
+                  </p>
+                </div>
+              </div>
+              <Link href={planoFaixaHref(attention["plano-10"])} className="shrink-0 text-sm font-bold text-violet-700 underline underline-offset-2 hover:text-violet-900">
+                {attention["plano-10"].length === 1 ? "Revisar planejamento" : "Revisar planejamentos"}
+              </Link>
+            </div>
+          )}
+        </section>
+      )}
+
+      {pendingOnly && (
         <div className="sticky top-16 z-20 flex flex-wrap items-center gap-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-2.5 shadow-sm">
-          {pendingOnly ? (
-            <>
+          <>
               <p className="min-w-0 flex-1 text-xs font-bold text-amber-800">
                 ⚠ Registros pendentes: {pendingCount} · filtro aplicado
                 <span className="mt-0.5 block font-medium">Exibindo somente os registros que precisam de correção.</span>
               </p>
-              <Button size="sm" variant="warning" onClick={() => router.replace("/registros")}>
+              <Button size="sm" variant="warning" onClick={voltarAoPeriodo}>
                 Voltar aos registros do período
               </Button>
             </>
-          ) : (
-            <>
-              <p className="min-w-0 flex-1 text-xs font-bold text-amber-800">
-                ⚠ Registros pendentes: {pendingCount}
-                <span className="mt-0.5 block font-medium">Existem dias que precisam de correção antes do saldo ser definitivo.</span>
-              </p>
-              <Button size="sm" variant="warning" onClick={() => router.replace("/registros?pendentes=1")}>
-                Ver pendências
-              </Button>
-            </>
-          )}
         </div>
       )}
 
-      {missingCount > 0 && (
+      {missingOnly && (
         <div className="flex flex-wrap items-center gap-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-2.5">
-          {missingOnly ? (
-            <>
+          <>
               <p className="min-w-0 flex-1 text-xs font-bold text-amber-800">
                 ⚠ Dias sem registro: {missingCount} · filtro aplicado
                 <span className="mt-0.5 block font-medium">Exibindo somente os dias de expediente sem registro ou justificativa.</span>
               </p>
-              <Button size="sm" variant="warning" onClick={() => router.replace("/registros")}>
+              <Button size="sm" variant="warning" onClick={voltarAoPeriodo}>
                 Voltar aos registros do período
               </Button>
             </>
-          ) : (
-            <>
-              <p className="min-w-0 flex-1 text-xs font-bold text-amber-800">
-                ⚠ Dias sem registro: {missingCount}
-                <span className="mt-0.5 block font-medium">Existem dias de expediente já encerrados sem registro ou justificativa.</span>
-              </p>
-              <Button size="sm" variant="warning" onClick={() => router.replace("/registros?semRegistro=1")}>
-                Ver dias sem registro
-              </Button>
-            </>
-          )}
         </div>
       )}
 
