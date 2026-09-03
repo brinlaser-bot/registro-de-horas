@@ -448,9 +448,10 @@ check("TESTE 22 DE 24 — Nav mobile [‹][21/08 → 20/09][›] numa linha (320
   const nav = src("src/components/period-navigator.tsx");
   const p = page();
   const r = registros();
-  // 4G.2 (SUPERADO): container agora é COLUNA no mobile (linha 1 = só
-  // navegação; linha 2 = contexto) e linha única no desktop (sm:flex-row).
-  assert.ok(nav.includes('className="flex w-full min-w-0 flex-col gap-2 sm:w-auto sm:flex-row sm:items-center sm:gap-2"'), "controle único (4G.2: linha 1 só navegação no mobile)");
+  // 4G.2 (SUPERADO) → 4G.2.1: container ÚNICO com wrap — linha 1 (navegação
+  // w-full) e linha 2 (contexto) no mobile; linha única no desktop
+  // (sm:flex-nowrap). Uma única instância de contexto/botão (sem cópias).
+  assert.ok(nav.includes('className="flex w-full min-w-0 flex-wrap items-center gap-2 sm:w-auto sm:flex-nowrap"'), "controle único (4G.2.1: wrap estrutural, sem duplicação)");
   assert.ok(nav.includes('aria-label={fullLabel}'), "aria-label completo");
   assert.ok(nav.includes('aria-label="Período anterior"') && nav.includes('aria-label="Próximo período"'), "setas acessíveis");
   assert.ok(nav.includes("<span className=\"sm:hidden\" title={fullLabel}>{shortLabel}</span>"), "mobile: rótulo curto");

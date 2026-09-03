@@ -221,19 +221,27 @@ check("TESTE 04 DE 18 — Store continua recusando cancelamento de uso protegido
 
 check("TESTE 05 DE 18 — Mobile: navegação em linha PRÓPRIA, separada do contexto", () => {
   const nav = navigator();
-  // container: COLUNA no mobile / LINHA ÚNICA no desktop (layout validado):
-  assert.ok(nav.includes('className="flex w-full min-w-0 flex-col gap-2 sm:w-auto sm:flex-row sm:items-center sm:gap-2"'),
-    "linha 1 (navegação) e linha 2 (contexto) no mobile; única linha no desktop");
+  // 4G.2.1 — estrutura SEM duplicação: container flex-wrap ÚNICO; o sub-bloco
+  // de navegação ocupa a linha inteira no mobile (w-full) e libera contexto/
+  // ação para a linha 2; no desktop (sm:w-auto sm:flex-nowrap) tudo volta à
+  // linha única validada:
+  assert.ok(nav.includes('className="flex w-full min-w-0 flex-wrap items-center gap-2 sm:w-auto sm:flex-nowrap"'),
+    "container único com wrap (linha 1 navegação / linha 2 contexto no mobile)");
+  assert.ok(nav.includes('<div className="flex w-full min-w-0 items-center gap-2 sm:w-auto sm:flex-none">'),
+    "navegação ocupa a linha inteira no mobile (w-full ⇒ contexto quebra p/ linha 2)");
   // LINHA 1 contém SOMENTE [‹][rótulo][›]:
-  const linha1 = nav.split("{/* LINHA 1")[1]?.split("{/* LINHA 2")[0] ?? "";
+  const linha1 = nav.split("{/* LINHA 1")[1]?.split("{/* CONTEXTO")[0] ?? "";
   assert.ok(linha1.includes('aria-label="Período anterior"') && linha1.includes('aria-label="Próximo período"'),
     "linha 1 = navegação");
-  assert.ok(!linha1.includes("contextLabel"), "nenhum contexto na linha 1");
-  // LINHA 2 (contexto) é exclusiva do mobile:
-  const linha2 = nav.split("<div className=\"flex min-w-0 flex-wrap items-center gap-2 sm:hidden\">")[1]?.split("{/* DESKTOP")[0] ?? "";
-  assert.ok(linha2.includes("contextLabel"), "linha 2 usa o contexto");
-  assert.ok(nav.includes("<div className=\"flex min-w-0 flex-wrap items-center gap-2 sm:hidden\">"),
-    "linha 2 de contexto existe somente no mobile (sm:hidden)");
+  assert.ok(!linha1.includes("contextLabel") && !linha1.includes("onBackToCurrent"),
+    "nenhum contexto/ação na linha 1");
+  // 4G.2.1 — PROVA DE UNICIDADE: exatamente UM site JSX de contexto e UM de
+  // retorno; NENHUM bloco equivalente escondido por utilitário responsivo:
+  assert.equal(nav.split("{contextLabel && (").length - 1, 1, "contexto renderizado por UM ÚNICO bloco JSX");
+  assert.equal(nav.split("{onBackToCurrent && (").length - 1, 1, "retorno renderizado por UM ÚNICO bloco JSX");
+  assert.ok(!nav.includes("sm:hidden\">") || !nav.split("sm:hidden\">")[1]?.includes("contextLabel"),
+    "sem bloco mobile duplicado de contexto");
+  assert.ok(!nav.includes('hidden shrink-0 sm:inline-flex'), "sem cópia desktop escondida por hidden (causa da duplicação 4G.2)");
 });
 
 check("TESTE 06 DE 18 — Mobile: intervalo não quebra internamente e as setas não encolhem", () => {
@@ -242,67 +250,67 @@ check("TESTE 06 DE 18 — Mobile: intervalo não quebra internamente e as setas 
   assert.ok(nav.includes("min-w-0 flex-1 overflow-hidden whitespace-nowrap rounded-xl border border-slate-300"),
     "box do período: flex-1 (centro ocupa o restante) + nowrap + overflow-hidden");
   // setas NUNCA encolhem:
-  const linha1 = nav.split("{/* LINHA 1")[1]?.split("{/* LINHA 2")[0] ?? "";
+  const linha1 = nav.split("{/* LINHA 1")[1]?.split("{/* CONTEXTO")[0] ?? "";
   assert.equal(linha1.split('className="shrink-0"').length - 1, 2, "duas setas shrink-0 (não encolhem)");
   // rótulos curto/completo preservados (mobile/desktop):
   assert.ok(nav.includes("<span className=\"sm:hidden\" title={fullLabel}>{shortLabel}</span>"), "mobile: rótulo curto");
   assert.ok(nav.includes("<span className=\"hidden sm:inline\">{fullLabel}</span>"), "desktop: rótulo completo");
 });
 
-check("TESTE 07 DE 18 — 'Período passado' fica na linha de contexto, fora da linha principal", () => {
+check("TESTE 07 DE 18 — 'Período passado' ocorre UMA ÚNICA VEZ (4G.2.1)", () => {
   const nav = navigator();
-  const linha2 = nav.split("<div className=\"flex min-w-0 flex-wrap items-center gap-2 sm:hidden\">")[1]?.split("{/* DESKTOP")[0] ?? "";
-  assert.ok(linha2.includes("contextLabel"), "badge de contexto na linha 2 (mobile)");
-  // a linha principal (linha 1) não contém o rótulo de contexto:
-  const linha1 = nav.split("{/* LINHA 1")[1]?.split("{/* LINHA 2")[0] ?? "";
-  assert.ok(!linha1.includes("contextLabel"), "contexto fora da linha principal");
+  // UNICIDADE: um único badge renderiza o contexto — 'Período passado' é o
+  // valor de PERIOD_CONTEXT_LABEL.past passado pelas páginas, e o componente
+  // não tem NENHUMA segunda cópia (mobile/desktop):
+  assert.equal(nav.split("<Badge tone=\"slate\"").length - 1, 1, "um único <Badge> de contexto no componente");
+  assert.equal(nav.split("contextLabel &&").length - 1, 1, "um único gate de contexto");
+  assert.ok(nav.split("{/* LINHA 1")[1]?.split("{/* CONTEXTO")[0] && !nav.split("{/* LINHA 1")[1]!.split("{/* CONTEXTO")[0].includes("Badge"),
+    "badge fora da linha principal (fica na linha 2 via wrap)");
   // classificação canônica intacta (derivada em periods.ts):
   reset();
   const atual = getPointPeriod(HOJE);
   const passado = PERIOD;
   assert.equal(pointPeriodContext(passado, atual), "past");
   assert.equal(PERIOD_CONTEXT_LABEL.past, "Período passado");
-  // páginas continuam passando a MESMA fonte única:
+  // páginas continuam passando a MESMA fonte única (uma vez cada):
   assert.ok(registros().includes("contextLabel={query || wantCycleScope ? undefined : PERIOD_CONTEXT_LABEL[contextoPeriodo]}"));
   assert.ok(page().includes("contextLabel={PERIOD_CONTEXT_LABEL[contextoPeriodo]}"));
+  assert.equal(registros().split("contextLabel={").length - 1, 1, "Registros passa o contexto UMA vez");
+  assert.equal(page().split("contextLabel={").length - 1, 1, "Resumo passa o contexto UMA vez");
 });
 
-check("TESTE 08 DE 18 — 'Período futuro' idem: mesma linha de contexto no mobile", () => {
+check("TESTE 08 DE 18 — 'Período futuro' ocorre UMA ÚNICA VEZ (mesmo canal único)", () => {
   reset();
   const atual = getPointPeriod(HOJE);
   const futuro: PointPeriod = { from: "2026-09-21", to: "2026-10-20" };
   assert.equal(pointPeriodContext(futuro, atual), "future");
   assert.equal(PERIOD_CONTEXT_LABEL.future, "Período futuro");
-  // a linha 2 renderiza QUALQUER contexto (passado OU futuro) pelo mesmo canal:
+  // passado OU futuro passam pelo MESMO (único) canal de contexto:
   const nav = navigator();
-  const linha2 = nav.split("<div className=\"flex min-w-0 flex-wrap items-center gap-2 sm:hidden\">")[1]?.split("{/* DESKTOP")[0] ?? "";
-  assert.ok(linha2.includes("{contextLabel && ("), "linha 2 genérica (mesmo canal para passado/futuro)");
-  assert.ok(linha2.includes("<Badge tone=\"slate\">"), "badge na linha 2");
+  assert.equal(nav.split("{contextLabel && (").length - 1, 1, "um único canal para passado/futuro");
+  assert.ok(nav.includes("<Badge tone=\"slate\" className=\"shrink-0\">"), "badge único com shrink-0");
 });
 
-check("TESTE 09 DE 18 — Período atual NÃO renderiza 'Ir para o período atual'", () => {
+check("TESTE 09 DE 18 — ATUAL: 'Período atual' único e SEM botão de retorno", () => {
   const nav = navigator();
-  // o botão só existe quando a página passa onBackToCurrent (fora do atual):
+  // UM ÚNICO botão de retorno no componente (4G.2.1 — antes eram 2 cópias):
+  assert.equal(nav.split('aria-label="Ir para o período atual"').length - 1, 1,
+    "'Ir para o período atual' existe UMA única vez");
   assert.ok(nav.includes("{onBackToCurrent && ("), "botão condicionado à ação");
-  assert.ok(nav.split('aria-label="Ir para o período atual"').length - 1 === 2,
-    "duas apresentações (mobile linha 2 + desktop), mesma ação");
-  // páginas passam undefined no período atual:
+  // páginas passam undefined no período atual ⇒ NENHUM botão de retorno:
   assert.ok(page().includes("onBackToCurrent={viewingCurrentPeriod ? undefined : () => setPeriod(currentPeriod)}"),
     "Resumo: sem botão no período atual");
   reset();
   const atual = getPointPeriod(HOJE);
   assert.equal(pointPeriodContext(atual, atual), "current");
-  // 4G.1 (SUPERADO em estrutura, preservado em significado): linha 2 do mobile
-  // só existe quando há contexto OU ação — no atual resta só o badge:
-  const nav2 = navigator();
-  assert.ok(nav2.includes("{(contextLabel || onBackToCurrent) && ("), "linha 2 existe só com contexto/ação");
+  assert.equal(PERIOD_CONTEXT_LABEL.current, "Período atual");
 });
 
-check("TESTE 10 DE 18 — 320/360/412 sem overflow horizontal estrutural", () => {
+check("TESTE 10 DE 18 — 320/360/412 sem overflow horizontal estrutural; desktop preservado", () => {
   const nav = navigator();
-  // corrente anti-overflow completa:
-  assert.ok(nav.includes("flex w-full min-w-0 flex-col"), "container w-full + min-w-0");
-  assert.ok(nav.includes("<div className=\"flex min-w-0 items-center gap-2 sm:flex-none\">"), "linha 1 min-w-0");
+  // corrente anti-overflow completa (mobile):
+  assert.ok(nav.includes("flex w-full min-w-0 flex-wrap"), "container w-full + min-w-0 + wrap (linha 2 independente)");
+  assert.ok(nav.includes('<div className="flex w-full min-w-0 items-center gap-2 sm:w-auto sm:flex-none">'), "linha 1: w-full + min-w-0");
   assert.ok(nav.includes("min-w-0 flex-1 overflow-hidden whitespace-nowrap"), "centro: flex-1 + min-w-0 + nowrap + clip");
   // ORÇAMENTO DE LARGURA (320px, pior caso, sem hardcode de datas):
   //   padding da página ≈ 32px ⇒ 288px úteis;
@@ -310,10 +318,16 @@ check("TESTE 10 DE 18 — 320/360/412 sem overflow horizontal estrutural", () =>
   //   box do período ≈ 192px − px-3 (24px) ≈ 168px de texto;
   //   rótulo curto "21/07 → 20/08" = 13 glifos @ ~8px ≈ 104px < 168px ✔
   //   (períodos especiais "21/04 → 30/04" são ainda mais curtos; com overflow
-  //   improvável, overflow-hidden corta — NUNCA gera scroll horizontal).
-  const linha1 = nav.split("{/* LINHA 1")[1]?.split("{/* LINHA 2")[0] ?? "";
+  //   improvável, overflow-hidden corta — NUNCA gera scroll horizontal;
+  //   na linha 2, badge+ação quebram ENTRE SI quando não couberem).
+  const linha1 = nav.split("{/* LINHA 1")[1]?.split("{/* CONTEXTO")[0] ?? "";
   assert.ok(!linha1.includes("min-w-[") && !linha1.includes("w-["), "nenhuma largura fixa na linha 1");
   assert.equal(linha1.split('className="shrink-0"').length - 1, 2, "setas fora do cálculo flex (shrink-0)");
+  // DESKTOP PRESERVADO (4G.2.1): sm:w-auto + sm:flex-nowrap ⇒ MESMA linha
+  // única validada (navegação + badge + ação lado a lado):
+  assert.ok(nav.includes("sm:w-auto sm:flex-nowrap"), "desktop: linha única sem wrap");
+  assert.ok(nav.includes("sm:w-auto sm:flex-none"), "navegação volta a dividir a linha no desktop");
+  assert.ok(nav.includes('<span className="hidden sm:inline">{fullLabel}</span>'), "desktop: rótulo completo");
 });
 
 /* ════════ CORREÇÃO 3 — HISTÓRICO COM TOGGLE COMPLETO ════════ */

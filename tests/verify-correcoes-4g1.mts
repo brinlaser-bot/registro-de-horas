@@ -394,11 +394,12 @@ check("TESTE 17 DE 18 — 'Ir para o período atual' é botão real, só fora do
   assert.ok(nav.includes('aria-label="Ir para o período atual"'), "acessibilidade");
   assert.ok(nav.includes("<Undo2 size={14}"), "ícone de retorno");
   // botão REAL (Button com variant/secondary — borda/background/hover/foco):
-  // 4G.2 (SUPERADO): o botão de retorno agora existe em DUAS apresentações
-  // (mobile no bloco de contexto sm:hidden; desktop inline) — segue botão
-  // REAL, renderizado SOMENTE quando a página passa a ação (fora do atual).
-  assert.ok(nav.includes('onClick={onBackToCurrent}') && nav.split('aria-label="Ir para o período atual"').length - 1 === 2,
-    "botão real de retorno nas duas apresentações (mobile/desktop), só fora do atual");
+  // 4G.2 (SUPERADO em estrutura, preservado em significado) → 4G.2.1: o botão
+  // de retorno existe em UMA ÚNICA instância JSX (a duplicação mobile/desktop
+  // escondida por CSS foi eliminada) — segue botão REAL, renderizado SOMENTE
+  // quando a página passa a ação (fora do atual).
+  assert.ok(nav.includes('onClick={onBackToCurrent}') && nav.split('aria-label="Ir para o período atual"').length - 1 === 1,
+    "botão real de retorno em instância ÚNICA (4G.2.1), só fora do atual");
   assert.ok(nav.includes("{onBackToCurrent && ("), "renderiza somente quando a página passa a ação");
   // páginas passam undefined no período atual (botão some):
   const p = page();
@@ -411,8 +412,9 @@ check("TESTE 17 DE 18 — 'Ir para o período atual' é botão real, só fora do
     "contexto informativo em Registros");
   assert.ok(p.includes("contextLabel={PERIOD_CONTEXT_LABEL[contextoPeriodo]}"), "contexto informativo no Resumo");
   // navegador aprovado preservado:
-  // 4G.2 (SUPERADO): container virou coluna no mobile / linha no desktop.
-  assert.ok(nav.includes('className="flex w-full min-w-0 flex-col gap-2 sm:w-auto sm:flex-row sm:items-center sm:gap-2"'), "controle único (4G.2)");
+  // 4G.2 (SUPERADO) → 4G.2.1: container único com wrap (coluna natural no
+  // mobile via w-full+wrap; linha única no desktop via sm:flex-nowrap).
+  assert.ok(nav.includes('className="flex w-full min-w-0 flex-wrap items-center gap-2 sm:w-auto sm:flex-nowrap"'), "controle único (4G.2.1)");
   assert.ok(nav.includes('aria-label="Período anterior"') && nav.includes('aria-label="Próximo período"'), "setas preservadas");
 });
 

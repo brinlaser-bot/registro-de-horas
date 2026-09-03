@@ -9,16 +9,22 @@
  *  · `onBackToCurrent` é AÇÃO: botão real "Ir para o período atual"
  *    (borda/hover/foco/cursor), exibido SOMENTE fora do período atual.
  *
- * 4G.2 — MOBILE SEM PERÍODO ESPREMIDO (validação manual 412px):
+ * 4G.2 — MOBILE SEM PERÍODO ESPREMIDO:
  *  LINHA 1 — APENAS NAVEGAÇÃO: [ ‹ ] [ 21/07 → 20/08 ] [ › ]
- *    · três blocos; datas em UMA linha (whitespace-nowrap no box);
- *    · setas NUNCA encolhem (shrink-0); centro ocupa o espaço restante
- *      (flex-1 min-w-0) — zero scroll horizontal;
- *  LINHA 2 — CONTEXTO (apenas mobile, pode quebrar entre si):
- *    [ Período passado/futuro ] [ ↩ Ir para o período atual ]
- *    (no período atual resta só o badge informativo).
- *  DESKTOP (sm+): layout único validado preservado — navegação + contexto +
- *    ação na MESMA linha.
+ *    (datas em UMA linha, setas NUNCA encolhem, zero scroll horizontal);
+ *  LINHA 2 — CONTEXTO: [ Período passado/futuro ] [ ↩ Ir para o período
+ *    atual ] (no período atual resta só o badge; pode quebrar ENTRE si).
+ *
+ * 4G.2.1 — UMA ÚNICA INSTÂNCIA de contexto/botão (correção da duplicação
+ *  validada no mobile 412px): NÃO existem mais blocos JSX "mobile" e
+ *  "desktop" equivalentes escondidos por utilitários responsivos — no CSS
+ *  compilado, .inline-flex (classe base de Button/Badge) vinha DEPOIS de
+ *  .hidden e vencia o esconderijo, renderizando o contexto DUAS VEZES.
+ *  Agora existe UM badge e UM botão, e o POSICIONAMENTO vem do fluxo flex:
+ *  no mobile o sub-bloco de navegação ocupa a linha inteira (w-full) e o
+ *  contexto/ação quebram NATURALMENTE para a linha 2 (flex-wrap); no desktop
+ *  (sm:w-auto sm:flex-nowrap) tudo volta para a linha única validada.
+ *  Duplicação estruturalmente impossível.
  */
 import { ChevronLeft, ChevronRight, Undo2 } from "lucide-react";
 import { Badge, Button } from "@/components/ui";
@@ -47,12 +53,15 @@ export function PeriodNavigator({
 }) {
   return (
     <div
-      className="flex w-full min-w-0 flex-col gap-2 sm:w-auto sm:flex-row sm:items-center sm:gap-2"
+      className="flex w-full min-w-0 flex-wrap items-center gap-2 sm:w-auto sm:flex-nowrap"
       aria-label={fullLabel}
     >
-      {/* LINHA 1 — SOMENTE NAVEGAÇÃO (mobile e desktop): sub-bloco que NUNCA
-          quebra; setas shrink-0; centro flex-1 min-w-0 com nowrap. */}
-      <div className="flex min-w-0 items-center gap-2 sm:flex-none">
+      {/* LINHA 1 — SOMENTE NAVEGAÇÃO: no mobile ocupa a LINHA INTEIRA (w-full),
+          empurrando contexto/ação para a linha 2; no desktop (sm:w-auto)
+          volta a dividir a linha única validada. Setas shrink-0 (nunca
+          encolhem); centro flex-1 min-w-0 com nowrap + overflow-hidden
+          (zero scroll horizontal em 320/360/412). */}
+      <div className="flex w-full min-w-0 items-center gap-2 sm:w-auto sm:flex-none">
         <Button variant="secondary" size="sm" onClick={onPrev} aria-label="Período anterior" className="shrink-0">
           <ChevronLeft size={16} />
         </Button>
@@ -64,33 +73,11 @@ export function PeriodNavigator({
           <ChevronRight size={16} />
         </Button>
       </div>
-      {/* LINHA 2 — CONTEXTO (apenas mobile): informação + ação podem quebrar
-          ENTRE SI, mas nunca dentro do box de datas. */}
-      {(contextLabel || onBackToCurrent) && (
-        <div className="flex min-w-0 flex-wrap items-center gap-2 sm:hidden">
-          {contextLabel && (
-            <Badge tone="slate">
-              {contextLabel}
-            </Badge>
-          )}
-          {onBackToCurrent && (
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={onBackToCurrent}
-              className="border-emerald-300 font-bold text-emerald-700 hover:bg-emerald-50"
-              aria-label="Ir para o período atual"
-            >
-              <Undo2 size={14} aria-hidden />
-              <span>Ir para o período atual</span>
-            </Button>
-          )}
-        </div>
-      )}
-      {/* DESKTOP (sm+) — contexto + ação na MESMA linha da navegação
-          (layout único validado na 4G/4G.1, preservado). */}
+      {/* CONTEXTO + AÇÃO — instância ÚNICA (4G.2.1): no mobile FORMAM a linha
+          2 (quebra natural do flex-wrap; em 320px podem quebrar ENTRE si); no
+          desktop seguem NA MESMA linha da navegação (layout 4G/4G.1). */}
       {contextLabel && (
-        <Badge tone="slate" className="hidden shrink-0 sm:inline-flex">
+        <Badge tone="slate" className="shrink-0">
           {contextLabel}
         </Badge>
       )}
@@ -99,7 +86,7 @@ export function PeriodNavigator({
           variant="secondary"
           size="sm"
           onClick={onBackToCurrent}
-          className="hidden shrink-0 border-emerald-300 font-bold text-emerald-700 hover:bg-emerald-50 sm:inline-flex"
+          className="shrink-0 border-emerald-300 font-bold text-emerald-700 hover:bg-emerald-50"
           aria-label="Ir para o período atual"
         >
           <Undo2 size={14} aria-hidden />
