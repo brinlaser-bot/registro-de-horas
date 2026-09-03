@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { AlertTriangle, Ban, CalendarClock, CalendarOff, ChevronLeft, ChevronRight, Clock3, FileWarning, Hourglass, Search, X } from "lucide-react";
+import { AlertTriangle, Ban, CalendarOff, ChevronLeft, ChevronRight, Clock3, FileWarning, Hourglass, Search, X } from "lucide-react";
 import { actions, getAppData, settingsOf, useAppData, useIsClient, useIsStoreReady } from "@/lib/store";
 import { useSpecialPunchActions } from "@/components/special-release-confirm";
 import {
@@ -122,11 +122,6 @@ function RegistrosBody() {
   const [planDate, setPlanDate] = useState<string | null>(null);
   // 4C: id do plano em resolução ("Usar planejamento [10+]").
   const [resolvePlanId, setResolvePlanId] = useState<string | null>(null);
-  // 4C §17: planejamentos ativos cujo destinationDate já chegou/passou.
-  const pendingPlansCount = useMemo(
-    () => (specialExcessPlans ?? []).filter((pl) => pl.status === "planned" && pl.destinationDate <= todayStr).length,
-    [specialExcessPlans, todayStr],
-  );
   const wantPending = searchParams.get("pendentes") === "1";
   const wantMissing = searchParams.get("semRegistro") === "1";
   const situacaoRaw = searchParams.get("situacao");
@@ -716,6 +711,11 @@ function RegistrosBody() {
       {(() => {
         const saldo = summaries.reduce((s, x) => s + x.balanceMinutes, 0);
         const tracked = summaries.reduce((s, x) => s + x.workedDays, 0);
+        // 4D.5.2 — mesma semântica canônica da 4D.5 (situations ⇒ attention-now),
+        // aplicada ao RANGE EFETIVO da tela (days): período no modo período,
+        // ciclo no modo ciclo. Nunca o count cego do escopo anual.
+        const inconsistentes = days.filter((d) => d.situations.includes("registro-inconsistente")).length;
+        const incompletos = days.filter((d) => d.situations.includes("registro-incompleto")).length;
         return (
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-semibold text-slate-600">
             <span className="font-extrabold text-slate-800">
@@ -729,7 +729,8 @@ function RegistrosBody() {
             </span>
             <span>Saldo <b className={saldo >= 0 ? "text-emerald-600" : "text-rose-600"}>{saldo >= 0 ? "+" : ""}{formatMinutes(saldo)}</b></span>
             <span>Dias com registro <b className="text-slate-900">{tracked}</b></span>
-            <span>Pendentes <b className="text-amber-700">{pendingCount}</b></span>
+            <span>Inconsistentes <b className="text-amber-700">{inconsistentes}</b></span>
+            <span>Incompletos <b className="text-amber-700">{incompletos}</b></span>
             <span>Sem registro <b className="text-amber-700">{missingCount}</b></span>
           </div>
         );
@@ -915,22 +916,19 @@ function RegistrosBody() {
         />
       ) : (
         <>
-          {/* 4C — ALERTA DE PLANEJAMENTOS PENDENTES (§17): âmbar de pendência
-              operacional (nunca vermelho/erro). Discreto e acima da lista
-              (rolagem desnecessária — o banner já está no topo dos dias). */}
-          {pendingPlansCount > 0 && (
-            <div className="flex flex-wrap items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5">
-              <CalendarClock size={15} className="shrink-0 text-amber-500" aria-hidden />
-              <p className="min-w-0 flex-1 text-xs font-semibold text-amber-800">
-                Planejamentos [10+] aguardando confirmação: <b className="tabular-nums">{pendingPlansCount}</b>
-                <span className="ml-1.5 font-medium text-amber-700/80">— resolva ou libere nos dias abaixo.</span>
-              </p>
-            </div>
-          )}
-          <div className={missingOnly || pendingOnly || planoOnly ? "space-y-4" : "space-y-2"}>
+          {/* 4D.5.2 — a faixa legada global de planejamentos [10+] FOI REMOVIDA:
+              a única faixa de planejamento é a violeta compartilhada da 4D.5
+              (fonte única attention-now), exibida no modo normal; com o filtro
+              plano-10 ativo resta apenas o contexto violeta do filtro. */}          <div className={missingOnly || pendingOnly || planoOnly ? "space-y-4" : "space-y-2"}>
           {listedDays.map(({ date, balanceView, displayDay, absence, calendarLabel, falta, workedInAbonoMinutes, abonoParcial, missingExpected, historicalEmpty, compact, specialExcess, specialPlans, planningCapacityMinutes, calendarSemantics }) => (
             <DayCard
-              key={date}
+              /* 4D.5.2 — a identidade muda quando o FOCO transiciona: navegando
+               * client-side na MESMA página (muda ?data=), o card focado é
+               * REMONTADO e lê initiallyExpanded fresco (a prop só é lida no
+               * primeiro mount). Sem efeito/setState — sem cascata de render;
+               * com o foco ativo o usuário ainda recolhe/expande manualmente
+               * (a key só muda de novo quando o foco sai). */
+              key={focusDate === date ? `${date}-atencao` : date}
               result={displayDay}
               settings={settings}
               allComps={compensations}

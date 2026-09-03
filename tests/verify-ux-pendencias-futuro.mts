@@ -85,7 +85,11 @@ check("5. Registros não possui card grande Resumo do período", () => {
 check("6. Registros possui resumo compacto", () => {
   const reg = srcOf("src/app/(app)/registros/page.tsx");
   assert.ok(reg.includes("Dias com registro"));
-  assert.ok(reg.includes("Pendentes"));
+  // 4D.5.2 (SUPERADO o chip genérico "Pendentes" — expectativa atualizada com
+  // justificativa): o resumo agora separa as naturezas canônicas da 4D.5:
+  assert.ok(reg.includes("Inconsistentes"));
+  assert.ok(reg.includes("Incompletos"));
+  assert.ok(!reg.includes("<span>Pendentes <b"));
   assert.ok(reg.includes("periodLabel(period)"));
 });
 

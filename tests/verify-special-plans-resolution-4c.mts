@@ -390,12 +390,18 @@ check("TESTE 13 DE 20 — ATOMICIDADE", () => {
   assert.equal(bankOf().reservedMinutes, bankBefore - 30, "banco intacto (só o cancelamento explícito liberou)");
 });
 
-check("TESTE 14 DE 20 — ALERTA PENDENTE", () => {
+check("TESTE 14 DE 20 — ALERTA PENDENTE (4D.5.2: faixa única violeta compartilhada)", () => {
+  // 4D.5.2 (SUPERADA a faixa legada laranja "Planejamentos [10+] aguardando
+  // confirmação: X — resolva ou libere nos dias abaixo." — expectativa
+  // atualizada com justificativa): a ÚNICA faixa de planejamento é a violeta
+  // compartilhada da 4D.5/4D.5.1 (fonte única attention-now); o predicado
+  // canônico (planned + destino <= hoje) vive em hasArrivedSpecialPlan:
   const page = src("src/app/(app)/registros/page.tsx");
-  assert.ok(page.includes("Planejamentos [10+] aguardando confirmação:"), "texto do alerta");
-  assert.ok(page.includes("amber-50") && page.includes("amber-800"), "âmbar de pendência operacional");
-  assert.ok(!/rose-\d00|text-red-/.test(page.slice(page.indexOf("aguardando confirmação") - 600, page.indexOf("aguardando confirmação") + 400)), "sem vermelho/erro no alerta");
-  assert.ok(page.includes('pl.status === "planned" && pl.destinationDate <= todayStr'), "contagem = planned com destino <= hoje");
+  const attention = src("src/lib/attention-now.ts");
+  assert.ok(page.includes('Planejamento [10+] aguardando confirmação: {attention["plano-10"].length}'), "faixa única violeta");
+  assert.ok(!page.includes("pendingPlansCount"), "faixa/variável legada removida");
+  assert.ok(!page.includes("resolva ou libere nos dias abaixo"), "texto legado removido");
+  assert.ok(attention.includes('date <= today && activeSpecialPlansForDate(plans, date).length > 0'), "contagem = planned com destino <= hoje (fonte única)");
   // Funcional: o predicado da página sobre o estado atual:
   setState([...gen60("2026-08-18"), ...def60("2026-08-25")]);
   planForArrived("2026-08-25", 60, "2026-08-20");

@@ -142,10 +142,13 @@ check("12. entrada isolada: Registro pendente, não Sem registro", () => {
   assert.ok(pendingPunchDates(entries, S, TODAY, RANGE).includes(WED));
 });
 
-check("13. resumo compacto mostra Dias com registro / Pendentes / Sem registro", () => {
+check("13. resumo compacto mostra Dias com registro / Inconsistentes / Incompletos / Sem registro (4D.5.2)", () => {
+  // 4D.5.2 (SUPERADO o chip "Pendentes" — expectativa atualizada com
+  // justificativa): pendências de registro viraram métricas distintas:
   const reg = srcOf("src/app/(app)/registros/page.tsx");
   assert.ok(reg.includes("Dias com registro"));
-  assert.ok(reg.includes("Pendentes"));
+  assert.ok(reg.includes("Inconsistentes"));
+  assert.ok(reg.includes("Incompletos"));
   assert.ok(reg.includes("Sem registro"));
   assert.ok(reg.includes("{missingCount}"));
 });
