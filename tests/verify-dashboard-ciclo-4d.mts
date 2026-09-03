@@ -430,10 +430,14 @@ check("TESTE 19 DE 20 — Scroll reset CENTRALIZADO: troca de rota sim; interaç
   }
 });
 
-check("TESTE 20 DE 20 — Central de Horas INTOCADA; fonte proibida (debt/hourBank) fora do dashboard", () => {
+check("TESTE 20 DE 20 — Dashboard preservado; Central reformada SOMENTE pela 4E autorizada; fonte proibida fora", () => {
+  // 4E (SUPERADO — expectativa atualizada com justificativa): a reforma da
+  // Central de Horas foi autorizada e executada pela ETAPA 4E; este guard
+  // passa a proteger apenas os arquivos do dashboard da 4D:
   const status = execSync("git status --porcelain", { cwd: root }).toString().split("\n");
   const tocados = status.filter((l) => l.trim().length > 0).map((l) => l.slice(3).trim());
-  assert.ok(!tocados.some((f) => f.includes("central")), "nenhum arquivo da Central alterado");
+  assert.ok(!tocados.some((f) => f.includes("page.tsx") && f.includes("(app)/page")), "Visão Geral intacta");
+  assert.ok(!tocados.some((f) => f.includes("cycle-dashboard")), "motor do dashboard intacto");
   assert.ok(exists("src/app/(app)/compensacoes/page.tsx"), "Central continua presente");
   // A fonte proibida não alimenta o novo dashboard:
   for (const f of ["src/app/(app)/page.tsx", "src/lib/cycle-dashboard.ts", "src/lib/calendar-forecast.ts"]) {

@@ -302,8 +302,11 @@ check("L. (3E.2) Realocar excedente segue em Compensações e painel; fora do ca
   assert.ok(!dayCardSrc.includes("onAllocateExcess"), "card sem callback legado (3E.2)");
   assert.ok(!dayCardSrc.includes("Realocar excedente"), "CTA legado fora do card (3E.2)");
   assert.ok(!registrosSrc.includes("AllocateExcessModal"), "Registros não monta o modal legado (3E.2)");
-  assert.ok(compensacoesSrc.includes("Realocar excedente"));
-  assert.ok(compensacoesSrc.includes("AllocateExcessModal"));
+  // 4E (SUPERADO — expectativa atualizada com justificativa): a Central
+  // reformada não hospeda mais o fluxo de realocação; o motor/modal legado
+  // permanece intacto e acessível pelos fluxos internos existentes:
+  assert.ok(!compensacoesSrc.includes("Realocar excedente"));
+  assert.ok(!compensacoesSrc.includes("AllocateExcessModal"));
   assert.ok(panelSrc.includes("setAllocateDate(d.date)"));
 });
 

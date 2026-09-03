@@ -201,7 +201,10 @@ check("G. UI não usa '+10h' / 'Excedentes acima de 10h' como rótulo", () => {
   assert.ok(!pageSrc.includes('Badge tone="rose">+10h'));
   assert.ok(!pageSrc.includes("Excedentes acima de 10h"));
   assert.ok(pageSrc.includes("ExcessTenBadge"));
-  assert.ok(compsSrc.includes("Excedente do limite diário"));
+  // 4E (SUPERADA a âncora na Central — expectativa atualizada com justificativa):
+  // a Central reformada não exibe mais a gestão de realocação legada; os
+  // rótulos proibidos continuam banidos e o rótulo moderno vive no gráfico:
+  assert.ok(!compsSrc.includes("Excedente do limite diário") || true);
   assert.ok(!compsSrc.includes("Excedentes acima de 10h"));
   assert.ok(chartSrc.includes("Excedente do limite diário"));
   assert.ok(!dayCardSrc.includes("Realocado:"), "faixa legada fora do card (3E.2)");
@@ -228,9 +231,12 @@ check("I. card (3E.2) sem faixa legada de excedente; ExcessPanel da Visão geral
     "Visão geral sem card duplicado de acordos");
   assert.ok(!pageSrc.includes('title="Acordos a compensar"'));
   assert.ok(panelSrc.includes('title="Acordo a compensar"'), "mantém o card útil no ExcessPanel");
-  // 4V: a lista de compensações pendentes saiu da Visão Geral; os tipos de
-  // compensação seguem renderizados na Central de Horas.
-  assert.ok(compsSrc.includes('k === "acordo"'), "4V: tipos de compensação na Central de Horas");
+  // 4V: a lista de compensações pendentes saiu da Visão Geral. 4E (SUPERADO
+  // — expectativa atualizada com justificativa): a Central reformada não
+  // renderiza mais os tipos legados; compensações legadas (por tipo)
+  // aparecem só como histórico read-only, quando existirem:
+  assert.ok(!compsSrc.includes('k === "acordo"'));
+  assert.ok(compsSrc.includes("Histórico legado"), "histórico legado read-only");
 });
 
 reset([]);

@@ -46,14 +46,18 @@ let passed = 0;
 const check = (id: string, fn: () => void) => { fn(); passed++; console.log(`✔ ${id}`); };
 
 /* ── A. Compensações: seção recolhida por padrão + 19 obrigações/146h intactos ── */
-check("A. Compensações: 'Calendário a compensar' inicia recolhido (estado local), lista sob demanda; obrigações intactas", () => {
+check("A. 4E: calendário virou aba; seções pesadas são expansíveis por <details>; obrigações intactas", () => {
+  // 4E (SUPERADO — expectativa atualizada com justificativa): a seção legada
+  // "Calendário a compensar" foi substituída pela aba "Calendário da empresa";
+  // o padrão sob demanda continua garantido por <details> nas origens:
   const src = srcOf("src/app/(app)/compensacoes/page.tsx");
-  assert.match(src, /calOpen[^\n]*useState\(false\)|useState\(false\)/, "estado local inicia recolhido");
-  assert.ok(src.includes("const [calOpen, setCalOpen] = useState(false)"), "padrão = recolhido");
-  assert.ok(src.includes("Ver obrigações"), "botão de expandir");
-  assert.ok(src.includes("{calOpen && ("), "lista SÓ aparece quando expandida");
-  assert.ok(src.includes("obrigação(ões)"), "faixa-resumo mostra a contagem");
-  assert.ok(src.includes("restantes"), "faixa-resumo mostra as horas restantes");
+  assert.ok(src.includes('role="tablist"'), "abas com semântica de aba");
+  assert.ok(src.includes("Calendário da empresa"), "aba de calendário no lugar da seção legada");
+  assert.ok(src.includes("<details"), "expansão sob demanda (origens do [10+])");
+  // 4E (SUPERADO — expectativa atualizada com justificativa): a faixa de
+  // "horas restantes" da seção legada saiu; o restante do ciclo é exibido
+  // como "jornada a cumprir" nos próximos eventos:
+  assert.ok(src.includes("Jornada a cumprir"), "restante exibido como jornada a cumprir");
   // Nenhum dado recalculado/perdido: cenário 25/08 quitada 2h no sábado → 146h restantes
   reset();
   actions.addEntry({ date: "2026-08-22", time: "08:00", type: "entrada", note: null });

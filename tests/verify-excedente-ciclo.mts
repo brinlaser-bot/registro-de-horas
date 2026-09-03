@@ -199,7 +199,10 @@ check("19. Déficit aberto usa fonte central", () => {
     seed.entries, seed.compensations, seed.absences, cals, seed.faltas, seed.excessReasons, S, CYCLE, TODAY,
   );
   const comps = srcOf("src/app/(app)/compensacoes/page.tsx");
-  assert.ok(comps.includes("bank.openDeficitTotal"));
+  // 4E (SUPERADO — expectativa atualizada com justificativa): a Central
+  // reformada exibe as métricas do banco [10+] (buildSpecialExcessBank);
+  // o motor do déficit aberto permanece intacto (assert abaixo):
+  assert.ok(comps.includes("buildSpecialExcessBank"));
   assert.ok(bank.openDeficitTotal >= 0);
 });
 
@@ -298,15 +301,18 @@ check("29. mudar período muda esses quatro valores", () => {
   assert.notEqual(a.original + a.free, b.original + b.free);
 });
 
-check("30. isso não altera os cards operacionais do ciclo em Compensações", () => {
+check("30. 4E: cards operacionais do ciclo agora vêm do banco [10+] canônico", () => {
+  // 4E (SUPERADO — expectativa atualizada com justificativa):
   const c = srcOf("src/app/(app)/compensacoes/page.tsx");
-  assert.ok(c.includes("Gestão de excedentes — ciclo atual"));
-  assert.ok(c.includes("Excedente livre [10+]"));
-  assert.ok(c.includes("Excedente programado"));
-  assert.ok(c.includes("Excedente realocado"));
-  assert.ok(c.includes("Déficit aberto"));
-  assert.ok(c.includes("cycleBounds"));
-  assert.ok(c.includes("cycleExcessBook.free"));
+  assert.ok(c.includes("Disponível [10+]"));
+  assert.ok(c.includes("Reservado"));
+  assert.ok(c.includes("Utilizado"));
+  // 4E (SUPERADO — expectativa atualizada com justificativa): a Central
+  // reformada não consome mais os books legados; usa o ciclo anual canônico
+  // e o banco [10+] como fontes:
+  assert.ok(!c.includes("cycleExcessBook"));
+  assert.ok(c.includes("getAnnualPointCycle") && c.includes("annualCycleBounds"), "ciclo anual canônico");
+  assert.ok(c.includes("buildSpecialExcessBank"), "banco [10+] canônico");
   const r = srcOf("src/app/(app)/resumo/page.tsx");
   // 3F: o Resumo deixou de usar os books legados (derivação única 3C)
   assert.ok(!r.includes("periodExcessBook"));

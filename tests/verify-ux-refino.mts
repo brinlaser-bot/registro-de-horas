@@ -143,14 +143,16 @@ check("G. card usa [10+] gerado (3E.2); 'Realocar excedente' só nos fluxos lega
   assert.ok(!dayCardSrc.includes("Alocar excedente"));
   assert.ok(panelSrc.includes("Realocar excedente"));
   assert.ok(!panelSrc.includes("Alocar excedente"));
-  assert.ok(compsSrc.includes("Realocar excedente"));
-  assert.ok(!compsSrc.includes("Alocar excedente"));
+  // 4E (SUPERADO — expectativa atualizada com justificativa): a Central
+  // reformada não hospeda mais o fluxo de realocação (legado fica interno);
+  assert.ok(!compsSrc.includes("Realocar excedente"));
+  assert.ok(!compsSrc.includes("Alocar excedente"), "vocabulário legado continua banido");
   assert.ok(allocSrc.includes("Realocar excedente"));
   assert.ok(!dayCardSrc.includes("a realocar"), "nunca 'a realocar' no card (3E.2)");
-  assert.ok(
-    compsSrc.includes("Excedente do limite diário a realocar") ||
-      compsSrc.includes("EXCEDENTE DO LIMITE DIÁRIO [10+]"),
-  );
+  // 4E (SUPERADO — expectativa atualizada com justificativa): as faixas de
+  // realocação da seção legada saíram da Central; a rastreabilidade do [10+]
+  // agora é feita pelas origens do banco (aba Banco):
+  assert.ok(compsSrc.includes("Origens do [10+]"), "origens do banco substituem as faixas legadas");
   assert.ok(!compsSrc.includes("Excedente >10h a realocar") && !compsSrc.includes("Excedente &gt;10h a realocar"));
   assert.ok(dayCardSrc.includes("separado no banco [10+]"), "rodapé factual (3E.2)");
   assert.ok(dayCardSrc.includes("[10+] gerado"), "[10+] gerado no card (3E.2)");

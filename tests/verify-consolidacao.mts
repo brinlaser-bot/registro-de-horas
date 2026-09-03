@@ -319,21 +319,23 @@ check("O. specialExcessStatusOf: livre / programado / parcial / tratado", () => 
   assert.equal(specialExcessLedger("2026-08-18", seed.compensations, 45).status, "programado");
   assert.equal(specialExcessLedger("2026-08-17", seed.compensations, 30).status, "tratado");
   assert.equal(specialExcessLedger("2026-08-11", seed.compensations, 15).status, "livre");
-  assert.ok(compsSrc.includes("Tratado ✓"));
-  assert.ok(compsSrc.includes("Parcialmente realocado"));
-  assert.ok(compsSrc.includes("Programado"));
-  assert.ok(compsSrc.includes("Livre"));
-  assert.ok(compsSrc.includes("Excedente do limite diário realocado"));
+  // 4E (SUPERADO — expectativa atualizada com justificativa): os rótulos do
+  // ledger legado saíram da Central reformada; o MOTOR specialExcessLedger
+  // permanece intacto (asserts funcionais acima) e os dados são preservados:
+  assert.ok(!compsSrc.includes("Tratado ✓"));
+  assert.ok(!compsSrc.includes("Excedente do limite diário realocado"));
 });
 
 /* ── P. (3E.2) card sem motivo; página de compensações preserva ─ */
 check("P. (3E.2) card sem fluxo de motivo; compensações preserva realizado ≠ programado", () => {
   assert.ok(!dayCardSrc.includes("onRegisterReason"), "card sem fluxo de motivo (3E.2)");
   assert.ok(!dayCardSrc.includes("Registrar motivo"), "botão de motivo fora do card (3E.2)");
-  assert.ok(compsSrc.includes("{!v.reason && ("));
-  assert.ok(compsSrc.includes("{v.reason && ("));
-  assert.ok(compsSrc.includes("Realizado:"));
-  assert.ok(compsSrc.includes("Programado:"));
+  // 4E (SUPERADO — expectativa atualizada com justificativa): a renderização
+  // da lista legada (motivo, realizado vs programado) saiu da Central
+  // reformada; o fluxo de motivo permanece interno (modal intacto) e os
+  // dados legados são preservados como histórico read-only:
+  assert.ok(!compsSrc.includes("{!v.reason && ("));
+  assert.ok(!compsSrc.includes("{v.reason && ("));
 });
 
 /* ── Q. Saudação com falta; card HOJE idle ──────────────────── */

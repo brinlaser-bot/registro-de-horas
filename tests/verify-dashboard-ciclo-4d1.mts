@@ -248,7 +248,7 @@ check("TESTE 11 DE 12 — Ordem da Visão Geral: saudação → atenção → Re
   assert.ok(page.includes("attentionNowSummary"), "Atenção agora: faixas independentes canônicas");
 });
 
-check("TESTE 12 DE 12 — Mobile de Dias recentes preservado + desktop em grid consistente + Central de Horas sem diff", () => {
+check("TESTE 12 DE 12 — Mobile de Dias recentes preservado + desktop em grid consistente + 4E: diff da Central é da reforma autorizada", () => {
   // MOBILE (aprovado na 4D): linha 1 = dia/data + horas; linha 2 = saldo + status:
   const recentes = page.slice(page.indexOf('title="Dias recentes"'));
   assert.ok(recentes.includes("sm:hidden"), "layout mobile próprio preservado");
@@ -263,10 +263,19 @@ check("TESTE 12 DE 12 — Mobile de Dias recentes preservado + desktop em grid c
   // hoje fica fora do recorte):
   const dash = page.slice(page.indexOf("D. SITUAÇÃO DO CICLO"), page.indexOf('title="Dias recentes"'));
   assert.equal((dash.match(/\n\s+compact\n/g) ?? []).length, 7, "7 StatCards compactos nas seções do dashboard");
-  // Central de Horas sem diff (Parte L) e sem persistência nova (Parte M):
+  // Parte L (4E — SUPERADO — expectativa atualizada com justificativa): a
+  // reforma da Central de Horas foi autorizada pela ETAPA 4E; o diff da
+  // Central é exatamente { compensacoes/page.tsx (reescrita) + central-view.ts
+  // (novo view-model) }; o RESTO da Central não existe:
   const status = execSync("git status --porcelain", { cwd: root }).toString().split("\n");
   const tocados = status.filter((l) => l.trim().length > 0).map((l) => l.slice(3).trim());
-  assert.ok(!tocados.some((f) => f.includes("compensacoes") || f.includes("central")), "Central de Horas sem diff");
+  const tocadosCentral = tocados.filter((f) => f.includes("compensacoes") || f.includes("central"));
+  for (const f of tocadosCentral) {
+    assert.ok(
+      f === "src/app/(app)/compensacoes/page.tsx" || f === "src/lib/central-view.ts" || f.startsWith("tests/"),
+      `4E: ${f} faz parte da reforma autorizada (fonte + atualizações de expectativa)`,
+    );
+  }
   assert.ok(!tocados.some((f) => f.includes("backup.ts")), "backup intocado (100% derivado)");
   // 4D.3 tornou o store aditivo (gate de planejamento); 4D.4.2 sancionou
   // APENAS a fórmula da necessidade de USO em dia realizado (mesma fonte

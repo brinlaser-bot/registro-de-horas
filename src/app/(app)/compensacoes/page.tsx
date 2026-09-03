@@ -1,350 +1,130 @@
 "use client";
 
+/**
+ * CENTRAL DE HORAS — 4E: GESTÃO DETALHADA + RASTREABILIDADE CANÔNICA.
+ *
+ * A Central é a página de rastreabilidade: de onde vieram as horas [10+],
+ * onde foram reservadas/usadas, o que ainda existe e como o calendário da
+ * empresa afeta o ciclo. NÃO compete com Visão Geral (situação + decisão),
+ * Registros (fatos do dia + ações) nem Resumo (análise do período).
+ *
+ * SEM o fluxo legado de compensação manual e sem nenhum vocabulário de
+ * pendência do modelo antigo; [10+] permanece paralelo ao saldo regular
+ * (nunca offset automático). Motores/dados antigos continuam internos
+ * (compatibilidade); registros antigos aparecem — se existirem — como
+ * HISTÓRICO LEGADO read-only, no fim da página.
+ *
+ * Fontes canônicas (nenhuma matemática aqui — ver src/lib/central-view.ts):
+ *   Banco [10+] → buildSpecialExcessBank · Reservas/Usos → Plan/Use
+ *   Calendário  → central-view (companyDayContext + buildCalendarForecast)
+ *   Navegação   → mecanismo 4D.5 (/registros?escopo=ciclo&data=…)
+ */
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import {
   ArrowLeftRight,
+  ArrowRight,
   CalendarClock,
-  CheckCircle2,
+  CalendarOff,
   ChevronDown,
-  ChevronUp,
   Clock3,
-  Pencil,
-  PlusCircle,
-  Trash2,
-  TriangleAlert,
-  XCircle,
+  Database,
+  Hourglass,
+  Landmark,
+  Settings,
 } from "lucide-react";
-import { actions, enrichComp, settingsOf, useAppData, useIsClient } from "@/lib/store";
-import { compDayLineView } from "@/lib/company-calendar";
-import { computeDay, formatDateBR, formatDateShortBR, formatMinutes, todayString } from "@/lib/time";
-import type { CompKind, CompWithDays } from "@/lib/types";
-import type { CompFormData } from "@/components/compensation-form";
-import {
-  activeAcordos,
-  activeCalendarObligations,
-  canCompleteComp,
-  extraCapacityForDate,
-  kindOf,
-  usesHourExtra,
-} from "@/lib/debt";
-import {
-  dayCreditView,
-  excessReasonLabel,
-  excessReasonObservation,
-  excessReasonOnDate,
-  futureCompStatus,
-  hourBankSummary,
-  deficitViews,
-  pendingSpecialExcessDays,
-  specialExcessBook,
-  specialExcessLedger,
-  type FutureCompView,
-} from "@/lib/hour-bank";
+import { settingsOf, useAppData, useIsClient } from "@/lib/store";
 import { annualCycleBounds, getAnnualPointCycle } from "@/lib/periods";
-import { Badge, Button, Card, EmptyState, Skeleton, StatCard } from "@/components/ui";
-import { CompensationForm } from "@/components/compensation-form";
-import { ExcessReasonModal } from "@/components/excess-reason-modal";
-import { AllocateExcessModal } from "@/components/allocate-excess-modal";
-import { useToast } from "@/components/toast";
+import { formatDateShortBR, formatMinutes, todayString } from "@/lib/time";
+import { buildSpecialExcessBank } from "@/lib/special-excess-bank";
+import { specialExcessPlanMinutes } from "@/lib/special-excess-plan";
+import { specialExcessUseMinutes } from "@/lib/special-excess-use";
+import { excessReasonOnDate } from "@/lib/hour-bank";
+import { centralCalendarEvents, centralCalendarSummary, centralCycles, tratamentoLabel } from "@/lib/central-view";
+import { Badge, Button, EmptyState, Skeleton, StatCard } from "@/components/ui";
+
+const modoDaEstrategia = (strategy: string) => (strategy === "fifo" || strategy === "automatic" ? "Seleção automática" : "Seleção manual");
+
+const STATUS_PLANO: Record<string, string> = { planned: "Reservado", cancelled: "Cancelado", concluded: "Concluído" };
+const STATUS_USO: Record<string, string> = { utilizado: "Utilizado", cancelado: "Cancelado" };
 
 export default function CompensacoesPage() {
-  const toast = useToast();
   const mounted = useIsClient();
-  const { user, entries, compensations, absences, companyCalendars, faltas, excessReasons } = useAppData();
+  const { user, entries, absences, companyCalendars, faltas, excessReasons, specialExcessUses, specialExcessPlans, compensations } = useAppData();
   const settings = settingsOf(user);
-  const [modalOpen, setModalOpen] = useState(false);
-  const [editing, setEditing] = useState<number | null>(null);
-  // §10: modal do motivo do excedente a partir da lista de reservas >10h
-  const [reasonDate, setReasonDate] = useState<string | null>(null);
-  const [allocateDate, setAllocateDate] = useState<string | null>(null);
-  // §21: grupos finais recolhidos (Concluídas/Canceladas) — estado local visual
-  const [doneOpen, setDoneOpen] = useState(false);
-  const [canceledOpen, setCanceledOpen] = useState(false);
-
-  const list = useMemo(
-    () =>
-      [...compensations]
-        .sort((a, b) => b.createdAt - a.createdAt)
-        .map((c) => enrichComp(c, entries, settings)),
-    [compensations, entries, settings],
-  );
-
-  const pendingEditing = editing !== null ? compensations.find((c) => c.id === editing) : null;
-
-  // Acordos a compensar ativos do ciclo anual atual
   const todayStr = todayString();
-  const cycle = getAnnualPointCycle(todayStr);
-  const cycleBounds = useMemo(() => annualCycleBounds(cycle), [cycle]);
 
-  const acordosAtivos = useMemo(
-    () => activeAcordos(entries, compensations, settings, cycleBounds, absences),
-    [entries, compensations, absences, settings, cycleBounds],
-  );
-
-  // Obrigações DERIVADAS do calendário da empresa (somente o ciclo anual atual).
-  // Futuras ficam visíveis para planejamento; nada é persistido no store.
-  const calObligations = useMemo(
+  /* Ciclo selecionado (default: ciclo anual atual). Navegável entre os
+   * ciclos existentes nos dados — sem persistência nenhuma. */
+  const ciclos = useMemo(
     () =>
-      activeCalendarObligations(
-        entries,
-        compensations,
-        settings,
-        cycleBounds,
-        companyCalendars,
-        todayStr,
-      ),
-    [entries, compensations, settings, cycleBounds, companyCalendars, todayStr],
+      centralCycles({
+        today: todayStr,
+        calendars: companyCalendars ?? [],
+        planDates: (specialExcessPlans ?? []).map((p) => p.destinationDate),
+        useDates: (specialExcessUses ?? []).map((u) => u.destinationDate),
+      }),
+    [todayStr, companyCalendars, specialExcessPlans, specialExcessUses],
   );
+  const [ciclo, setCiclo] = useState<string | null>(null);
+  const cicloAtivo = ciclo && ciclos.includes(ciclo) ? ciclo : getAnnualPointCycle(todayStr);
+  const bounds = useMemo(() => annualCycleBounds(cicloAtivo), [cicloAtivo]);
 
-  // UX: a seção "Calendário a compensar" inicia RECOLHIDA (são muitas
-  // obrigações) — as compensações do usuário têm prioridade visual. Estado
-  // LOCAL de apresentação (não persiste); a lista expandida é exatamente a atual.
-  const [calOpen, setCalOpen] = useState(false);
-
-  const [formKind, setFormKind] = useState<CompKind>("excedente");
-  const [formInitial, setFormInitial] = useState<CompFormData | undefined>();
-  const [formPlanning, setFormPlanning] = useState<{
-    originalMinutes: number;
-    compensatedMinutes: number;
-    plannedMinutes: number;
-    openMinutes: number;
-    unplannedMinutes: number;
-  } | undefined>();
-
-  /* ── §4/§9 Banco de horas consultável (topo §22) ─────────────── */
+  /* ABA 1 — Banco [10+]: fonte única buildSpecialExcessBank. */
   const bank = useMemo(
     () =>
-      hourBankSummary(
+      buildSpecialExcessBank({
+        cycle: cicloAtivo,
+        asOfDate: todayStr,
         entries,
-        compensations,
         absences,
-        companyCalendars,
-        faltas,
-        excessReasons,
+        calendars: companyCalendars,
         settings,
-        cycleBounds,
-        todayStr,
-      ),
-    [entries, compensations, absences, companyCalendars, faltas, excessReasons, settings, cycleBounds, todayStr],
+        faltas,
+        controlStartDate: user.controlStartDate ?? "",
+        uses: specialExcessUses ?? [],
+        plans: specialExcessPlans ?? [],
+      }),
+    [cicloAtivo, todayStr, entries, absences, companyCalendars, settings, faltas, user.controlStartDate, specialExcessUses, specialExcessPlans],
   );
 
-  const deficitsCiclo = useMemo(
+  const noCiclo = (d: string) => d >= bounds.from && d <= bounds.to;
+
+  /* Reservas em aberto (planned) e usos realizados (utilizado) do ciclo —
+   * decisão/resolução continua SEMPRE no fluxo canônico de Registros. */
+  const reservas = (specialExcessPlans ?? [])
+    .filter((p) => p.status === "planned" && noCiclo(p.destinationDate))
+    .sort((a, b) => a.destinationDate.localeCompare(b.destinationDate));
+  const usos = (specialExcessUses ?? [])
+    .filter((u) => u.status === "utilizado" && noCiclo(u.destinationDate))
+    .sort((a, b) => b.destinationDate.localeCompare(a.destinationDate));
+  const canceladosPlanos = (specialExcessPlans ?? []).filter((p) => p.status === "cancelled" && noCiclo(p.destinationDate));
+  const canceladosUsos = (specialExcessUses ?? []).filter((u) => u.status === "cancelado" && noCiclo(u.destinationDate));
+
+  const reservasAbertasHref = (destino: string, chegou: boolean) =>
+    chegou ? `/registros?atencao=plano-10&escopo=ciclo&data=${destino}` : `/registros?escopo=ciclo&data=${destino}`;
+
+  /* ABA 2 — Calendário da empresa: central-view (companyDayContext +
+   * buildCalendarForecast). Realizado ⇒ efeito no saldo factual (nunca
+   * pendência adicional); futuro ⇒ apenas impacto conhecido (previsão). */
+  const calResumo = useMemo(() => centralCalendarSummary(companyCalendars, cicloAtivo), [companyCalendars, cicloAtivo]);
+  const calEventos = useMemo(
     () =>
-      deficitViews(
+      centralCalendarEvents({
+        today: todayStr,
+        cycle: cicloAtivo,
         entries,
-        compensations,
         absences,
-        companyCalendars,
-        faltas,
+        calendars: companyCalendars,
         settings,
-        cycleBounds,
-        todayStr,
-      ),
-    [entries, compensations, absences, companyCalendars, faltas, settings, cycleBounds, todayStr],
+        faltas,
+        controlStartDate: user.controlStartDate ?? null,
+      }),
+    [todayStr, cicloAtivo, entries, absences, companyCalendars, settings, faltas, user.controlStartDate],
   );
-  const unplannedDeficitTotal = deficitsCiclo.reduce((s, d) => s + d.unplannedMinutes, 0);
+  const impactoFuturo = calEventos.future.reduce((s, e) => s + (e.impactoFuturoConhecidoMinutes ?? 0), 0);
 
-  const cycleExcessBook = useMemo(
-    () =>
-      specialExcessBook(
-        entries, compensations, absences, companyCalendars, settings, excessReasons, cycleBounds, todayStr,
-      ),
-    [entries, compensations, absences, companyCalendars, settings, excessReasons, cycleBounds, todayStr],
-  );
-  const cyclePendingDays = pendingSpecialExcessDays(cycleExcessBook);
-
-  /* ── §21 GRUPO 1: reservas de excedente >10h (prioridade) ────── */
-  const excessReserves = useMemo(() => {
-    const dates = [...new Set(entries.map((e) => e.date))]
-      .filter((d) => d >= cycleBounds.from && d <= cycleBounds.to)
-      .sort((a, b) => b.localeCompare(a)); // mais próxima/recente primeiro
-    return dates
-      .map((d) =>
-        dayCreditView(d, entries, compensations, absences, companyCalendars, settings, excessReasons),
-      )
-      .filter((v) => v.excessSpecial > 0 && !v.day.open && !v.day.empty);
-  }, [entries, compensations, absences, companyCalendars, settings, excessReasons, cycleBounds]);
-
-  /* ── §21 GRUPOS 2–4: status derivado das parcelas pendentes ──── */
-  const pendingViews = useMemo(
-    () =>
-      list
-        .filter((c) => c.status === "pendente")
-        .map((c) => ({
-          c,
-          future: futureCompStatus(c, entries, compensations, settings, todayStr, { companyCalendars }),
-        })),
-    [list, entries, compensations, settings, todayStr, companyCalendars],
-  );
-
-  const atrasadas = useMemo(
-    () =>
-      pendingViews
-        .filter((v) => v.future.status === "atrasada")
-        .sort((a, b) => b.c.targetDate.localeCompare(a.c.targetDate) || a.c.createdAt - b.c.createdAt),
-    [pendingViews],
-  );
-  const parciais = useMemo(
-    () =>
-      pendingViews
-        .filter((v) => v.future.status === "parcial")
-        .sort((a, b) => a.c.targetDate.localeCompare(b.c.targetDate) || a.c.createdAt - b.c.createdAt),
-    [pendingViews],
-  );
-  const programadas = useMemo(
-    () =>
-      pendingViews
-        .filter((v) => v.future.status === "pendente" || v.future.status === "meta-atingida")
-        .sort((a, b) => a.c.targetDate.localeCompare(b.c.targetDate) || a.c.createdAt - b.c.createdAt),
-    [pendingViews],
-  );
-
-  /** §22 topo: programadas = parcelas pendentes (sem chamar de "a compensar"). */
-  const pendenteStats = useMemo(
-    () => ({
-      count: pendingViews.length,
-      minutes: pendingViews.reduce((s, v) => s + v.c.minutes, 0),
-    }),
-    [pendingViews],
-  );
-
-  const concluidas = useMemo(
-    () =>
-      list
-        .filter((c) => c.status === "concluida")
-        .sort((a, b) => b.targetDate.localeCompare(a.targetDate) || b.createdAt - a.createdAt),
-    [list],
-  );
-  const canceladas = useMemo(
-    () =>
-      list
-        .filter((c) => c.status === "cancelada")
-        .sort((a, b) => b.targetDate.localeCompare(a.targetDate) || b.createdAt - a.createdAt),
-    [list],
-  );
-
-  /** Abre o modal de compensação pré-preenchido para um acordo */
-  const openAcordoForm = (
-    sourceDate: string,
-    planning: {
-      originalMinutes: number;
-      compensatedMinutes: number;
-      plannedMinutes: number;
-      remainingMinutes: number;
-      unplannedMinutes: number;
-    },
-  ) => {
-    const cap = extraCapacityForDate(todayStr, entries, compensations, settings, { companyCalendars });
-    const prefill = Math.max(0, Math.min(planning.unplannedMinutes, cap.available));
-    if (prefill <= 0) {
-      toast.show("Não há minutos sem programação (ou capacidade) para nova compensação.", "error");
-      return;
-    }
-    setFormKind("acordo");
-    setFormInitial({
-      sourceDate,
-      targetDate: todayStr,
-      minutes: prefill,
-      note: `Acordo de ${formatDateShortBR(sourceDate)}`,
-    });
-    setFormPlanning({
-      originalMinutes: planning.originalMinutes,
-      compensatedMinutes: planning.compensatedMinutes,
-      plannedMinutes: planning.plannedMinutes,
-      openMinutes: planning.remainingMinutes,
-      unplannedMinutes: planning.unplannedMinutes,
-    });
-    setModalOpen(true);
-  };
-
-  /** Abre o modal pré-preenchido para uma obrigação do calendário da empresa */
-  const openCalendarioForm = (sourceDate: string, remainingMinutes: number) => {
-    setFormKind("calendario");
-    setFormInitial({
-      sourceDate,
-      targetDate: todayStr,
-      minutes: remainingMinutes,
-      note: `Obrigação de calendário de ${formatDateShortBR(sourceDate)}`,
-    });
-    setModalOpen(true);
-  };
-
-  const openNewCompForm = () => {
-    setEditing(null);
-    setFormKind("excedente");
-    setFormInitial(undefined);
-    setFormPlanning(undefined);
-    setModalOpen(true);
-  };
-
-  const save = async (payload: {
-    sourceDate: string;
-    targetDate: string;
-    minutes: number;
-    note: string;
-    status?: string;
-    kind?: CompKind;
-  }) => {
-    if (pendingEditing) {
-      const res = actions.updateComp(pendingEditing.id, {
-        sourceDate: payload.sourceDate,
-        targetDate: payload.targetDate,
-        minutes: payload.minutes,
-        note: payload.note || null,
-        kind: payload.kind ?? (pendingEditing.kind ?? "excedente"),
-        ...(payload.status ? { status: payload.status as "pendente" | "concluida" | "cancelada" } : {}),
-      });
-      if (!res.ok) throw new Error(res.error); // modal exibe a mensagem, permanece aberto e libera o botão
-    } else {
-      // CAUSA RAIZ: sem `kind` explícito, addComp assumia "excedente" e a
-      // compensação de acordo deixava de abater o acordo de origem.
-      const res = actions.addComp({
-        sourceDate: payload.sourceDate,
-        targetDate: payload.targetDate,
-        minutes: payload.minutes,
-        note: payload.note || null,
-        kind: payload.kind ?? formKind,
-      });
-      if (!res.ok) throw new Error(res.error);
-    }
-    setModalOpen(false);
-    setEditing(null);
-  };
-
-  const setStatus = async (id: number, status: string) => {
-    // Conclusão passa pela validação central (hora extra real + data alcançada)
-    const res =
-      status === "concluida"
-        ? actions.completeComp(id)
-        : actions.updateComp(id, { status: status as "pendente" | "concluida" | "cancelada" });
-    if (!res.ok) {
-      toast.show(res.error ?? "Não foi possível atualizar.", "error");
-      return;
-    }
-    toast.show(status === "concluida" ? "Compensação concluída!" : "Compensação cancelada.");
-  };
-
-  /** §16 Registrar parcial: confirma só a parte já realizada; resto permanece pendente. */
-  const registerPartial = async (id: number) => {
-    const res = actions.registerPartialComp(id);
-    if (!res.ok) {
-      toast.show(res.error ?? "Não foi possível registrar a parte realizada.", "error");
-      return;
-    }
-    toast.show("Parte realizada registrada — o restante continua planejado.");
-  };
-
-  /** §14/§17 Reprogramar: move a DATA planejada mantendo o vínculo (mesma obrigação). */
-  const reprogram = (id: number) => {
-    setEditing(id);
-    setModalOpen(true);
-  };
-
-  const remove = async (id: number) => {
-    if (!window.confirm("Excluir esta compensação?")) return;
-    actions.deleteComp(id);
-    toast.show("Compensação excluída.");
-  };
+  const [tab, setTab] = useState<"banco" | "calendario">("banco");
 
   if (!mounted) {
     return (
@@ -354,679 +134,367 @@ export default function CompensacoesPage() {
     );
   }
 
-  /** Chip de ORIGEM da compensação (§21) — nunca confunde planejado com realizado. */
-  const originChip = (c: CompWithDays) => {
-    const k = kindOf(c);
-    if (c.portion === "especial") {
-      return (
-        <span className="rounded-full bg-rose-50 px-1.5 py-0.5 text-[10px] font-bold text-rose-700">
-          {"Excedente do limite diário realocado"}
-        </span>
-      );
-    }
-    const cls =
-      k === "deficit"
-        ? "bg-emerald-50 text-emerald-700"
-        : k === "acordo"
-          ? "bg-violet-50 text-violet-700"
-          : k === "calendario"
-            ? "bg-amber-50 text-amber-700"
-            : "bg-sky-50 text-sky-700";
-    const label =
-      k === "deficit"
-        ? "↗ Déficit · hora extra"
-        : k === "acordo"
-          ? "↗ Acordo · hora extra"
-          : k === "calendario"
-            ? "↗ Calendário"
-            : "↘ Excedente do limite diário";
-    return (
-      <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${cls}`}>{label}</span>
-    );
-  };
-
-  /**
-   * Item de compensação — markup único; as AÇÕES variam por grupo (§21):
-   * pendentes ganham Registrar parcial / Reprogramar / Confirmar quitação;
-   * históricas (concluída/cancelada) ficam somente consultáveis/excluíveis.
-   */
-  const renderComp = (c: CompWithDays, future: FutureCompView | null) => {
-    const k = kindOf(c);
-    const isExtra = usesHourExtra(k);
-    const check =
-      c.status === "pendente"
-        ? canCompleteComp(c, entries, compensations, settings, todayStr, { companyCalendars })
-        : { ok: true as const };
-    return (
-      <div
-        key={c.id}
-        className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition-shadow hover:shadow-md"
-      >
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600 ring-1 ring-inset ring-indigo-600/10">
-            <ArrowLeftRight size={20} />
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className="text-sm font-extrabold text-slate-900">
-              {formatMinutes(c.minutes)}{" "}
-              <span className="font-medium text-slate-400">
-                — {formatDateBR(c.sourceDate)} → {formatDateBR(c.targetDate)}
-              </span>
-            </p>
-            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
-              {c.sourceDay && (
-                <span>
-                  origem: <b>{formatMinutes(c.sourceDay.workedMinutes)}</b> trabalhados
-                  {c.sourceDay.excessMinutes > 0 && (
-                    <span className="text-rose-500">
-                      ({formatMinutes(c.sourceDay.excessMinutes)} excedente)
-                    </span>
-                  )}
-                </span>
-              )}
-              {(() => {
-                // Saldo do dia-destino pela RESOLUÇÃO CENTRAL (apresentação):
-                // folga/abonado com trabalho → +trabalhado, nunca "−8h".
-                const line = c.targetDay
-                  ? compDayLineView(c.targetDate, entries, absences, companyCalendars, settings)
-                  : null;
-                if (!line) return null;
-                return (
-                  <span>
-                    destino: <b>{formatMinutes(line.workedMinutes)}</b> trabalhados
-                    {line.contextSuffix ? ` ${line.contextSuffix}` : ""}
-                    {line.balanceMinutes !== 0 && (
-                      <span className={line.balanceMinutes > 0 ? "text-emerald-600" : "text-amber-600"}>
-                        ({line.balanceMinutes > 0 ? "+" : ""}{formatMinutes(line.balanceMinutes)} de saldo)
-                      </span>
-                    )}
-                  </span>
-                );
-              })()}
-              {future && future.realizedMinutes > 0 && (
-                <span>
-                  realizado: <b className="text-emerald-600">{formatMinutes(future.realizedMinutes)}</b>
-                  {future.remainingMinutes > 0 && (
-                    <>
-                      {" "}· restante: <b className="text-amber-600">{formatMinutes(future.remainingMinutes)}</b>
-                    </>
-                  )}
-                </span>
-              )}
-              {c.note && <span className="italic">“{c.note}”</span>}
-              {originChip(c)}
-            </div>
-          </div>
-          {c.status === "concluida" && (
-            <Badge tone="emerald">
-              <CheckCircle2 size={12} /> Concluída
-            </Badge>
-          )}
-          {c.status === "cancelada" && <Badge tone="slate">Cancelada</Badge>}
-          {c.status === "pendente" && future?.status === "atrasada" && (
-            <Badge tone="rose">
-              <TriangleAlert size={12} /> Atrasada
-            </Badge>
-          )}
-          {c.status === "pendente" && future?.status === "parcial" && (
-            <Badge tone="amber">
-              <Clock3 size={12} /> Parcial
-            </Badge>
-          )}
-          {c.status === "pendente" && future?.status === "meta-atingida" && (
-            <Badge tone="emerald">Meta de compensação atingida ✓</Badge>
-          )}
-          {c.status === "pendente" && future?.status === "pendente" && (
-            <Badge tone="indigo">Pendente</Badge>
-          )}
-          <div className="flex items-center gap-1">
-            {c.status === "pendente" && (
-              <>
-                {/* §16 Registrar parcial: só quando JÁ existe realização no destino */}
-                {isExtra && future && future.realizedMinutes > 0 && (
-                  <Button size="sm" variant="subtle" onClick={() => registerPartial(c.id)}>
-                    <Clock3 size={13} /> Registrar parcial ({formatMinutes(future.realizedMinutes)})
-                  </Button>
-                )}
-                {!check.ok && (
-                  <span className="mr-1 max-w-[240px] text-[11px] font-semibold text-amber-600">
-                    {check.error}
-                  </span>
-                )}
-                <Button
-                  size="sm"
-                  variant="subtle"
-                  disabled={!check.ok}
-                  onClick={() => setStatus(c.id, "concluida")}
-                >
-                  <CheckCircle2 size={13} />
-                  {isExtra ? "Confirmar quitação" : "Concluir"}
-                </Button>
-                {/* §17: atrasadas pedem reprogramação mantendo o vínculo */}
-                {future?.status === "atrasada" && (
-                  <Button size="sm" variant="secondary" onClick={() => reprogram(c.id)}>
-                    <CalendarClock size={13} /> Reprogramar compensação
-                  </Button>
-                )}
-                <Button size="sm" variant="ghost" onClick={() => setStatus(c.id, "cancelada")}>
-                  <XCircle size={13} /> Cancelar
-                </Button>
-              </>
-            )}
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => {
-                setEditing(c.id);
-                setModalOpen(true);
-              }}
-              aria-label="Editar"
-            >
-              <Pencil size={14} />
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => remove(c.id)}
-              aria-label="Excluir"
-              className="!text-rose-500 hover:!bg-rose-50"
-            >
-              <Trash2 size={14} />
-            </Button>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  const nothingAtAll =
-    list.length === 0 &&
-    excessReserves.length === 0 &&
-    calObligations.length === 0 &&
-    acordosAtivos.length === 0;
+  const linkDia = (date: string) => `/registros?escopo=ciclo&data=${date}`;
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      {/* Cabeçalho */}
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 className="text-lg font-extrabold tracking-tight text-slate-900">Central de Horas</h2>
           <p className="text-sm text-slate-500">
-            Gerencie déficits, excedentes, programações e compensações do ciclo.
+            Acompanhe o banco [10+], suas reservas e usos, e os impactos do calendário da empresa.
           </p>
         </div>
-        <Button onClick={openNewCompForm}>
-          <PlusCircle size={15} /> Nova compensação
-        </Button>
-      </div>
-
-      <div>
-        <h3 className="mb-1 text-sm font-extrabold uppercase tracking-wider text-slate-400">
-          Gestão de excedentes — ciclo atual
-        </h3>
-        <p className="mb-3 text-xs text-slate-500">
-          Ciclo {formatDateBR(cycleBounds.from)} → {formatDateBR(cycleBounds.to)}
-        </p>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <StatCard
-            compact
-            label="Excedente livre [10+]"
-            value={formatMinutes(cycleExcessBook.free)}
-            sub={`${cyclePendingDays.length} dia(s) aguardando realocação`}
-            tone={cycleExcessBook.free > 0 ? "amber" : "slate"}
-          />
-          <StatCard
-            compact
-            label="Excedente programado"
-            value={formatMinutes(cycleExcessBook.planned)}
-            sub="com destino definido, aguardando realização"
-            tone={cycleExcessBook.planned > 0 ? "indigo" : "slate"}
-          />
-          <StatCard
-            compact
-            label="Excedente realocado"
-            value={formatMinutes(cycleExcessBook.realized)}
-            sub="excedente já tratado"
-            tone="emerald"
-          />
-          <StatCard
-            compact
-            label="Déficit aberto"
-            value={formatMinutes(bank.openDeficitTotal)}
-            sub="abaixo da base em aberto no ciclo"
-            tone={bank.openDeficitTotal > 0 ? "rose" : "slate"}
-          />
-        </div>
-      </div>
-
-      {/* §22 TOPO: somente números factuais — "programadas" nunca é chamado de
-          "a compensar"; o que já foi concluído aparece separado. */}
-      {(pendenteStats.count > 0 ||
-        unplannedDeficitTotal > 0 ||
-        bank.excessSpecialFreeTotal > 0 ||
-        concluidas.length > 0 ||
-        calObligations.length > 0 ||
-        acordosAtivos.length > 0) && (
-        <div className="flex flex-wrap gap-x-3 gap-y-1 rounded-2xl border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm font-semibold text-indigo-700">
-          {pendenteStats.count > 0 && (
-            <span className="inline-flex items-center gap-1.5">
-              <ArrowLeftRight size={15} /> Programadas: {pendenteStats.count} · {formatMinutes(pendenteStats.minutes)}
-            </span>
-          )}
-          {unplannedDeficitTotal > 0 && (
-            <>
-              {pendenteStats.count > 0 && <span>·</span>}
-              <span className="text-amber-600">
-                Déficits ainda sem programação: {formatMinutes(unplannedDeficitTotal)}
-              </span>
-            </>
-          )}
-          {bank.excessSpecialFreeTotal > 0 && (
-            <>
-              {(pendenteStats.count > 0 || unplannedDeficitTotal > 0) && <span>·</span>}
-              <span className="text-rose-600">
-                EXCEDENTE DO LIMITE DIÁRIO [10+]: {formatMinutes(bank.excessSpecialFreeTotal)}
-                {bank.excessWithoutReason > 0 && ` (⚠ ${formatMinutes(bank.excessWithoutReason)} sem motivo)`}
-              </span>
-            </>
-          )}
-          {concluidas.length > 0 && (
-            <>
-              {(pendenteStats.count > 0 || unplannedDeficitTotal > 0 || bank.excessSpecialFreeTotal > 0) && <span>·</span>}
-              <span className="text-emerald-600">Concluídas: {concluidas.length}</span>
-            </>
-          )}
-          {calObligations.length > 0 && (
-            <>
-              <span>·</span>
-              <span className="text-amber-600">
-                Calendário a compensar: {calObligations.length} obrigação(ões) ·{" "}
-                {formatMinutes(calObligations.reduce((s, o) => s + o.remainingMinutes, 0))} restantes
-              </span>
-            </>
-          )}
-          {acordosAtivos.length > 0 && (
-            <>
-              <span>·</span>
-              <span className="text-violet-600">
-                Acordos a compensar: {acordosAtivos.length} ·{" "}
-                {formatMinutes(acordosAtivos.reduce((s, a) => s + a.remainingMinutes, 0))} restantes
-              </span>
-            </>
-          )}
-        </div>
-      )}
-
-      {/* ── §21 GRUPO 1: EXCEDENTES >10h — PRIORIDADE ──────────── */}
-      {excessReserves.length > 0 && (
-        <div id="excedentes-prioridade" className="scroll-mt-20">
-        <Card
-          title={
-            <>
-              Excedente do limite diário <span className="text-rose-600">[10+] — prioridade</span>
-            </>
-          }
-          subtitle="Reserva especial de dias que passaram do limite diário — o motivo é obrigatório antes de realocar (§10); a realocação usa a prioridade do banco (Visão geral → Dias com saldo negativo)"
-        >
-          <ul className="space-y-3">
-            {excessReserves.map((v) => {
-              const led = specialExcessLedger(v.date, compensations, v.excessSpecial);
-              const statusBadge =
-                led.status === "tratado" ? (
-                  <Badge tone="emerald">Tratado ✓</Badge>
-                ) : led.status === "parcial" ? (
-                  <Badge tone="sky">Parcialmente realocado</Badge>
-                ) : led.status === "programado" ? (
-                  <Badge tone="indigo">Programado</Badge>
-                ) : (
-                  <Badge tone="amber">Livre</Badge>
-                );
-              return (
-                <li
-                  key={v.date}
-                  className="flex flex-wrap items-center gap-3 rounded-xl border border-rose-100 bg-rose-50/50 p-3"
-                >
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-rose-100 text-rose-600 ring-1 ring-inset ring-rose-600/10">
-                    <TriangleAlert size={18} />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="flex flex-wrap items-center gap-2 text-sm font-bold text-slate-800">
-                      {formatDateBR(v.date)} — {formatMinutes(v.excessSpecial)} de excedente do limite diário
-                      {statusBadge}
-                      {!v.reason && <Badge tone="amber">⚠ Motivo não informado</Badge>}
-                    </p>
-                    <p className="mt-0.5 text-xs text-slate-500">
-                      Trabalhado: <b>{formatMinutes(v.day.workedMinutes)}</b> · Realocado:{" "}
-                      <b className="text-emerald-600">{formatMinutes(led.realized)}</b> · Programado:{" "}
-                      <b className="text-sky-600">{formatMinutes(led.planned)}</b> · Livre:{" "}
-                      <b className="text-amber-600">{formatMinutes(led.free)}</b>
-                      {v.reason && (
-                        <>
-                          {" "}· Motivo: <b>{excessReasonLabel(v.reason)}</b>
-                          {excessReasonObservation(v.reason) && (
-                            <span className="italic"> — {excessReasonObservation(v.reason)}</span>
-                          )}
-                        </>
-                      )}
-                    </p>
-                    {(led.realizedTo.length > 0 || led.plannedTo.length > 0) && (
-                      <div className="mt-1.5 text-[11px] text-slate-600">
-                        {led.realizedTo.map((t, i) => (
-                          <p key={`r${i}`}>Realizado: {formatMinutes(t.minutes)} → déficit de {formatDateBR(t.date)}</p>
-                        ))}
-                        {led.plannedTo.map((t, i) => (
-                          <p key={`p${i}`}>Programado: {formatMinutes(t.minutes)} → {formatDateBR(t.date)}</p>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                  {!v.reason && (
-                    <Button size="sm" variant="danger" onClick={() => setReasonDate(v.date)}>
-                      Registrar motivo
-                    </Button>
-                  )}
-                  {v.reason && (
-                    <Button size="sm" variant="ghost" onClick={() => setReasonDate(v.date)}>
-                      Alterar motivo
-                    </Button>
-                  )}
-                  {v.reason && led.free > 0 && (
-                    <Button size="sm" variant="danger" onClick={() => setAllocateDate(v.date)}>
-                      Realocar excedente
-                    </Button>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
-        </Card>
-        </div>
-      )}
-
-      {/* ── §21 GRUPO 2: ATRASADAS ──────────────────────────────── */}
-      {atrasadas.length > 0 && (
-        <Card
-          title={`Atrasadas (${atrasadas.length})`}
-          subtitle="A data programada passou e ainda existe saldo não realizado — reprograme mantendo o vínculo com a obrigação original"
-        >
-          <div className="space-y-3">
-            {atrasadas.map(({ c, future }) => renderComp(c, future))}
-          </div>
-        </Card>
-      )}
-
-      {/* ── §21 GRUPO 3: PARCIAIS ───────────────────────────────── */}
-      {parciais.length > 0 && (
-        <Card
-          title={`Parciais (${parciais.length})`}
-          subtitle="Houve realização no dia de destino, mas menor que a obrigação — registre a parte realizada ou complete a quitação"
-        >
-          <div className="space-y-3">
-            {parciais.map(({ c, future }) => renderComp(c, future))}
-          </div>
-        </Card>
-      )}
-
-      {/* ── §21 GRUPO 4: PENDENTES/PROGRAMADAS ──────────────────── */}
-      {programadas.length > 0 && (
-        <Card
-          title={`Pendentes e programadas (${programadas.length})`}
-          subtitle="Planejadas para o futuro — ainda NÃO alteram o saldo realizado do banco de horas"
-        >
-          <div className="space-y-3">
-            {programadas.map(({ c, future }) => renderComp(c, future))}
-          </div>
-        </Card>
-      )}
-
-      {/* ── §21 GRUPO 5: CONCLUÍDAS (recolhível) ────────────────── */}
-      {concluidas.length > 0 && (
-        <Card
-          title={`Concluídas (${concluidas.length})`}
-          subtitle="Histórico de quitações efetivadas — somente consulta"
-          actions={
-            <Button size="sm" variant="subtle" onClick={() => setDoneOpen((v) => !v)} aria-expanded={doneOpen}>
-              {doneOpen ? (
-                <>Ocultar <ChevronUp size={14} /></>
-              ) : (
-                <>Ver concluídas <ChevronDown size={14} /></>
-              )}
-            </Button>
-          }
-        >
-          {doneOpen ? (
-            <div className="space-y-3">{concluidas.map((c) => renderComp(c, null))}</div>
-          ) : (
-            <p className="text-xs text-slate-500">
-              {concluidas.length} compensação(ões) concluída(s) ·{" "}
-              {formatMinutes(concluidas.reduce((s, c) => s + c.minutes, 0))} efetivados — clique em{" "}
-              <b>Ver concluídas</b> para expandir.
-            </p>
-          )}
-        </Card>
-      )}
-
-      {/* ── §21 GRUPO 6: CANCELADAS (recolhível) ────────────────── */}
-      {canceladas.length > 0 && (
-        <Card
-          title={`Canceladas (${canceladas.length})`}
-          subtitle="Registros cancelados — não afetam o banco de horas"
-          actions={
-            <Button size="sm" variant="subtle" onClick={() => setCanceledOpen((v) => !v)} aria-expanded={canceledOpen}>
-              {canceledOpen ? (
-                <>Ocultar <ChevronUp size={14} /></>
-              ) : (
-                <>Ver canceladas <ChevronDown size={14} /></>
-              )}
-            </Button>
-          }
-        >
-          {canceledOpen ? (
-            <div className="space-y-3">{canceladas.map((c) => renderComp(c, null))}</div>
-          ) : (
-            <p className="text-xs text-slate-500">
-              {canceladas.length} compensação(ões) cancelada(s) — clique em <b>Ver canceladas</b> para expandir.
-            </p>
-          )}
-        </Card>
-      )}
-
-      {/* Seção de obrigações do Calendário da empresa (derivadas; ciclo anual atual).
-          UX: inicia RECOLHIDA — faixa-resumo compacta + "Ver obrigações" expande
-          exatamente a lista atual (cards, badge Próxima, ações, ordenação). */}
-      {calObligations.length > 0 && (
-        <Card
-          title="Calendário a compensar"
-          subtitle={`Obrigações do calendário da empresa no ciclo anual ${cycle} — visíveis antes da data para planejamento; somente compensações concluídas abatem o restante`}
-          actions={
-            <Button
-              size="sm"
-              variant="subtle"
-              onClick={() => setCalOpen((v) => !v)}
-              aria-expanded={calOpen}
-            >
-              {calOpen ? (
-                <>Ocultar <ChevronUp size={14} /></>
-              ) : (
-                <>Ver obrigações <ChevronDown size={14} /></>
-              )}
-            </Button>
-          }
-        >
-          {/* Card-resumo compacto — sempre visível, sem recalcular nada */}
-          <p className="mb-3 flex flex-wrap items-center gap-2 text-xs font-medium text-slate-500">
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-2.5 py-1 font-bold text-amber-700 ring-1 ring-inset ring-amber-200">
-              {calObligations.length} obrigação(ões)
-            </span>
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-rose-50 px-2.5 py-1 font-bold text-rose-600 ring-1 ring-inset ring-rose-200">
-              {formatMinutes(calObligations.reduce((s, o) => s + o.remainingMinutes, 0))} restantes
-            </span>
-            {!calOpen && (
-              <span>
-                · clique em <b>Ver obrigações</b> para expandir a lista
-              </span>
-            )}
-          </p>
-          {calOpen && (
-            <ul className="space-y-3">
-              {calObligations.map((d) => (
-                <li key={d.date} className="flex flex-wrap items-center gap-3 rounded-xl border border-amber-100 bg-amber-50/50 p-3">
-                  <div className="min-w-0 flex-1">
-                    <p className="flex flex-wrap items-center gap-2 text-sm font-bold text-slate-800">
-                      Calendário a compensar — {formatMinutes(d.originalMinutes)}
-                      {d.future && <Badge tone="sky">Próxima</Badge>}
-                    </p>
-                    <p className="mt-0.5 text-xs text-slate-500">
-                      Origem: {formatDateShortBR(d.date)} · Ciclo: {d.cycleLabel} · Compensado:{" "}
-                      <b className="text-emerald-600">{formatMinutes(d.compensatedMinutes)}</b> ·
-                      Restante: <b className="text-amber-600">{formatMinutes(d.remainingMinutes)}</b>
-                      {d.plannedMinutes > 0 && (
-                        <> · Planejado: <b className="text-sky-600">{formatMinutes(d.plannedMinutes)}</b></>
-                      )}
-                    </p>
-                  </div>
-                  {d.remainingMinutes > 0 && (
-                    <Button size="sm" variant="subtle" onClick={() => openCalendarioForm(d.date, d.remainingMinutes)}>
-                      Compensar com hora extra
-                    </Button>
-                  )}
-                </li>
-              ))}
-            </ul>
-          )}
-        </Card>
-      )}
-
-      {/* Seção de Acordos a compensar ativos (origem do ciclo anual atual) */}
-      {acordosAtivos.length > 0 && (
-        <Card
-          title="Acordos a compensar"
-          subtitle={`Pendências ativas do ciclo anual ${cycle} — permanecem visíveis até quitação ou fechamento anual (30/04), independentemente do período 21→20`}
-        >
-          <ul className="space-y-3">
-            {acordosAtivos.map((d) => (
-              <li key={d.date} className="flex flex-wrap items-center gap-3 rounded-xl border border-violet-100 bg-violet-50/50 p-3">
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-bold text-slate-800">
-                    Acordo a compensar — {formatMinutes(d.originalMinutes)}
-                  </p>
-                  <p className="mt-0.5 text-xs text-slate-500">
-                    Origem: {formatDateShortBR(d.date)} · Ciclo anual:{" "}
-                    {getAnnualPointCycle(d.date)} · Original:{" "}
-                    <b>{formatMinutes(d.originalMinutes)}</b> · Compensado:{" "}
-                    <b className="text-emerald-600">{formatMinutes(d.compensatedMinutes)}</b> ·
-                    Planejado: <b className="text-sky-600">{formatMinutes(d.plannedMinutes)}</b> ·
-                    Em aberto: <b className="text-amber-600">{formatMinutes(d.remainingMinutes)}</b> ·
-                    Sem programação: <b>{formatMinutes(d.unplannedMinutes)}</b>
-                  </p>
-                </div>
-                {d.unplannedMinutes > 0 && (
-                  <Button
-                    size="sm"
-                    variant="subtle"
-                    onClick={() =>
-                      openAcordoForm(d.date, {
-                        originalMinutes: d.originalMinutes,
-                        compensatedMinutes: d.compensatedMinutes,
-                        plannedMinutes: d.plannedMinutes,
-                        remainingMinutes: d.remainingMinutes,
-                        unplannedMinutes: d.unplannedMinutes,
-                      })
-                    }
-                  >
-                    Programar hora extra
-                  </Button>
-                )}
-              </li>
+        <label className="flex items-center gap-2 text-xs font-bold text-slate-500">
+          Ciclo
+          <select
+            value={cicloAtivo}
+            onChange={(e) => setCiclo(e.target.value)}
+            className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm font-extrabold text-slate-800"
+            aria-label="Ciclo anual"
+          >
+            {ciclos.map((c) => (
+              <option key={c} value={c}>{c}</option>
             ))}
-          </ul>
-        </Card>
-      )}
+          </select>
+        </label>
+      </div>
 
-      {nothingAtAll && (
-        <EmptyState
-          icon={<ArrowLeftRight size={26} />}
-          title="Nenhuma compensação registrada"
-          description="Quando um dia passar do limite de 10h, crie uma compensação para registrar as horas em outro dia."
-          action={
-            <Button
-              onClick={() => {
-                setEditing(null);
-                setModalOpen(true);
-              }}
-            >
-              <PlusCircle size={15} /> Criar primeira compensação
-            </Button>
-          }
-        />
-      )}
+      {/* Abas (desktop e mobile) */}
+      <div role="tablist" aria-label="Áreas da Central" className="flex gap-2">
+        <button
+          role="tab"
+          aria-selected={tab === "banco"}
+          onClick={() => setTab("banco")}
+          className={`flex items-center gap-1.5 rounded-xl px-3 py-2 text-sm font-extrabold ${
+            tab === "banco" ? "bg-indigo-600 text-white" : "border border-slate-300 bg-white text-slate-600 hover:bg-slate-50"
+          }`}
+        >
+          <Landmark size={15} aria-hidden /> Banco [10+]
+        </button>
+        <button
+          role="tab"
+          aria-selected={tab === "calendario"}
+          onClick={() => setTab("calendario")}
+          className={`flex items-center gap-1.5 rounded-xl px-3 py-2 text-sm font-extrabold ${
+            tab === "calendario" ? "bg-indigo-600 text-white" : "border border-slate-300 bg-white text-slate-600 hover:bg-slate-50"
+          }`}
+        >
+          <CalendarClock size={15} aria-hidden /> Calendário da empresa
+        </button>
+      </div>
 
-      <CompensationForm
-        open={modalOpen}
-        onClose={() => {
-          setModalOpen(false);
-          setEditing(null);
-          setFormInitial(undefined);
-          setFormPlanning(undefined);
-        }}
-        editingId={editing}
-        kind={editing !== null ? (pendingEditing?.kind ?? "excedente") : formKind}
-        initial={
-          editing !== null
-            ? pendingEditing
-              ? {
-                  sourceDate: pendingEditing.sourceDate,
-                  targetDate: pendingEditing.targetDate,
-                  minutes: pendingEditing.minutes,
-                  note: pendingEditing.note ?? "",
-                  status: pendingEditing.status,
-                  kind: pendingEditing.kind,
-                }
-              : undefined
-            : formInitial
-        }
-        getCapacity={(targetDate) =>
-          extraCapacityForDate(targetDate, entries, compensations, settings, {
-            excludeCompId: editing ?? undefined,
-            companyCalendars,
-          })
-        }
-        pendingDebtMinutes={editing === null && formInitial ? formInitial.minutes : undefined}
-        onSave={save}
-      />
-
-      {/* §10 Modal de motivo do excedente — fecha livremente; sem motivo o dia
-          mantém "⚠ Motivo não informado" e a reserva fica indisponível. */}
-      {allocateDate && (
-        <AllocateExcessModal
-          open
-          onClose={() => setAllocateDate(null)}
-          excessDate={allocateDate}
-          entries={entries}
-          compensations={compensations}
-          absences={absences}
-          companyCalendars={companyCalendars}
-          faltas={faltas}
-          excessReasons={excessReasons}
-          settings={settings}
-        />
-      )}
-      {reasonDate &&
-        (() => {
-          const day = computeDay(
-            entries.filter((e) => e.date === reasonDate),
-            settings,
-          );
-          return (
-            <ExcessReasonModal
-              open
-              onClose={() => setReasonDate(null)}
-              date={reasonDate}
-              workedMinutes={day.workedMinutes}
-              excessMinutes={day.excessMinutes}
-              existing={excessReasonOnDate(excessReasons, reasonDate)}
+      {tab === "banco" && (
+        <>
+          {/* Quatro métricas — mesma fonte; DISPONÍVEL com prioridade visual. */}
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <StatCard
+              label="Disponível [10+]"
+              value={formatMinutes(bank.availableMinutes)}
+              sub="gerado − reservado − utilizado"
+              tone={bank.availableMinutes > 0 ? "indigo" : "slate"}
             />
-          );
-        })()}
+            <StatCard compact label="Reservado" value={formatMinutes(bank.reservedMinutes)} sub="reservas em aberto" tone={bank.reservedMinutes > 0 ? "amber" : "slate"} />
+            <StatCard compact label="Utilizado" value={formatMinutes(bank.usedMinutes)} sub="aplicado em jornadas" tone="emerald" />
+            <StatCard compact label="Gerado" value={formatMinutes(bank.generatedMinutes)} sub={`excedente acima de 10h · ciclo ${cicloAtivo}`} tone="slate" />
+          </div>
+
+          {/* Origens do [10+] */}
+          <section aria-label="Origens do [10+]" className="space-y-2">
+            <h3 className="text-sm font-extrabold uppercase tracking-wider text-slate-400">Origens do [10+]</h3>
+            {bank.lots.length === 0 ? (
+              <EmptyState icon={<Database size={26} />} title="Nenhuma hora [10+] gerada neste ciclo." description="Dias com jornada acima de 10h aparecem aqui como origens rastreáveis." />
+            ) : (
+              <div className="space-y-2">
+                {bank.lots.map((lot) => {
+                  const motivo = excessReasonOnDate(excessReasons, lot.originDate);
+                  return (
+                    <details key={lot.originDate} className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                      <summary className="flex cursor-pointer flex-wrap items-center justify-between gap-2">
+                        <span className="flex min-w-0 items-center gap-2">
+                          <ChevronDown size={15} aria-hidden className="shrink-0 text-slate-400" />
+                          <span className="text-sm font-extrabold text-slate-800">{formatDateShortBR(lot.originDate)}</span>
+                          {motivo && <Badge tone="amber">{motivo.reason}</Badge>}
+                          {lot.needsReview && <Badge tone="rose">Revisar</Badge>}
+                        </span>
+                        <span className="text-xs font-semibold text-slate-500">
+                          Gerado <b className="text-slate-900">{formatMinutes(lot.generatedMinutes)}</b> · Utilizado{" "}
+                          <b className="text-slate-900">{formatMinutes(lot.usedMinutes)}</b> · Reservado{" "}
+                          <b className="text-slate-900">{formatMinutes(lot.reservedMinutes)}</b> · Disponível{" "}
+                          <b className="text-indigo-600">{formatMinutes(lot.availableMinutes)}</b>
+                        </span>
+                      </summary>
+                      <div className="mt-3 space-y-1.5 border-t border-slate-100 pt-2.5">
+                        <p className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400">Destinos das horas desta origem</p>
+                        {lot.destinations.length === 0 ? (
+                          <p className="text-xs text-slate-500">Nenhum destino ainda — horas inteiramente disponíveis.</p>
+                        ) : (
+                          lot.destinations.map((d) => (
+                            <div key={`${d.useId}-${d.destinationDate}-${d.minutes}`} className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                              <span className="font-semibold text-slate-700">
+                                <ArrowRight size={12} aria-hidden className="mr-1 inline text-slate-400" />
+                                {formatDateShortBR(d.destinationDate)} → <b className="tabular-nums">{formatMinutes(d.minutes)}</b>{" "}
+                                {d.status === "utilizado" ? "utilizado" : "cancelado"}
+                                <span className="ml-1.5 font-medium text-slate-400">· {modoDaEstrategia(d.allocationStrategy)}</span>
+                              </span>
+                              <Link href={linkDia(d.destinationDate)} className="font-bold text-indigo-600 underline underline-offset-2 hover:text-indigo-800">
+                                Ver dia
+                              </Link>
+                            </div>
+                          ))
+                        )}
+                        {/* Reservas ATIVAS lastreadas nesta origem (junção canônica
+                            por allocations — o banco lot.destinations rastreia usos;
+                            a reserva é exibida pelo plano, sem nova matemática). */}
+                        {(specialExcessPlans ?? [])
+                          .filter((pl) => pl.status === "planned" && pl.allocations.some((a) => a.originDate === lot.originDate))
+                          .map((pl) => (
+                            <div key={`pl-${pl.id}`} className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                              <span className="font-semibold text-slate-700">
+                                <ArrowRight size={12} aria-hidden className="mr-1 inline text-amber-400" />
+                                {pl.allocations.filter((a) => a.originDate === lot.originDate).map((a) => (
+                                  <span key={a.originDate}>
+                                    {formatDateShortBR(pl.destinationDate)} → <b className="tabular-nums">{formatMinutes(a.minutes)}</b> reservado
+                                  </span>
+                                ))}
+                                <span className="ml-1.5 font-medium text-slate-400">· {modoDaEstrategia(pl.selectionMode)}</span>
+                              </span>
+                              <Link href={reservasAbertasHref(pl.destinationDate, pl.destinationDate <= todayStr)} className="font-bold text-indigo-600 underline underline-offset-2 hover:text-indigo-800">
+                                Ver dia
+                              </Link>
+                            </div>
+                          ))}
+                      </div>
+                    </details>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+
+          {/* Reservas em aberto */}
+          <section aria-label="Reservas em aberto" className="space-y-2">
+            <h3 className="text-sm font-extrabold uppercase tracking-wider text-slate-400">Reservas em aberto</h3>
+            {reservas.length === 0 ? (
+              <p className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-xs font-medium text-slate-500">Não há reservas em aberto.</p>
+            ) : (
+              reservas.map((p) => {
+                const chegou = p.destinationDate <= todayStr;
+                return (
+                  <div key={p.id} className="flex flex-col gap-2 rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="min-w-0">
+                      <p className="text-sm font-bold text-amber-900">
+                        <Hourglass size={14} aria-hidden className="mr-1 inline" />
+                        {formatDateShortBR(p.destinationDate)} → <b className="tabular-nums">{formatMinutes(specialExcessPlanMinutes(p))}</b>
+                        <span className="ml-1.5 font-medium text-amber-700/80">· {modoDaEstrategia(p.selectionMode)} · {STATUS_PLANO[p.status] ?? p.status}</span>
+                      </p>
+                      <p className="text-xs font-medium text-amber-700">
+                        Origem: {p.allocations.map((a, i) => (
+                          <span key={a.originDate}>{i > 0 && ", "}<b className="tabular-nums">{formatDateShortBR(a.originDate)}</b> ({formatMinutes(a.minutes)})</span>
+                        ))}
+                        {chegou ? " · chegou ao dia — aguardando confirmação" : " · reserva para o dia indicado"}
+                      </p>
+                    </div>
+                    <Link
+                      href={reservasAbertasHref(p.destinationDate, chegou)}
+                      className="shrink-0 text-sm font-bold text-amber-800 underline underline-offset-2 hover:text-amber-900"
+                    >
+                      {chegou ? "Gerenciar no dia" : "Abrir em Registros"}
+                    </Link>
+                  </div>
+                );
+              })
+            )}
+          </section>
+
+          {/* Usos realizados */}
+          <section aria-label="Usos realizados" className="space-y-2">
+            <h3 className="text-sm font-extrabold uppercase tracking-wider text-slate-400">Usos realizados</h3>
+            {usos.length === 0 ? (
+              <p className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-xs font-medium text-slate-500">Não há usos realizados.</p>
+            ) : (
+              <div className="space-y-2">
+                {usos.map((u) => (
+                  <div key={u.id} className="flex flex-col gap-2 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="min-w-0">
+                      <p className="text-sm font-bold text-emerald-900">
+                        <ArrowLeftRight size={14} aria-hidden className="mr-1 inline" />
+                        {formatDateShortBR(u.destinationDate)} → <b className="tabular-nums">{formatMinutes(specialExcessUseMinutes(u))}</b>
+                        <span className="ml-1.5 font-medium text-emerald-700/80">· {modoDaEstrategia(u.allocationStrategy)} · {STATUS_USO[u.status] ?? u.status}</span>
+                      </p>
+                      <p className="text-xs font-medium text-emerald-700">
+                        Origem: {u.allocations.map((a, i) => (
+                          <span key={a.originDate}>{i > 0 && ", "}<b className="tabular-nums">{formatDateShortBR(a.originDate)}</b> ({formatMinutes(a.minutes)})</span>
+                        ))}
+                        <span className="ml-1 font-medium text-emerald-600/80">· uso é projeção oficial; não altera a jornada real nem o saldo factual</span>
+                      </p>
+                    </div>
+                    <Link href={linkDia(u.destinationDate)} className="shrink-0 text-sm font-bold text-emerald-800 underline underline-offset-2 hover:text-emerald-900">
+                      Abrir em Registros
+                    </Link>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+
+          {/* Histórico cancelado (recolhível, somente se houver) */}
+          {(canceladosPlanos.length > 0 || canceladosUsos.length > 0) && (
+            <details className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+              <summary className="cursor-pointer text-sm font-extrabold text-slate-600">
+                Histórico cancelado ({canceladosPlanos.length + canceladosUsos.length})
+                <span className="ml-1.5 text-xs font-medium text-slate-400">não soma no banco atual — rastreabilidade</span>
+              </summary>
+              <div className="mt-3 space-y-1.5 border-t border-slate-100 pt-2.5">
+                {canceladosPlanos.map((p) => (
+                  <div key={p.id} className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-600">
+                    <span>
+                      Reserva {formatDateShortBR(p.destinationDate)} → <b className="tabular-nums">{formatMinutes(specialExcessPlanMinutes(p))}</b>
+                      {" · origem "}{p.allocations.map((a) => formatDateShortBR(a.originDate)).join(", ")}
+                    </span>
+                    <Badge tone="slate">{STATUS_PLANO[p.status] ?? p.status}</Badge>
+                  </div>
+                ))}
+                {canceladosUsos.map((u) => (
+                  <div key={u.id} className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-600">
+                    <span>
+                      Uso {formatDateShortBR(u.destinationDate)} → <b className="tabular-nums">{formatMinutes(specialExcessUseMinutes(u))}</b>
+                      {" · origem "}{u.allocations.map((a) => formatDateShortBR(a.originDate)).join(", ")}
+                    </span>
+                    <Badge tone="slate">{STATUS_USO[u.status] ?? u.status}</Badge>
+                  </div>
+                ))}
+              </div>
+            </details>
+          )}
+        </>
+      )}
+
+      {tab === "calendario" && (
+        <>
+          {!calResumo.hasCalendar ? (
+            <EmptyState
+              icon={<CalendarOff size={26} />}
+              title="Calendário da empresa não carregado"
+              description="Adicione o calendário da empresa em Configurações para acompanhar os impactos do ciclo."
+              action={<Link href="/configuracoes"><Button variant="secondary" size="sm"><Settings size={15} /> Ir para Configurações</Button></Link>}
+            />
+          ) : (
+            <>
+              {/* Dados cadastrados do ciclo — configuração ORIGINAL, não pendência atual. */}
+              <div className="grid gap-3 sm:grid-cols-3">
+                <StatCard label="Datas no calendário" value={String(calResumo.dateCount)} sub={`ciclo ${calResumo.label ?? cicloAtivo}`} tone="slate" />
+                <StatCard compact label="Carga COMPENSAR cadastrada" value={formatMinutes(calResumo.compLoadMinutes)} sub="configuração original do calendário" tone="slate" />
+                <StatCard compact label="Horas ABONADAS cadastradas" value={formatMinutes(calResumo.abonadasMinutes)} sub="configuração original do calendário" tone="slate" />
+              </div>
+
+              {/* Impacto futuro conhecido — fonte: buildCalendarForecast */}
+              <div className="rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3">
+                <p className="text-sm font-bold text-amber-900">
+                  <CalendarClock size={15} aria-hidden className="mr-1 inline" />
+                  Impacto futuro conhecido (previsão): {impactoFuturo < 0 ? "" : "+"}{formatMinutes(impactoFuturo)}
+                  <span className="ml-1.5 font-medium text-amber-700/80">
+                    · {calEventos.future.filter((e) => (e.impactoFuturoConhecidoMinutes ?? 0) !== 0).length} evento(s) futuro(s) com impacto · {calEventos.future.length} evento(s) futuro(s) no total
+                  </span>
+                </p>
+                <p className="mt-0.5 text-xs font-medium text-amber-700">
+                  Eventos já realizados estão refletidos no saldo factual — nunca somados aqui.
+                </p>
+              </div>
+
+              {/* Próximos eventos (crescente) */}
+              <section aria-label="Próximos eventos" className="space-y-2">
+                <h3 className="text-sm font-extrabold uppercase tracking-wider text-slate-400">Próximos eventos</h3>
+                {calEventos.future.length === 0 ? (
+                  <p className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-xs font-medium text-slate-500">Nenhum evento futuro neste ciclo.</p>
+                ) : (
+                  calEventos.future.map((e) => (
+                    <div key={e.date} className="flex flex-col gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="min-w-0">
+                        <p className="text-sm font-bold text-slate-800">
+                          {formatDateShortBR(e.date)} — {e.descricao}
+                          <Badge tone="slate">{tratamentoLabel(e.tratamento)}</Badge>
+                        </p>
+                        <p className="text-xs font-medium text-slate-500">
+                          {e.tratamento === "ABONADO" && "Dia abonado — neutro (sem impacto)."}
+                          {e.tratamento === "ABONADO_PARCIAL" && "Parcial: crédito do calendário + jornada regular a cumprir — sem impacto automático."}
+                          {e.tratamento === "COMPENSAR" && "Folga integral a compensar — impacto conhecido no futuro."}
+                          {e.impactoFuturoConhecidoMinutes !== null && (
+                            <span className="ml-1 font-bold text-amber-700">Impacto conhecido: {formatMinutes(e.impactoFuturoConhecidoMinutes)}</span>
+                          )}
+                        </p>
+                      </div>
+                      <Link href={linkDia(e.date)} className="shrink-0 text-xs font-bold text-indigo-600 underline underline-offset-2 hover:text-indigo-800">
+                        Ver dia
+                      </Link>
+                    </div>
+                  ))
+                )}
+              </section>
+
+              {/* Eventos realizados (mais recente primeiro) */}
+              <section aria-label="Eventos realizados" className="space-y-2">
+                <h3 className="text-sm font-extrabold uppercase tracking-wider text-slate-400">Eventos realizados</h3>
+                <p className="text-xs font-medium text-slate-500">Efeito já refletido no saldo factual — esta é a história do ciclo, não cobrança extra.</p>
+                {calEventos.past.length === 0 ? (
+                  <p className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-xs font-medium text-slate-500">Nenhum evento realizado ainda neste ciclo.</p>
+                ) : (
+                  calEventos.past.map((e) => (
+                    <div key={e.date} className="flex flex-col gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 sm:flex-row sm:items-start sm:justify-between">
+                      <div className="min-w-0">
+                        <p className="text-sm font-bold text-slate-800">
+                          {formatDateShortBR(e.date)} — {e.descricao}
+                          <Badge tone="slate">{tratamentoLabel(e.tratamento)}</Badge>
+                          {e.preControlStartDate && <Badge tone="slate">pré-início do controle</Badge>}
+                        </p>
+                        <p className="mt-0.5 text-xs font-medium text-slate-500">
+                          Base referência <b className="text-slate-700">{formatMinutes(e.baseReferenciaMinutes)}</b> · Crédito calendário{" "}
+                          <b className="text-slate-700">{formatMinutes(e.creditoCalendarioMinutes)}</b> · Jornada a cumprir{" "}
+                          <b className="text-slate-700">{formatMinutes(e.jornadaACumprirMinutes)}</b>
+                          {e.trabalhadoMinutes !== undefined && (
+                            <> · Trabalhado real <b className="text-slate-700">{formatMinutes(e.trabalhadoMinutes)}</b> · Saldo factual do dia{" "}
+                            <b className={e.saldoFactualMinutes && e.saldoFactualMinutes < 0 ? "text-rose-600" : "text-emerald-600"}>{formatMinutes(e.saldoFactualMinutes ?? 0)}</b></>
+                          )}
+                        </p>
+                        {e.trabalhoEmAbonado && (
+                          <p className="mt-0.5 text-xs font-semibold text-amber-700">
+                            Há trabalho registrado neste dia abonado. Consulte a regra da empresa antes de considerar qualquer efeito.
+                          </p>
+                        )}
+                      </div>
+                      <Link href={linkDia(e.date)} className="shrink-0 text-xs font-bold text-indigo-600 underline underline-offset-2 hover:text-indigo-800">
+                        Ver dia
+                      </Link>
+                    </div>
+                  ))
+                )}
+              </section>
+            </>
+          )}
+        </>
+      )}
+
+      {/* Histórico legado (read-only) — apenas se houver registros legados. */}
+      {(compensations ?? []).length > 0 && (
+        <details className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+          <summary className="cursor-pointer text-sm font-extrabold text-slate-600">
+            Histórico legado — compensações externas ({(compensations ?? []).length})
+            <span className="ml-1.5 text-xs font-medium text-slate-400">somente leitura · os fluxos atuais são o calendário e o banco [10+]</span>
+          </summary>
+          <div className="mt-3 space-y-1.5 border-t border-slate-100 pt-2.5">
+            {(compensations ?? []).slice().sort((a, b) => b.createdAt - a.createdAt).map((c) => (
+              <div key={c.id} className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-600">
+                <span>
+                  {c.kind === "calendario" && <Badge tone="slate">Compensação externa registrada</Badge>}
+                  {formatDateShortBR(c.sourceDate)} → {formatDateShortBR(c.targetDate)} · <b className="tabular-nums">{formatMinutes(c.minutes)}</b>
+                </span>
+                <Badge tone={c.status === "concluida" ? "emerald" : c.status === "cancelada" ? "slate" : "amber"}>{c.status}</Badge>
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
     </div>
   );
 }

@@ -473,7 +473,11 @@ check("TESTE 14 DE 14 — MOBILE / SEMÂNTICA", () => {
   const legacy = src("src/lib/hour-bank.ts");
   assert.ok(!legacy.includes("SpecialExcessPlan"), "motor legado sem SpecialExcessPlan");
   const central = src("src/app/(app)/compensacoes/page.tsx");
-  assert.ok(!central.includes("specialExcessPlans") && !central.includes("SpecialExcessPlan"), "Central não recebe planos nesta etapa");
+  // 4E (SUPERADO — expectativa atualizada com justificativa): a Central
+  // reformada EXIBE planos/reservas em modo somente-leitura (rastreabilidade
+  // canônica) e NUNCA os muta:
+  assert.ok(central.includes("specialExcessPlans"), "Central exibe reservas (read-only)");
+  assert.ok(!central.includes("createSpecialExcessPlan") && !central.includes("cancelSpecialExcessPlan") && !central.includes("setSpecialExcessPlanStatus"), "Central sem mutação de planos");
   // Compactação 3F.1 preservada: a ação nova fica dentro do card expandido
   // (não cria cards enormes para todos os futuros).
   assert.ok(card.includes("futureDay && onPlanSpecial"), "ação discreta condicionada");

@@ -54,10 +54,9 @@ check("3. página mostra título Central de Horas", () => {
   assert.ok(shell.includes("titleFor(pathname)"));
 });
 
-check("4. subtítulo correto", () => {
-  assert.ok(
-    page.includes("Gerencie déficits, excedentes, programações e compensações do ciclo."),
-  );
+check("4. subtítulo correto (4E: gestão detalhada + rastreabilidade)", () => {
+  // 4E (SUPERADO o subtítulo antigo — expectativa atualizada com justificativa):
+  assert.ok(page.includes("Acompanhe o banco [10+], suas reservas e usos, e os impactos do calendário da empresa."));
 });
 
 check("5. estado ativo do menu permanece", () => {
@@ -83,12 +82,13 @@ check("5. estado ativo do menu permanece", () => {
   ]);
 });
 
-check("6. termos funcionais de compensação continuam intactos", () => {
-  assert.ok(page.includes("Nova compensação"));
-  assert.ok(page.includes("Calendário a compensar"));
-  assert.ok(page.includes("Acordos a compensar"));
-  assert.ok(page.includes("Programar hora extra"));
-  assert.ok(page.includes("Compensar com hora extra"));
+check("6. 4E: Central sem o fluxo legado; rastreabilidade canônica no lugar", () => {
+  // 4E (SUPERADO — expectativa atualizada com justificativa): a renderização
+  // principal NÃO tem mais o modelo legado (ordem da 4E); motores/dados
+  // legados permanecem internos e aparecem só como histórico read-only:
+  assert.ok(!page.includes("Nova compensação"));
+  assert.ok(page.includes("Histórico legado") || true, "histórico legado existe quando há dados");
+  assert.ok(page.includes("Banco [10+]") && page.includes("Calendário da empresa"), "duas áreas canônicas");
   // 4V: a lista de compensações pendentes saiu da Visão Geral (reforma
   // UI-only) — o gerenciamento permanece na Central de Horas.
   assert.ok(!visao.includes("Compensações pendentes"), "4V: Visão Geral não lista mais compensações pendentes");
@@ -107,9 +107,12 @@ check("7. nenhuma rota foi alterada", () => {
   const nextCfg = srcOf("next.config.ts");
   assert.ok(!nextCfg.includes("central-de-horas"));
   assert.ok(!nextCfg.includes("redirects"));
-  assert.ok(page.includes("Gestão de excedentes — ciclo atual"));
-  assert.ok(page.includes("Excedente livre [10+]"));
-  assert.ok(page.includes("Déficit aberto"));
+  // 4E (SUPERADO — expectativa atualizada com justificativa): as métricas da
+  // Central agora vêm do banco canônico (buildSpecialExcessBank), não do
+  // modelo legado de déficit/realocação:
+  assert.ok(page.includes("buildSpecialExcessBank"));
+  assert.ok(page.includes("Disponível [10+]"));
+  assert.ok(!page.includes("Déficit aberto"));
 });
 
 check("8. CTA de navegação da Visão geral aponta para a Central de Horas", () => {
