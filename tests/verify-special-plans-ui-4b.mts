@@ -266,7 +266,10 @@ check("TESTE 05 DE 14 — RESERVA REDUZ DISPONÍVEL", () => {
   assert.equal(view.banks[0].bank.availableMinutes, 30, "Resumo: Disponível 30min");
   assert.equal(view.cards.specialGeneratedMinutes, 120, "'[10+] gerado no período' continua FACTUAL");
   const resumo = src("src/app/(app)/resumo/page.tsx");
-  assert.ok(resumo.includes(">Reservado<"), "painel do banco exibe Reservado");
+  // 4F (SUPERADO — expectativa atualizada com justificativa): o painel do
+  // banco anual saiu do Resumo; a reserva aparece como "Reservado para o
+  // período" (planos planned com destino em 21→20):
+  assert.ok(resumo.includes("Reservado para o período"), "reserva do período exibida");
 });
 
 check("TESTE 06 DE 14 — DOIS PLANOS NO MESMO DIA", () => {

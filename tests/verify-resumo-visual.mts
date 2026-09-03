@@ -29,52 +29,60 @@ const S = settingsOf(seed.user);
 
 check("1. quatro cards principais do Resumo têm ícone e malha alinhada (3F)", () => {
   const page = srcOf("src/app/(app)/resumo/page.tsx");
-  assert.ok(page.includes('label="Horas registradas"'));
-  assert.ok(page.includes('label="Saldo regular"'));
-  assert.ok(page.includes('label="[10+] gerado no período"'));
+  // 4F (SUPERADO — expectativa atualizada com justificativa): os quatro
+  // cards principais da reforma: Saldo factual · Projeção no ponto ·
+  // Dias com registro · Pendências de apuração:
+  assert.ok(page.includes('label="Saldo factual"'));
   assert.ok(page.includes('label="Projeção no ponto"'));
+  assert.ok(page.includes('label="Dias com registro"'));
+  assert.ok(page.includes('label="Pendências de apuração"'));
   assert.ok(page.includes("icon={<Clock3 size={16} />}"));
   assert.ok(page.includes("icon={<Wallet size={16} />}"));
   assert.ok(page.includes("icon={<TriangleAlert size={16} />}"));
   assert.ok(page.includes("icon={<TrendingUp size={16} />}"));
-  assert.ok(page.includes("grid grid-cols-2 items-stretch gap-4 lg:grid-cols-4"));
+  assert.ok(page.includes("grid grid-cols-2 items-stretch gap-3 lg:grid-cols-4"), "4F: 2×2 no mobile · 4 em linha no desktop");
   const ui = srcOf("src/components/ui.tsx");
   assert.ok(ui.includes("flex h-full flex-col justify-center"));
   assert.ok(ui.includes("text-2xl font-extrabold tabular-nums leading-none tracking-tight"));
 });
 
-check("2. card [10+] do período mostra o gerado factual — sem Realocado/A realocar (3F)", () => {
+check("2. 4F: bloco [10+] do período mostra o gerado factual — sem Realocado/A realocar", () => {
+  // 4F (SUPERADO — expectativa atualizada com justificativa):
   const page = srcOf("src/app/(app)/resumo/page.tsx");
-  assert.ok(page.includes('label="[10+] gerado no período"'));
-  assert.ok(page.includes("Excedente factual acima de 10h/dia."));
-  assert.ok(page.includes('tone={cards.specialGeneratedMinutes > 0 ? "violet" : "slate"}'));
+  assert.ok(page.includes("Gerado no período"));
+  assert.ok(page.includes("origens dentro de 21→20"));
+  assert.ok(page.includes("text-violet-700"), "tom violeta preservado");
   assert.ok(!page.includes("Realocado"), "sem 'Realocado'");
   assert.ok(!page.includes("A realocar"), "sem 'A realocar'");
 });
 
-check("3. seções de detalhes têm hierarquia maior que os itens (3F: sem 'Compensações')", () => {
+check("3. 4F: seções da apuração têm hierarquia (sem 'Compensações')", () => {
   const page = srcOf("src/app/(app)/resumo/page.tsx");
-  assert.ok(page.includes('title="Composição do saldo regular"'));
-  assert.ok(page.includes('title="Ausências e abonos"'));
+  // 4F (SUPERADO — expectativa atualizada com justificativa):
+  assert.ok(page.includes("Como o período se formou"));
+  assert.ok(page.includes("Calendário da empresa no período"));
   assert.ok(!page.includes('title="Compensações"'), "bloco Compensações fora do Resumo");
-  assert.ok(page.includes('className="mb-3 text-[13px] font-bold text-slate-800"'));
+  assert.ok(page.includes('text-sm font-extrabold uppercase tracking-wider'), "hierarquia de seções");
   assert.ok(!page.includes("mb-2 text-[10px] font-extrabold uppercase tracking-wider text-slate-400"));
 });
 
-check("4. rótulo e valor ficam no mesmo bloco, valor à direita (3F: composição + ausências)", () => {
+check("4. 4F: rótulo e valor no mesmo bloco (composição da apuração)", () => {
+  // 4F (SUPERADO — expectativa atualizada com justificativa): os três blocos
+  // da formação (positivas/negativas/saldo factual) têm rótulo + valor:
   const page = srcOf("src/app/(app)/resumo/page.tsx");
-  assert.ok(page.includes('className="flex items-start gap-2"'));
-  assert.ok(page.includes("ml-auto shrink-0 text-right"));
-  assert.ok(page.includes('label="Créditos regulares"'));
-  assert.ok(page.includes('label="Jornadas abaixo da base"'));
-  assert.ok(page.includes('label="Férias"'));
+  assert.ok(page.includes("Horas positivas regulares"));
+  assert.ok(page.includes("Horas negativas regulares"));
+  assert.ok(page.includes("composition.generatedCreditMinutes"));
+  assert.ok(page.includes("composition.generatedDeficitMinutes"));
   assert.ok(!page.includes('label="Acordo a compensar"'), "acordo (legado) fora do Resumo");
 });
 
-check("5. duas seções como blocos discretos e empilháveis (3F)", () => {
+check("5. 4F: blocos discretos e empilháveis na formação", () => {
   const page = srcOf("src/app/(app)/resumo/page.tsx");
-  assert.ok(page.includes("mt-3 grid gap-3 text-sm text-slate-600 sm:grid-cols-2"));
-  assert.ok(page.includes("rounded-xl bg-slate-50/80 px-3.5 py-3 ring-1 ring-slate-100"));
+  // 4F (SUPERADO — expectativa atualizada com justificativa): os blocos da
+  // apuração são cards discretos em grade:
+  assert.ok(page.includes('grid gap-3 sm:grid-cols-3'));
+  assert.ok(page.includes("rounded-xl border border-slate-200 bg-white px-4 py-3"));
 });
 
 check("6. segmento e legenda [10+] usam violeta", () => {
@@ -131,7 +139,9 @@ check("8. seed explícito: 28/08 11h30 com 10h no ponto, extra +2h, [10+] 1h30",
 check("9. [10+] do período vem da derivação única (3C); engine legado intacto (3F)", () => {
   const page = srcOf("src/app/(app)/resumo/page.tsx");
   const view = srcOf("src/lib/resumo-period-view.ts");
-  assert.ok(page.includes("cards.specialGeneratedMinutes"), "card consome a derivação única");
+  // 4F (SUPERADO — expectativa atualizada com justificativa): a movimentação
+  // do período consome o agregado derivado:
+  assert.ok(page.includes("movement.generatedMinutes"), "bloco consome a derivação única");
   assert.ok(view.includes("buildSpecialExcessBank"), "gerado derivado dos lotes 3C");
   assert.ok(view.includes("generatedByDate"), "lote por origem → dia");
   // engine legado continua calculando o mesmo (preservado em 2º plano)

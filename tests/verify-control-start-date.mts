@@ -133,9 +133,13 @@ check("11. Resumo Dias sem registro respeita início", () => {
   assert.equal(missing.length, 0);
 });
 
-check("12. alerta de Sem registro respeita início", () => {
+check("12. 4F: pendência 'Dia sem registro' respeita o início (classificador canônico no BLOCO 5)", () => {
   const r = srcOf("src/app/(app)/resumo/page.tsx");
-  assert.ok(r.includes("detailStats.missingRecords > 0"));
+  // 4F (SUPERADO — expectativa atualizada com justificativa): a faixa legada
+  // deu lugar às pendências de apuração via attentionNowSummary com range do
+  // período (mesma fonte isMissingExpectedRecord/controlStartDate):
+  assert.ok(r.includes("resumoPeriodPendencies"), "pendências via classificador canônico");
+  assert.ok(r.includes('label: "Dia sem registro"'), "categoria sem registro no BLOCO 5");
   const reg = srcOf("src/app/(app)/registros/page.tsx");
   assert.ok(reg.includes("missingCount"));
   assert.ok(reg.includes("user.controlStartDate"));

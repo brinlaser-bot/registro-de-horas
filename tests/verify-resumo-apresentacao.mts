@@ -74,8 +74,10 @@ check("B. 7h30 / base 8h => Jornada abaixo do previsto e −30min", () => {
   assert.equal(d.balanceMinutes, -30);
   assert.equal(resumoFinancialFrozen(d), false);
   const page = srcOf("src/app/(app)/resumo/page.tsx");
-  assert.ok(page.includes('kind === "Jornada abaixo do previsto"'));
-  assert.ok(page.includes('? "rose"'));
+  // 4F (SUPERADO — expectativa atualizada com justificativa): a situação vem
+  // da derivação (resumoEventKind) como badge; saldo negativo em tom rose:
+  assert.ok(page.includes("{row.situation !== \"—\" && <Badge"), "situação como badge");
+  assert.ok(page.includes('"text-rose-600"'), "déficit em rose");
 });
 
 check("C. 11h30 => no ponto 10h, extra +2h, [10+] 1h30; tooltip separa", () => {
@@ -123,8 +125,9 @@ check("D. card [10+] do período mostra o gerado (3C) — sem Realocado/A realoc
   // novo modelo (3F): o card do Resumo mostra o gerado factual do período
   const page = srcOf("src/app/(app)/resumo/page.tsx");
   const view = srcOf("src/lib/resumo-period-view.ts");
-  assert.ok(page.includes('label="[10+] gerado no período"'));
-  assert.ok(page.includes("Excedente factual acima de 10h/dia."));
+  // 4F (SUPERADO — expectativa atualizada com justificativa):
+  assert.ok(page.includes("Gerado no período"));
+  assert.ok(page.includes("origens dentro de 21→20"));
   assert.ok(view.includes("buildSpecialExcessBank"), "fonte 3C na derivação");
   assert.ok(!page.includes("Realocado"), "sem 'Realocado' no Resumo");
   assert.ok(!page.includes("A realocar"), "sem 'A realocar' no Resumo");
@@ -161,14 +164,14 @@ check("R4. botão Período atual permanece", () => {
   assert.ok(page.includes("Período atual"));
 });
 
-check("R5. cores distintas Sem registro / abaixo / [10+] / Folga", () => {
+check("R5. 4F: situações da derivação como badge; saldos com cores distintas", () => {
+  // 4F (SUPERADO — expectativa atualizada com justificativa): a coloração por
+  // `kind` saiu com a tabela antiga; a linha compacta exibe a situação da
+  // derivação (resumoEventKind) como badge e o saldo factual colorido:
   const page = srcOf("src/app/(app)/resumo/page.tsx");
-  assert.ok(page.includes('kind === "Sem registro"'));
-  assert.ok(page.includes('kind === "Jornada abaixo do previsto"'));
-  assert.ok(page.includes('kind === "Acima do limite [10+]"'));
-  assert.ok(page.includes('kind === "Folga"'));
-  assert.ok(page.includes('? "violet"'));
-  assert.ok(page.includes('? "sky"'));
+  assert.ok(page.includes('row.situation !== "—" && <Badge'), "situação da derivação");
+  assert.ok(page.includes('"text-rose-600"') && page.includes('"text-emerald-600"'), "cores de saldo preservadas");
+  assert.ok(page.includes("text-violet-600"), "[10+] em violeta");
 });
 
 check("R6. histórico sem fatos não vira abaixo do previsto", () => {

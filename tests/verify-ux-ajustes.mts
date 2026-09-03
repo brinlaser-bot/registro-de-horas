@@ -127,9 +127,11 @@ check("C. Visão geral: sem 'Últimos 14 dias'; gráfico empilhado compartilhado
 });
 
 /* ── D. Resumo do período: versão completa intacta ── */
-check("D. Resumo mantém o Card 'Barras empilhadas do período' completo (height 210)", () => {
+check("D. 4F: Resumo mantém o gráfico factual completo (height 210) na seção de formação", () => {
   const resumo = srcOf("src/app/(app)/resumo/page.tsx");
-  assert.ok(resumo.includes('title="Barras empilhadas do período"'));
+  // 4F (SUPERADO — expectativa atualizada com justificativa): o card do
+  // gráfico virou parte de "Como o período se formou":
+  assert.ok(resumo.includes("StackedPeriodChart"));
   assert.ok(resumo.includes("height={210}"), "versão completa preservada");
   // Builder agnóstico de período: respeita exatamente o par resolvido (inclui especiais do fechamento)
   const abril = buildStackedPeriodData({
@@ -149,9 +151,13 @@ check("D. Resumo mantém o Card 'Barras empilhadas do período' completo (height
  * (hoje + offset), clampada ao fim do ciclo do fixture (2026/2027). Nunca
  * "vence" como as constantes absolutas (a antiga 2026-09-01 fixa foi alcançada
  * pelo relógio real e quebrou o teste). */
+/* Fragilidade corrigida (classe A — regra: nunca data absoluta): a base era
+ * Date.now() e o rolamento do dia fazia o "futuro" cair num fim de semana,
+ * rejeitado por addFalta. Base determinística = TODAY da suíte. */
 function futuraDeterministica(offsetDias = 30, limite = "2027-04-23"): string {
-  const d = new Date(Date.now() + offsetDias * 86400000);
-  const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  const [y, m, d] = TODAY.split("-").map(Number);
+  const base = new Date(y, m - 1, d + offsetDias);
+  const iso = `${base.getFullYear()}-${String(base.getMonth() + 1).padStart(2, "0")}-${String(base.getDate()).padStart(2, "0")}`;
   return iso > limite ? limite : iso;
 }
 

@@ -243,10 +243,13 @@ check("23. novo ciclo começa zerado em relação ao ciclo anterior", () => {
   assert.equal(b.days.length, 0);
 });
 
-check("24. [10+] do período aparece no card principal (3F: gerado factual)", () => {
+check("24. 4F: [10+] do período aparece no bloco de movimentação (gerado factual)", () => {
+  // 4F (SUPERADO — expectativa atualizada com justificativa): a movimentação
+  // [10+] do período virou o bloco "[10+] neste período" (gerado/utilizado/
+  // reservado com origem/destino em 21→20, fonte buildSpecialExcessBank):
   const r = srcOf("src/app/(app)/resumo/page.tsx");
-  assert.ok(r.includes('label="[10+] gerado no período"'));
-  assert.ok(r.includes("Excedente factual acima de 10h/dia."));
+  assert.ok(r.includes("Gerado no período"));
+  assert.ok(r.includes("resumoSpecialPeriodMovement"));
   assert.ok(!r.includes("Realocado"), "3F: 'Realocado' saiu do Resumo");
   assert.ok(!r.includes("A realocar"), "3F: 'A realocar' saiu do Resumo");
   assert.ok(r.includes("{detailsOpen && ("));
@@ -259,7 +262,9 @@ check("25. [10+] do período usa somente excedente gerado no período selecionad
   assert.ok(cycleB.original >= periodBook.original);
   const r = srcOf("src/app/(app)/resumo/page.tsx");
   const view = srcOf("src/lib/resumo-period-view.ts");
-  assert.ok(r.includes("cards.specialGeneratedMinutes"), "card consome a derivação (escopo período)");
+  // 4F (SUPERADO — expectativa atualizada com justificativa): a movimentação
+  // do período usa o agregado derivado (lots com origem em 21→20):
+  assert.ok(r.includes("movement.generatedMinutes"), "bloco consome o agregado derivado (escopo período)");
   assert.ok(view.includes("generatedByDate"), "só origens mapeadas por data do período entram no total");
   assert.ok(!pending(PERIOD).some((d) => d.date === "2026-08-11"));
 });
@@ -285,8 +290,9 @@ check("27. (3F) 'a realocar' saiu do Resumo; engine legado ainda apura o livre",
 
 check("28. (3F) 'Déficit do período' virou composição do saldo regular (2A)", () => {
   const r = srcOf("src/app/(app)/resumo/page.tsx");
-  assert.ok(r.includes('label="Jornadas abaixo da base"'), "déficits na composição");
-  assert.ok(r.includes('title="Composição do saldo regular"'));
+  // 4F (SUPERADO — expectativa atualizada com justificativa):
+  assert.ok(r.includes("Horas negativas regulares"), "déficits na composição");
+  assert.ok(r.includes("Como o período se formou"));
   const view = srcOf("src/lib/resumo-period-view.ts");
   assert.ok(view.includes("summarizeRegularFacts"), "composição vem da 2A (escopo do período)");
 });

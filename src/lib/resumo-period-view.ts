@@ -244,6 +244,162 @@ export function resumoDayPending(r: ResumoDetailRow): boolean {
   return r.day.entryCount > 0 && (r.day.status === "incomplete" || r.day.status === "inconsistent");
 }
 
+/* ════════════════════════════════════════════════════════════════════
+ * 4F — AGREGADOS DO RESUMO DO PERÍODO (derivados puros/reutilizáveis).
+ * Nenhuma matemática nova: cada agregado é um recorte de PERÍODO sobre
+ * fontes canônicas já consolidadas (attention-now, banco [10+],
+ * SpecialExcessUse/Plan, central-view/companyDayContext).
+ * ════════════════════════════════════════════════════════════════════ */
+
+import { attentionNowSummary } from "./attention-now";
+import { centralCalendarEvents, centralCalendarSummary, type CentralCalendarEventRow } from "./central-view";
+
+/** Pendências de APURAÇÃO do período (4F): MESMO classificador canônico da
+ *  atenção agora (4D.5), recortado no período 21→20 via `range`. Só categorias
+ *  que tornam a leitura incompleta; futuro/hoje em andamento/ABONADO neutro/
+ *  fim de semana comum NUNCA aparecem (regra do classificador). */
+export interface ResumoPeriodPendencies {
+  inconsistente: string[];
+  incompleto: string[];
+  semRegistro: string[];
+  /** Planejamento [10+] que CHEGOU AO DIA e aguarda decisão — destino no período. */
+  plano10: string[];
+  total: number;
+}
+
+export function resumoPeriodPendencies(input: {
+  today: string;
+  period: PointPeriod;
+  entries: TimeEntry[];
+  absences: Absence[];
+  calendars: CompanyCalendars | undefined;
+  settings: WorkSettings;
+  faltas: Falta[];
+  controlStartDate: string | null;
+  plans: SpecialExcessPlan[];
+}): ResumoPeriodPendencies {
+  const s = attentionNowSummary({
+    today: input.today,
+    entries: input.entries,
+    absences: input.absences,
+    calendars: input.calendars,
+    settings: input.settings,
+    faltas: input.faltas,
+    controlStartDate: input.controlStartDate,
+    plans: input.plans,
+    range: { from: input.period.from, to: input.period.to },
+  });
+  return {
+    inconsistente: s.inconsistente,
+    incompleto: s.incompleto,
+    semRegistro: s["sem-registro"],
+    plano10: s["plano-10"],
+    total: s.inconsistente.length + s.incompleto.length + s["sem-registro"].length + s["plano-10"].length,
+  };
+}
+
+/** MOVIMENTAÇÃO [10+] DO PERÍODO (4F): origens/destinos dentro do período
+ *  21→20 — ≠ saldo total do banco do ciclo (esse é da Central). Contagens
+ *  lidas de buildSpecialExcessBank (lots), SpecialExcessUse ativo e planos
+ *  planned; nenhuma nova matemática. */
+export interface ResumoSpecialPeriodMovement {
+  /** [10+] nascido em origens DENTRO do período. */
+  generatedMinutes: number;
+  /** [10+] aplicado em destinos DENTRO do período (usos ativos). */
+  usedMinutes: number;
+  /** Reservas `planned` com destino DENTRO do período. */
+  reservedMinutes: number;
+  /** Algum uso do período consome origem de OUTRO período do mesmo ciclo
+   *  (válido — o texto informativo da UI deriva daqui). */
+  usesOriginOutsidePeriod: boolean;
+  usesWithDestination: number;
+}
+
+export function resumoSpecialPeriodMovement(input: {
+  period: PointPeriod;
+  today: string;
+  cycle: string;
+  entries: TimeEntry[];
+  absences: Absence[];
+  calendars: CompanyCalendars | undefined;
+  settings: WorkSettings;
+  faltas: Falta[];
+  controlStartDate: string | null;
+  uses: SpecialExcessUse[];
+  plans: SpecialExcessPlan[];
+}): ResumoSpecialPeriodMovement {
+  const { period } = input;
+  const inPeriod = (d: string) => d >= period.from && d <= period.to;
+  const bank = buildSpecialExcessBank({
+    cycle: input.cycle,
+    asOfDate: input.today,
+    entries: input.entries,
+    absences: input.absences,
+    calendars: input.calendars,
+    settings: input.settings,
+    faltas: input.faltas,
+    controlStartDate: input.controlStartDate ?? "",
+    uses: input.uses,
+    plans: input.plans,
+  });
+  const generatedMinutes = bank.lots
+    .filter((l) => inPeriod(l.originDate))
+    .reduce((s, l) => s + l.generatedMinutes, 0);
+  let usedMinutes = 0;
+  let reservedMinutes = 0;
+  let usesWithDestination = 0;
+  let usesOriginOutsidePeriod = false;
+  for (const u of input.uses) {
+    if (u.status !== "utilizado" || !inPeriod(u.destinationDate)) continue;
+    usesWithDestination += 1;
+    usedMinutes += u.allocations.reduce((s, a) => s + a.minutes, 0);
+    if (u.allocations.some((a) => a.originDate < period.from)) usesOriginOutsidePeriod = true;
+  }
+  for (const p of input.plans) {
+    if (p.status !== "planned" || !inPeriod(p.destinationDate)) continue;
+    reservedMinutes += p.allocations.reduce((s, a) => s + a.minutes, 0);
+  }
+  return { generatedMinutes, usedMinutes, reservedMinutes, usesOriginOutsidePeriod, usesWithDestination };
+}
+
+/** Calendário da empresa NO PERÍODO (4F): MESMA derivação canônica da Central
+ *  (centralCalendarEvents — forecast para futuro, companyDayContext +
+ *  dayBalanceContribution para realizado), recortada em 21→20. Sem nova
+ *  matemática; classificação integral×parcial (4E.1) preservada. */
+export function resumoCalendarPeriodRows(input: {
+  today: string;
+  cycle: string;
+  period: PointPeriod;
+  entries: TimeEntry[];
+  absences: Absence[];
+  calendars: CompanyCalendars | undefined;
+  settings: WorkSettings;
+  faltas: Falta[];
+  controlStartDate: string | null;
+}): { hasCalendar: boolean; label: string | null; realized: CentralCalendarEventRow[]; future: CentralCalendarEventRow[] } {
+  const summary = centralCalendarSummary(input.calendars, input.cycle);
+  if (!summary.hasCalendar) {
+    return { hasCalendar: false, label: null, realized: [], future: [] };
+  }
+  const evs = centralCalendarEvents({
+    today: input.today,
+    cycle: input.cycle,
+    entries: input.entries,
+    absences: input.absences,
+    calendars: input.calendars,
+    settings: input.settings,
+    faltas: input.faltas,
+    controlStartDate: input.controlStartDate,
+  });
+  const inPeriod = (r: CentralCalendarEventRow) => r.date >= input.period.from && r.date <= input.period.to;
+  return {
+    hasCalendar: true,
+    label: summary.label,
+    realized: evs.past.filter(inPeriod),
+    future: evs.future.filter(inPeriod),
+  };
+}
+
 /** Projeção agrega informação? (usos aplicados > 0). Caso contrário: discreta. */
 export function resumoProjectionVisible(r: ResumoDetailRow): boolean {
   return r.projection.projectable && r.projection.appliedSpecialMinutes > 0;

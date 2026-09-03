@@ -301,26 +301,33 @@ check("S. gráfico em modo factual: sem 'Horas compensadas' como camada principa
   assert.ok(page.includes("factualOnly"), "Resumo liga o modo factual");
   assert.ok(barsSrc.includes("{!factualOnly && d.compensated > 0 &&"), "camada compensada só no modo legado");
   assert.ok(barsSrc.includes("!factualOnly && (d.compensatedConcluded"), "tooltip de compensação só no modo legado");
-  assert.ok(page.includes('title="Barras empilhadas do período"'), "card do gráfico preservado");
+  // 4F (SUPERADO — expectativa atualizada com justificativa): o gráfico
+  // factual foi incorporado à seção "Como o período se formou":
+  assert.ok(page.includes("StackedPeriodChart") && page.includes("Como o período se formou"), "gráfico preservado na seção de formação");
 });
 
-check("T. card [10+] usa linguagem 'gerado' (sem 'Excedente do período')", () => {
-  assert.ok(page.includes('[10+] gerado no período'), "rótulo do card");
-  assert.ok(page.includes("Excedente factual acima de 10h/dia."), "subtexto factual");
+check("T. 4F: bloco [10+] usa linguagem 'Gerado no período' (sem 'Excedente do período')", () => {
+  // 4F (SUPERADO — expectativa atualizada com justificativa):
+  assert.ok(page.includes("Gerado no período"), "rótulo do bloco");
+  assert.ok(page.includes("origens dentro de 21→20"), "subtexto factual");
   assert.ok(!page.includes("Excedente do período [10+]"), "rótulo legado fora");
 });
 
-check("U. banco anual mostra Gerado / Utilizado / Disponível (3C)", () => {
-  assert.ok(page.includes('title="Banco [10+]"'), "bloco separado e identificado");
-  assert.ok(page.includes(`Ciclo {cycle}`), "ciclo nomeado no painel");
-  for (const l of ["Gerado", "Utilizado", "Disponível"]) assert.ok(page.includes(`>${l}<`), `campo ${l}`);
+check("U. 4F: movimentação [10+] mostra Gerado / Utilizado / Reservado no período", () => {
+  // 4F (SUPERADO — expectativa atualizada com justificativa): o painel do
+  // banco anual (saldo do CICLO) saiu do Resumo; a movimentação do PERÍODO
+  // tem os três campos com origem/destino em 21→20:
+  assert.ok(page.includes('[10+] neste período'), "bloco separado e identificado");
+  for (const l of ["Gerado no período", "Utilizado no período", "Reservado para o período"]) assert.ok(page.includes(l), `campo ${l}`);
   assert.ok(viewSrc.includes("buildSpecialExcessBank"), "fonte 3C na derivação");
 });
 
 check("V. composição do saldo mostra positivos / negativos / líquido (2A)", () => {
-  assert.ok(page.includes('title="Composição do saldo regular"'));
-  assert.ok(page.includes('label="Créditos regulares"'));
-  assert.ok(page.includes('label="Jornadas abaixo da base"'));
+  // 4F (SUPERADO — expectativa atualizada com justificativa): a composição
+  // virou a apuração "Como o período se formou":
+  assert.ok(page.includes("Como o período se formou"));
+  assert.ok(page.includes("Horas positivas regulares"));
+  assert.ok(page.includes("Horas negativas regulares"));
   assert.ok(viewSrc.includes("summarizeRegularFacts"), "fonte 2A na derivação");
   const v = viewOf();
   assert.equal(v.composition.generatedCreditMinutes, 120, "créditos +2h (28/08)");
@@ -328,15 +335,17 @@ check("V. composição do saldo mostra positivos / negativos / líquido (2A)", (
   assert.equal(v.composition.netBalanceMinutes, 30);
 });
 
-check("W. detalhamento possui representação [10+] (tabela + mobile)", () => {
-  assert.ok(page.includes(">[10+]</th>"), "coluna [10+] na tabela desktop");
-  assert.ok(page.includes('label="[10+] gerado"'), "campo mobile gerado");
-  assert.ok(page.includes('label="[10+] usado"'), "campo mobile usado");
+check("W. 4F: detalhamento possui representação [10+] na linha compacta", () => {
+  // 4F (SUPERADO — expectativa atualizada com justificativa): a coluna da
+  // tabela e os campos do accordion viraram chips na linha compacta:
+  assert.ok(page.includes("[10+] gerado {formatMinutes(row.specialGenerated)}"));
+  assert.ok(page.includes("usado {formatMinutes(row.specialUsed)}"));
 });
 
-check("X. detalhamento possui projeção (tabela + mobile)", () => {
-  assert.ok(page.includes("Projeção**</th>"), "coluna Projeção na tabela desktop");
-  assert.ok(page.includes('label="Projeção"'), "campo mobile Projeção");
+check("X. 4F: detalhamento possui projeção na linha compacta (só quando agrega)", () => {
+  // 4F (SUPERADO — expectativa atualizada com justificativa):
+  assert.ok(page.includes("showProj &&"), "projeção só quando agrega informação");
+  assert.ok(page.includes("Projeção <b"), "campo Projeção na linha");
 });
 
 check("Y. registro incompleto continua sem saldo financeiro (mobile: mensagem de pendência)", () => {
@@ -344,7 +353,10 @@ check("Y. registro incompleto continua sem saldo financeiro (mobile: mensagem de
   const r = v.days.find((x) => x.day.date === "2026-08-27")!;
   assert.equal(r.day.balanceContribution, 0);
   assert.ok(resumoDayPending(r), "dia pendente identificado");
-  assert.ok(page.includes("Registro pendente. Os valores financeiros serão definidos após a correção."), "mensagem compacta do mobile");
+  // 4F (SUPERADO — expectativa atualizada com justificativa): a mensagem do
+  // accordion virou badge "Pendente" + valores em "—" na linha compacta:
+  assert.ok(page.includes('<Badge tone="amber">Pendente</Badge>'), "selo de pendência na linha");
+  assert.ok(page.includes('frozen ? "—"'), "valores congelados em —");
 });
 
 check("Z. legenda principal do gráfico não depende da linguagem legada de compensação", () => {
@@ -355,13 +367,16 @@ check("Z. legenda principal do gráfico não depende da linguagem legada de comp
   assert.ok(chartSrc.includes("if (!factualOnly) {"), "modos: legado só no modo legado");
 });
 
-check("AG. desktop possui tabela", () => {
-  assert.ok(page.includes('hidden md:block'), "tabela visível em md+");
-  assert.ok(page.includes('<table className="w-full text-sm">'), "tabela sem min-width (sem scroll forçado)");
+check("AG. 4F: desktop e mobile compartilham a lista compacta (sem tabela horizontal)", () => {
+  // 4F (SUPERADO — expectativa atualizada com justificativa): a reforma
+  // substituiu a tabela por uma lista compacta única:
+  assert.ok(!page.includes("<table"), "sem tabela (nunca scroll horizontal)");
+  assert.ok(page.includes("view.days.map((r) => ("), "lista única mapeia a derivação");
 });
 
-check("AH. mobile possui representação alternativa própria (lista vertical)", () => {
-  assert.ok(page.includes('<ul className="divide-y divide-slate-100 md:hidden">'), "lista mobile < md");
+check("AH. 4F: representação única em lista vertical (mobile e desktop)", () => {
+  // 4F (SUPERADO — expectativa atualizada com justificativa):
+  assert.ok(page.includes('<ul className="mt-3 space-y-2">'), "lista vertical única");
 });
 
 check("AI. mobile não depende de scroll horizontal para campos essenciais", () => {
@@ -373,20 +388,25 @@ check("AI. mobile não depende de scroll horizontal para campos essenciais", () 
   assert.ok(!page.includes("min-w-[640px]"), "min-width antigo da tabela removido");
 });
 
-check("AJ. mobile possui Trabalhado", () => {
-  assert.ok(page.includes('label="Trabalhado"'));
+check("AJ. 4F: linha compacta possui Trabalhado", () => {
+  // 4F (SUPERADO — expectativa atualizada com justificativa): os campos do
+  // accordion viraram rótulos inline na linha compacta:
+  assert.ok(page.includes("Trabalhado <b"), "trabalhado na linha");
 });
 
-check("AK. mobile possui Jornada", () => {
-  assert.ok(page.includes('label="Jornada"'));
+check("AK. 4F: Jornada NÃO é duplicada na linha compacta (fica em Registros)", () => {
+  const linha = page.slice(page.indexOf("function PeriodDayRow"));
+  assert.ok(!linha.includes("d.expectedMinutes"), "sem jornada na linha (não duplica Registros; CSV segue completo)");
 });
 
-check("AL. mobile possui Saldo regular", () => {
-  assert.ok(page.includes('label="Saldo regular"'));
+check("AL. 4F: linha compacta possui Saldo factual", () => {
+  const linha = page.slice(page.indexOf("function PeriodDayRow"));
+  assert.ok(linha.includes("Saldo factual") && linha.includes("fmtSigned(d.balanceMinutes)"), "saldo factual na linha");
 });
 
-check("AM. mobile possui No ponto", () => {
-  assert.ok(page.includes('label="No ponto"'));
+check("AM. 4F: 'No ponto' NÃO é duplicado na linha compacta (fica em Registros)", () => {
+  const linha = page.slice(page.indexOf("function PeriodDayRow"));
+  assert.ok(!linha.includes("d.registrableMinutes"), "sem no ponto na linha (CSV segue completo)");
 });
 
 check("AN. mobile possui [10+] quando aplicável (gerado/usado)", () => {
@@ -398,11 +418,11 @@ check("AO. mobile possui Projeção quando aplicável", () => {
   // sem uso: nenhuma projeção agregando informação → campo ausente (discreta)
   const v = viewOf();
   assert.ok(!v.days.some((r) => resumoProjectionVisible(r)), "sem uso: projeção discreta (—)");
-  assert.ok(page.includes('label="Projeção"'), "campo presente no layout (condicional)");
+  assert.ok(page.includes("Projeção <b"), "campo presente na linha (condicional)");
 });
 
 check("AP. registro incompleto no mobile não recebe valores financeiros inventados", () => {
-  assert.ok(page.includes(") : !frozen ? ("), "grid financeiro do mobile só quando não congelado");
+  assert.ok(page.includes('frozen ? "—"'), "linha mostra — quando congelado (nunca inventa)");
   const v = viewOf();
   const r = v.days.find((x) => x.day.date === "2026-08-27")!;
   assert.ok(resumoFinancialFrozen(r.day) && resumoDayPending(r), "27/08: pendência, não financeiro");
@@ -411,7 +431,7 @@ check("AP. registro incompleto no mobile não recebe valores financeiros inventa
 check("AS. desktop e mobile usam a MESMA derivação (view.days; sem cálculo paralelo)", () => {
   assert.ok(page.includes("buildResumoPeriodView"), "página consome a derivação única");
   assert.ok(viewSrc.includes("buildResumoDayRow"), "derivação ancorada na fonte central");
-  assert.ok((page.match(/view\.days\.map/g) ?? []).length >= 2, "tabela e lista mapeiam a mesma view.days");
+  assert.ok((page.match(/view\.days\.map/g) ?? []).length >= 1, "lista mapeia a mesma view.days (4F: única)");
   assert.ok(!page.includes("specialExcessBook"), "sem engine legado hour-bank no Resumo");
   assert.ok(!page.includes("buildDebtDays"), "sem engine legado debt no Resumo");
   assert.ok(!viewSrc.includes("buildDebtDays") && !viewSrc.includes("specialExcessBook") && !viewSrc.includes("openDeficit"), "derivação limpa de legado");

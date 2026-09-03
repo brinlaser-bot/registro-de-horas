@@ -222,19 +222,23 @@ check("18. quando o relógio ultrapassa o horário, vira realizado sem duplicar"
   assert.equal(eve.workedMinutes, 480);
 });
 
-check("19. Resumo do período possui Ver mais detalhes do período", () => {
+check("19. 4F: Resumo possui o detalhamento recolhível do período", () => {
   const r = srcOf("src/app/(app)/resumo/page.tsx");
-  assert.ok(r.includes("Ver mais detalhes do período"));
-  assert.ok(r.includes("Ocultar detalhes do período"));
+  // 4F (SUPERADO — expectativa atualizada com justificativa): rótulos novos:
+  assert.ok(r.includes("Ver detalhamento do período"));
+  assert.ok(r.includes("Ocultar detalhamento do período"));
 });
 
-check("20. detalhes expandidos mostram os indicadores (3F: composição + ausências)", () => {
+check("20. 4F: composição visível na seção de formação; pendências via classificador", () => {
   const r = srcOf("src/app/(app)/resumo/page.tsx");
-  assert.ok(r.includes("Composição do saldo regular"), "composição do saldo regular");
-  assert.ok(r.includes("Jornadas abaixo da base"), "déficits factuais na composição");
+  // 4F (SUPERADO — expectativa atualizada com justificativa): a composição
+  // é sempre visível em "Como o período se formou"; pendências viraram o
+  // BLOCO 5 (classificador canônico):
+  assert.ok(r.includes("Como o período se formou"), "seção de formação");
+  assert.ok(r.includes("Horas negativas regulares"), "déficits factuais na composição");
   assert.ok(!r.includes("Acordo a compensar"), "acordo (legado) fora do Resumo");
-  assert.ok(r.includes("Registros pendentes"));
-  assert.ok(r.includes("O saldo pode sofrer alteração após a correção dos registros pendentes."));
+  assert.ok(r.includes("Pendências do período"));
+  assert.ok(r.includes("Revisar em Registros"));
 });
 
 check("21. Registros não duplica esses indicadores", () => {
@@ -305,11 +309,11 @@ check("27. Ver mais detalhes do período expande", () => {
 check("28. painel expandido contém as 2 seções temáticas (3F)", () => {
   const r = srcOf("src/app/(app)/resumo/page.tsx");
   for (const label of [
-    "Composição do saldo regular", "Ausências e abonos",
-    "Créditos regulares", "Jornadas abaixo da base", "Saldo regular",
-    "Férias", "Saúde", "Dispensados", "Faltas", "Faltas previstas",
+    "Horas positivas regulares", "Horas negativas regulares", "Saldo factual",
   ]) {
-    assert.ok(r.includes(`label="${label}"`) || r.includes(`title="${label}"`), label);
+    // 4F (SUPERADO — expectativa atualizada com justificativa): a composição
+    // da 3F virou a apuração "Como o período se formou":
+    assert.ok(r.includes(label), label);
   }
   assert.ok(!r.includes("Jornada e saldo"), "coluna antiga fora");
   assert.ok(!r.includes("Horas compensadas"), "compensações fora");
@@ -320,28 +324,36 @@ check("28. painel expandido contém as 2 seções temáticas (3F)", () => {
 
 check("29. clicar novamente recolhe", () => {
   const r = srcOf("src/app/(app)/resumo/page.tsx");
-  assert.ok(r.includes("Ocultar detalhes do período"));
+  // 4F (SUPERADO — expectativa atualizada com justificativa): rótulos novos:
+  assert.ok(r.includes("Ocultar detalhamento do período"));
   assert.ok(r.includes("ChevronUp"));
   assert.ok(r.includes("ChevronDown"));
 });
 
 check("30. mudar o período atualiza os indicadores (3F: memos dependem de period)", () => {
   const r = srcOf("src/app/(app)/resumo/page.tsx");
+  // 4F (SUPERADO — expectativa atualizada com justificativa): os memos novos
+  // (pendências/movimentação/calendário) também dependem do período:
   assert.ok(r.includes("settings, faltas, period, todayStr, user.controlStartDate, specialExcessUses"), "view depende do período");
-  assert.ok(r.includes("[view, entries, settings, period, todayStr, faltas]"), "detalhes operacionais dependem do período");
+  assert.ok(r.includes("[entries, absences, companyCalendars, settings, faltas, period, todayStr, user.controlStartDate, specialExcessPlans]"), "pendências dependem do período");
   assert.ok(r.includes("getNextPointPeriod(period)"));
   assert.ok(r.includes("getPreviousPointPeriod(period)"));
 });
 
-check("31. alerta de pendências em /resumo possui Ver pendências", () => {
+check("31. 4F: pendências do período têm CTA Revisar em Registros", () => {
   const r = srcOf("src/app/(app)/resumo/page.tsx");
-  assert.ok(r.includes('variant="warning">Ver pendências'));
-  assert.ok(r.includes("O saldo pode sofrer alteração após a correção dos registros pendentes."));
+  // 4F (SUPERADO — expectativa atualizada com justificativa): a faixa legada
+  // deu lugar ao BLOCO 5:
+  assert.ok(r.includes("Revisar em Registros"));
+  assert.ok(r.includes("Pendências do período"));
 });
 
-check("32. Ver pendências leva a /registros?pendentes=1", () => {
+check("32. 4F: pendências levam a Registros com os filtros validados (4D.5)", () => {
   const r = srcOf("src/app/(app)/resumo/page.tsx");
-  assert.ok(r.includes('href="/registros?pendentes=1"'));
+  // 4F (SUPERADO — expectativa atualizada com justificativa): o filtro legado
+  // ?pendentes=1 deu lugar aos CTAs situacao=* & escopo=ciclo [&data=]:
+  assert.ok(r.includes('hrefBase: "/registros?situacao=registro-inconsistente&escopo=ciclo"'));
+  assert.ok(r.includes('hrefBase: "/registros?situacao=registro-incompleto&escopo=ciclo"'));
 });
 
 actions.replaceAll({ user, entries: [], compensations: [], absences: [], companyCalendars: cals, faltas: [], excessReasons: [] });

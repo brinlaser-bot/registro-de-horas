@@ -217,23 +217,27 @@ check("21. resolver último item limpa ?semRegistro=1", () => {
   assert.ok(reg.includes('router.replace("/registros")'));
 });
 
-check("22. alerta de Dias sem registro permanece no Resumo", () => {
+check("22. 4F: 'Dia sem registro' permanece no Resumo (pendências de apuração)", () => {
   const r = srcOf("src/app/(app)/resumo/page.tsx");
-  assert.ok(r.includes("Dias sem registro: {detailStats.missingRecords}"));
-  assert.ok(r.includes("detailStats.missingRecords"));
-  assert.ok(!r.includes('label="Dias sem registro"'));
+  // 4F (SUPERADO — expectativa atualizada com justificativa): a faixa legada
+  // deu lugar ao BLOCO 5 com o classificador canônico:
+  assert.ok(r.includes('"Dia sem registro"'), "categoria presente");
+  assert.ok(r.includes("pend.semRegistro"), "fonte canônica (attentionNowSummary)");
 });
 
-check("23. /resumo possui CTA Ver dias sem registro quando count > 0", () => {
+check("23. 4F: pendência sem registro tem CTA para Registros (filtros 4D.5)", () => {
   const r = srcOf("src/app/(app)/resumo/page.tsx");
-  assert.ok(r.includes("detailStats.missingRecords > 0"));
-  assert.ok(r.includes("Ver dias sem registro"));
-  assert.ok(r.includes("Existem dias de expediente sem registro ou justificativa."));
+  // 4F (SUPERADO — expectativa atualizada com justificativa): o CTA do BLOCO 5
+  // é "Revisar em Registros" com situacao=sem-registro&escopo=ciclo[&data=]:
+  assert.ok(r.includes('hrefBase: "/registros?situacao=sem-registro&escopo=ciclo"'));
+  assert.ok(r.includes("Revisar em Registros"));
 });
 
-check("24. CTA do Resumo abre /registros?semRegistro=1", () => {
+check("24. 4F: CTA do Resumo para sem registro usa o filtro validado 4D.5", () => {
   const r = srcOf("src/app/(app)/resumo/page.tsx");
-  assert.ok(r.includes('href="/registros?semRegistro=1"'));
+  // 4F (SUPERADO — expectativa atualizada com justificativa): o filtro legado
+  // ?semRegistro=1 deu lugar a situacao=sem-registro&escopo=ciclo[&data=]:
+  assert.ok(r.includes('hrefBase: "/registros?situacao=sem-registro&escopo=ciclo"'));
 });
 
 check("25. filtros pendentes e semRegistro não permanecem ativos juntos", () => {
@@ -247,8 +251,11 @@ check("25. filtros pendentes e semRegistro não permanecem ativos juntos", () =>
   assert.ok(reg.includes("if (wantPending) router.replace(\"/registros\")"));
   assert.ok(reg.includes("if (wantMissing) router.replace(\"/registros\")"));
   const r = srcOf("src/app/(app)/resumo/page.tsx");
-  assert.ok(r.includes('href="/registros?pendentes=1"'));
-  assert.ok(r.includes('href="/registros?semRegistro=1"'));
+  // 4F (SUPERADO — expectativa atualizada com justificativa): os filtros
+  // legados ?pendentes=1/?semRegistro=1 saíram; BLOCO 5 usa os CTAs 4D.5:
+  assert.ok(r.includes('hrefBase: "/registros?situacao=sem-registro&escopo=ciclo"'));
+  assert.ok(r.includes('hrefBase: "/registros?situacao=registro-inconsistente&escopo=ciclo"'));
+  assert.ok(r.includes('hrefBase: "/registros?situacao=registro-incompleto&escopo=ciclo"'));
 });
 
 check("26. card Sem registro usa aviso âmbar (não vermelho) e ações existentes", () => {

@@ -217,7 +217,9 @@ check("TESTE 05 DE 10 — [10+] gerado: factual, fora da VG (4D) e intacto no Re
   });
   assert.equal(view.cards.specialGeneratedMinutes, factual, "[10+] gerado no período = soma factual dos excessos");
   const resumo4v = src("src/app/(app)/resumo/page.tsx");
-  assert.ok(resumo4v.includes('[10+] gerado no período'), "Resumo mantém o indicador factual");
+  // 4F (SUPERADO — expectativa atualizada com justificativa): o indicador
+  // factual do período vive no bloco "[10+] neste período":
+  assert.ok(resumo4v.includes("Gerado no período"), "Resumo mantém o indicador factual");
 });
 
 check("TESTE 06 DE 10 — Dias recentes presentes, classificação 3H intacta", () => {
@@ -301,7 +303,9 @@ check("TESTE 08 DE 10 — Gráfico detalhado sai da Visão Geral; componente per
   assert.ok(exists("src/components/stacked-period-chart.tsx"), "componente do gráfico preservado");
   const resumo = src("src/app/(app)/resumo/page.tsx");
   assert.ok(resumo.includes("StackedPeriodChart"), "Resumo segue renderizando o gráfico");
-  assert.ok(resumo.includes('title="Barras empilhadas do período"'), "card do gráfico intacto no Resumo");
+  // 4F (SUPERADO — expectativa atualizada com justificativa): o gráfico vive
+  // na seção "Como o período se formou":
+  assert.ok(resumo.includes("Como o período se formou"), "seção de formação intacta no Resumo");
 });
 
 check("TESTE 09 DE 10 — Responsividade: composição compacta mobile, sem overflow horizontal", () => {
