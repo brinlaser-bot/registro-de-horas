@@ -189,7 +189,8 @@ check("TESTE 10 DE 14 — CTA de planejamento: foco no destino correto", () => {
 check("TESTE 11 DE 14 — Com filtro específico ativo: faixas globais ocultas; só o contexto", () => {
   const page = reg();
   assert.ok(
-    page.includes("{!pendingOnly && !missingOnly && !planoOnly && !situationActive && ("),
+    // 4G.1 (SUPERADO): gate ganhou !historicalPeriodView (faixas globais só no período atual).
+    page.includes("{!historicalPeriodView && !pendingOnly && !missingOnly && !planoOnly && !situationActive && ("),
     "faixas globais só no modo normal (sem filtro)",
   );
   // Contextos de filtro ativo preservados (categoria + quantidade + botão):

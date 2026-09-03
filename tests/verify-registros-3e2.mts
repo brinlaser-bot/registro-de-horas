@@ -138,8 +138,12 @@ check("H. 'Adicionar batida' abre o MESMO modal existente (CorrectPunchesModal)"
  * o gate é apenas estrutural — a ação é preservada.
  */
 const addBtnSegment = (() => {
+  // 4G.1 (SUPERADO — expectativa atualizada com justificativa): o bloco de
+  // adição ganhou a condição !ro (consolidado = somente leitura; em card
+  // consolidado NENHUM controle mutável é oferecido — os guards do motor
+  // continuam sendo a defesa real).
   const start = dayCard.indexOf(
-    "{!missingExpected && !historicalEmpty && !incompletePast && !inconsistent && (",
+    "{!ro && !missingExpected && !historicalEmpty && !incompletePast && !inconsistent && (",
   );
   const btn = dayCard.indexOf("Adicionar batida", start);
   assert.ok(start > 0 && btn > start, "bloco do card com registros não encontrado");
@@ -388,7 +392,8 @@ check("U. seed 4.0 cobre o roteiro manual (27/08, 24/08, 26/08, 28/08, banco 130
 
 /** Condição do bloco de ações de adição do card (Adicionar batida / Registrar intervalo). */
 const addGate = (() => {
-  const start = dayCard.indexOf("{!missingExpected && !historicalEmpty &&");
+  // 4G.1 (SUPERADO): o gate do bloco de adição ganhou a condição !ro antes.
+  const start = dayCard.indexOf("{!ro && !missingExpected && !historicalEmpty &&");
   assert.ok(start > 0, "bloco de ações de adição do card não encontrado");
   return dayCard.slice(start, start + 110);
 })();

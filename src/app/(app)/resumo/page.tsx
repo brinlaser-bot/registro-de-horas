@@ -7,6 +7,8 @@ import { actions, settingsOf, useAppData, useIsClient } from "@/lib/store";
 import { formatMinutes, todayString, weekdayShort } from "@/lib/time";
 import {
   getNextPointPeriod,
+  PERIOD_CONTEXT_LABEL,
+  pointPeriodContext,
   getPointPeriod,
   getPreviousPointPeriod,
   periodLabel,
@@ -40,7 +42,7 @@ function fmtSigned(v: number): string {
   return `${v > 0 ? "+" : ""}${formatMinutes(v)}`;
 }
 
-/** 4G — dd/mm/aaaa hh:mm para a fotografia consolidada. */
+/** 4G — dd/mm/aaaa hh:mm para a data de consolidação. */
 function formatDateTimeBR(ts: number): string {
   const d = new Date(ts);
   const dd = String(d.getDate()).padStart(2, "0");
@@ -64,6 +66,8 @@ export default function ResumoPage() {
   const [reopenNote, setReopenNote] = useState("");
   const [histOpen, setHistOpen] = useState(false);
   const viewingCurrentPeriod = samePointPeriod(period, currentPeriod);
+  // 4G.1 — CONTEXTO do período exibido (informação; derivação única em periods.ts)
+  const contextoPeriodo = pointPeriodContext(period, currentPeriod);
 
   // ETAPA 3F — derivação ÚNICA do Resumo (fatos + 2A + 3A + 3B + 3C):
   // cards, composição, projeção e linhas do detalhamento.
@@ -259,12 +263,9 @@ export default function ResumoPage() {
             shortLabel={`${period.from.slice(8)}/${period.from.slice(5, 7)} → ${period.to.slice(8)}/${period.to.slice(5, 7)}`}
             onPrev={() => setPeriod(getPreviousPointPeriod(period))}
             onNext={() => setPeriod(getNextPointPeriod(period))}
+            contextLabel={PERIOD_CONTEXT_LABEL[contextoPeriodo]}
+            onBackToCurrent={viewingCurrentPeriod ? undefined : () => setPeriod(currentPeriod)}
           />
-          {!viewingCurrentPeriod && (
-            <Button variant="secondary" size="sm" onClick={() => setPeriod(currentPeriod)}>
-              Período atual
-            </Button>
-          )}
           {/* Status derivado — nunca um fechamento manual. */}
           <Badge
             tone={
@@ -282,6 +283,23 @@ export default function ResumoPage() {
           <Button variant="primary" size="md" className="w-full sm:w-auto" onClick={() => setConsolidarOpen(true)}>
             Consolidar período
           </Button>
+        )}
+        {/* 4G.1 — RECONSOLIDAÇÃO: reaberto + 0 pendências + histórico anterior ⇒
+            nova revisão (nunca sobrescreve a anterior). Mesmo modal de confirmação. */}
+        {estadoPeriodo === "reaberto-para-ajustes" && pend.total === 0 && (
+          <Button variant="primary" size="md" className="w-full sm:w-auto" onClick={() => setConsolidarOpen(true)}>
+            Consolidar novamente
+          </Button>
+        )}
+        {estadoPeriodo === "reaberto-para-ajustes" && pend.total > 0 && (
+          <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-amber-300 bg-amber-50 px-4 py-2.5">
+            <p className="min-w-0 flex-1 text-sm font-bold text-amber-900">
+              Resolva as pendências antes de consolidar novamente este período.
+            </p>
+            <Link href="/registros?pendentes=1">
+              <Button size="sm" variant="warning">Revisar em Registros</Button>
+            </Link>
+          </div>
         )}
         {estadoPeriodo === "encerrado-com-pendencias" && (
           <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-amber-300 bg-amber-50 px-4 py-2.5">
@@ -305,7 +323,7 @@ export default function ResumoPage() {
           icon={<Wallet size={16} />}
         />
         {consolidacaoAtiva ? (
-          /* 4G — consolidado: a fotografia substitui a projeção viva
+          /* 4G — consolidado: o resultado salvo substitui a projeção viva
               (factual ≠ consolidado, SEMPRE explícito). */
           <StatCard
             label="Resultado consolidado no ponto"
@@ -369,8 +387,18 @@ export default function ResumoPage() {
         </div>
       )}
 
-      {/* ── 4G — HISTÓRICO DE CONSOLIDAÇÕES (recolhível; só se existir) ── */}
-      {revisoesDoPeriodo.length > 0 && histOpen && (
+      {/* ── 4G.1 — HISTÓRICO sempre acessível quando houver QUALQUER revisão
+          (Consolidado · Reaberto para ajustes · estados futuros): a revisão
+          NÃO pode ficar invisível só porque não existe uma ACTIVE. ── */}
+      {revisoesDoPeriodo.length > 0 && !consolidacaoAtiva && !histOpen && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2.5">
+          <p className="text-sm font-bold text-slate-700">Histórico de consolidações</p>
+          <Button variant="secondary" size="sm" onClick={() => setHistOpen(true)}>
+            Ver histórico
+          </Button>
+        </div>
+      )}
+      {revisoesDoPeriodo.length > 0 && histOpen &&(
         <Card title="Histórico de consolidações" subtitle={`Revisões do período ${periodLabel(period)}`}>
           <ul className="space-y-2">
             {revisoesDoPeriodo.map((c) => (
@@ -563,7 +591,7 @@ export default function ResumoPage() {
         </Card>
       )}
 
-      {/* ── 4G — CONFIRMAÇÃO DA CONSOLIDAÇÃO (fotografia exata) ── */}
+      {/* ── 4G — CONFIRMAÇÃO DA CONSOLIDAÇÃO (dados exatos) ── */}
       <Modal
         open={consolidarOpen}
         onClose={() => setConsolidarOpen(false)}
@@ -578,7 +606,7 @@ export default function ResumoPage() {
                 const r = actions.consolidatePeriod({ periodStart: period.from, periodEnd: period.to });
                 if (r.ok) {
                   setConsolidarOpen(false);
-                  toast.show("Período consolidado — fotografia salva no histórico.");
+                  toast.show("Período consolidado e registrado no histórico.");
                 } else {
                   setConsolidarOpen(false);
                   toast.show(r.error ?? "Não foi possível consolidar o período.");
@@ -591,7 +619,7 @@ export default function ResumoPage() {
         }
       >
         <div className="space-y-2 text-sm text-slate-700">
-          <p className="font-bold text-slate-800">A fotografia exata que será salva:</p>
+          <p className="font-bold text-slate-800">Confira os dados antes de consolidar:</p>
           <dl className="grid grid-cols-2 gap-2 rounded-xl border border-slate-200 bg-white p-3 text-xs">
             <div><dt className="font-semibold text-slate-400">Saldo factual</dt><dd className="text-base font-extrabold tabular-nums">{fmtSigned(cards.regularBalanceMinutes)}</dd></div>
             <div><dt className="font-semibold text-slate-400">Resultado no ponto</dt><dd className="text-base font-extrabold tabular-nums text-indigo-600">{fmtSigned(projection.projectedBalanceMinutes)}</dd></div>
@@ -602,8 +630,8 @@ export default function ResumoPage() {
             <div className="col-span-2"><dt className="font-semibold text-slate-400">Calendário relevante</dt><dd className="font-medium">{calendario.realized.length} realizado(s) · {calendario.future.length} futuro(s) — efeitos já contidos no saldo factual dos dias.</dd></div>
           </dl>
           <p className="text-xs font-medium text-slate-600">
-            O saldo factual continuará preservando a jornada real. A consolidação salva o resultado considerado no ponto
-            e protege os dados que formaram esse fechamento.
+            Seu saldo factual continuará mostrando o que realmente aconteceu na jornada. Ao consolidar, o resultado no
+            ponto será registrado e os dados deste período ficarão protegidos contra alterações.
           </p>
         </div>
       </Modal>

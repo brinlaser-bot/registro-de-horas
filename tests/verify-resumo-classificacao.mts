@@ -150,10 +150,11 @@ check("9. períodos históricos antes do início não ficam cheios de Abaixo da 
   assert.ok(weekdays.every((d) => d.expectedMinutes === 480));
 });
 
-check("10. botão Período atual não aparece no período vigente", () => {
+check("10. botão de retorno não aparece no período vigente (4G.1: ação inequívoca)", () => {
+  // 4G.1 (SUPERADO): ação "Ir para o período atual" somem quando viewingCurrentPeriod.
   const src = srcOf("src/app/(app)/resumo/page.tsx");
-  assert.ok(src.includes("{!viewingCurrentPeriod && ("));
-  assert.ok(src.includes("Período atual"));
+  assert.ok(src.includes("onBackToCurrent={viewingCurrentPeriod ? undefined : () => setPeriod(currentPeriod)}"));
+  assert.ok(src.includes("PERIOD_CONTEXT_LABEL[contextoPeriodo]"));
   assert.ok(!src.includes("Voltar para o período atual"));
   assert.equal(samePointPeriod(CURRENT, getPointPeriod(TODAY)), true);
 });
@@ -173,9 +174,11 @@ check("12. botão aparece ao navegar para período posterior", () => {
   assert.ok(src.includes("getNextPointPeriod(period)"));
 });
 
-check("13. clicar retorna ao período vigente", () => {
+check("13. clicar retorna ao período vigente (4G.1: via onBackToCurrent do navegador)", () => {
+  // 4G.1 (SUPERADO): a ação migrou para onBackToCurrent do PeriodNavigator —
+  // mesmo destino (setPeriod(currentPeriod)), agora como botão inequívoco.
   const src = srcOf("src/app/(app)/resumo/page.tsx");
-  assert.ok(src.includes("onClick={() => setPeriod(currentPeriod)}"));
+  assert.ok(src.includes("onBackToCurrent={viewingCurrentPeriod ? undefined : () => setPeriod(currentPeriod)}"));
   assert.ok(src.includes("const currentPeriod = getPointPeriod(todayStr)"));
   const jumped = getPreviousPointPeriod(getPreviousPointPeriod(CURRENT));
   assert.equal(samePointPeriod(jumped, CURRENT), false);

@@ -79,7 +79,13 @@ check("TESTE 03 DE 12 — Filtro sem-registro ativo: faixa legada de planejament
   const page = reg();
   assert.ok(!page.includes("pendingPlansCount"), "sem faixa legada em NENHUM estado");
   // No filtro, as faixas globais (incl. a violeta) ficam ocultas:
-  assert.ok(page.includes("{!pendingOnly && !missingOnly && !planoOnly && !situationActive && ("), "gate das faixas globais");
+  // 4G.1 (SUPERADO — expectativa atualizada com justificativa): o gate ganhou
+  // a condição de contexto histórico (!historicalPeriodView) — as faixas
+  // globais (escopo ciclo ATUAL) não são exibidas quando Registros mostra um
+  // período histórico distinto do atual; no período atual o comportamento é
+  // exatamente o mesmo da 4D.5.2.
+  assert.ok(page.includes("{!historicalPeriodView && !pendingOnly && !missingOnly && !planoOnly && !situationActive && ("), "gate das faixas globais (+ contexto histórico 4G.1)");
+  assert.ok(page.includes('const historicalPeriodView = !wantCycleScope && !query && contextoPeriodo !== "current";'), "histórico = período ≠ atual");
 });
 
 check("TESTE 04 DE 12 — Filtro plano-10 ativo: somente contexto violeta + DayCard", () => {

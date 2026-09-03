@@ -137,8 +137,11 @@ check("TESTE 01 DE 14 — ENTRADA SOMENTE FUTURA", () => {
   const card = src("src/components/day-card.tsx");
   // 4D.3: além de futuro e sem reserva, o card exige BASE EFETIVA positiva
   // (companyDayContext.effectiveExpected via planningCapacityMinutes):
-  assert.ok(card.includes("futureDay && onPlanSpecial && (planningCapacityMinutes === undefined || planningCapacityMinutes > 0) && !(specialPlans && specialPlans.length > 0)"),
-    "card exibe 'Planejar uso de [10+]' só em dia futuro, sem reserva e com base efetiva");
+  // 4G.1 (SUPERADO — expectativa atualizada com justificativa): além de futuro/
+  // sem reserva/base positiva, o card exige !ro — data de período consolidado
+  // NUNCA oferece planejamento (a regra destinationDate > hoje segue soberana).
+  assert.ok(card.includes("futureDay && !ro && onPlanSpecial && (planningCapacityMinutes === undefined || planningCapacityMinutes > 0) && !(specialPlans && specialPlans.length > 0)"),
+    "card exibe 'Planejar uso de [10+]' só em dia futuro, sem reserva, com base efetiva e fora de consolidado");
   assert.ok(card.includes("Planejar uso de [10+]"), "rótulo da ação");
   // Funcional: o store continua o gate soberano (hoje/passado rejeitados).
   setState([...gen30("2026-08-28")]);
@@ -483,7 +486,8 @@ check("TESTE 14 DE 14 — MOBILE / SEMÂNTICA", () => {
   assert.ok(!central.includes("createSpecialExcessPlan") && !central.includes("cancelSpecialExcessPlan") && !central.includes("setSpecialExcessPlanStatus"), "Central sem mutação de planos");
   // Compactação 3F.1 preservada: a ação nova fica dentro do card expandido
   // (não cria cards enormes para todos os futuros).
-  assert.ok(card.includes("futureDay && onPlanSpecial"), "ação discreta condicionada");
+  // 4G.1 (SUPERADO): a condição ganhou !ro — consolidado nunca planeja.
+  assert.ok(card.includes("futureDay && !ro && onPlanSpecial"), "ação discreta condicionada");
 });
 
 console.log(`\n${passed}/14 verificações da Etapa 4B passaram.`);

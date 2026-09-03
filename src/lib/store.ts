@@ -1893,6 +1893,13 @@ export const actions = {
         result = { ok: false, code: "invalid", error: "Data inválida." };
         return d;
       }
+      // 4G.1 — GUARD: o motivo/justificativa do excedente é METADADO DA ORIGEM
+      // [10+] daquele dia; alterá-lo em data de período consolidado mudaria
+      // informação histórica que formou o fechamento. Mesmo guard canônico.
+      if (consolidationLockForDate(d.periodConsolidations, p.date)) {
+        result = { ok: false, code: "consolidated", error: PERIOD_CONSOLIDATED_MSG };
+        return d;
+      }
       const custom = (p.customReason ?? "").trim();
       if (p.reason === "outro" && !custom) {
         result = { ok: false, code: "invalid", error: "Informe o motivo." };

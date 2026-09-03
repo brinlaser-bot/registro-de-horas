@@ -158,10 +158,14 @@ check("R3. Folga permanece Folga", () => {
   assert.equal(resumoEventKind(d), "Folga");
 });
 
-check("R4. botão Período atual permanece", () => {
+check("R4. retorno ao período atual permanece (4G.1: botão inequívoco + contexto)", () => {
+  // 4G.1 (SUPERADO — expectativa atualizada com justificativa): o botão ghost
+  // "Período atual" virou AÇÃO explícita "Ir para o período atual" no
+  // PeriodNavigator (só fora do atual) + badge INFORMATIVO de contexto.
   const page = srcOf("src/app/(app)/resumo/page.tsx");
-  assert.ok(page.includes("{!viewingCurrentPeriod && ("));
-  assert.ok(page.includes("Período atual"));
+  assert.ok(page.includes("onBackToCurrent={viewingCurrentPeriod ? undefined : () => setPeriod(currentPeriod)}"),
+    "ação de retorno só fora do período atual");
+  assert.ok(page.includes("contextLabel={PERIOD_CONTEXT_LABEL[contextoPeriodo]}"), "contexto informativo");
 });
 
 check("R5. 4F: situações da derivação como badge; saldos com cores distintas", () => {

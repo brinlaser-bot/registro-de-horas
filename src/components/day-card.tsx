@@ -10,6 +10,7 @@ import {
   ChevronUp,
   Handshake,
   HeartPulse,
+  Lock,
   Pencil,
   Plus,
   Timer,
@@ -175,6 +176,13 @@ interface Props {
   /** 4D.5: estado inicial EXPANDIDO — foco vindo de "Atenção agora"
    *  (CTA com exatamente 1 item abre Registros na data do problema). */
   initiallyExpanded?: boolean;
+  /** 4G.1 — a data pertence a período com consolidação ACTIVE (derivado do
+   *  pai via consolidationLockForDate; NENHUM estado visual persistido).
+   *  CONSOLIDADO = SOMENTE LEITURA: dados visíveis, expandir/recolher livre,
+   *  NENHUM controle mutável (batidas, intervalo, falta, correção, [10+],
+   *  reserva) e NENHUM modal mutável a partir do card. Os guards do motor
+   *  continuam sendo a defesa real — a UI é camada de clareza. */
+  consolidated?: boolean;
 }
 
 export function DayCard({
@@ -209,6 +217,7 @@ export function DayCard({
   calendarSemantics,
   onResolvePlan,
   initiallyExpanded,
+  consolidated = false,
 }: Props) {
   const specialActions = useSpecialPunchActions();
   // Regra: todos os dias iniciam RECOLHIDOS — o usuário expande apenas o dia
@@ -228,6 +237,8 @@ export function DayCard({
   // batida" de dia estruturalmente válido). Mesmo modal, mesma lógica.
   const [punchModal, setPunchModal] = useState<"correct" | "add" | null>(null);
   const [showInterval, setShowInterval] = useState(false);
+  /** 4G.1 — somente leitura: período com consolidação ACTIVE cobre esta data. */
+  const ro = consolidated;
   const [intOut, setIntOut] = useState("");
   const [intIn, setIntIn] = useState("");
 
@@ -308,8 +319,8 @@ export function DayCard({
         missingExpected
           ? "border-amber-300 bg-amber-50/40 shadow-sm"
           : compact
-            ? "border-slate-200/80 bg-white shadow-none"
-            : "border-slate-200 bg-white shadow-sm"
+            ? `border-slate-200/80 bg-white shadow-none${ro ? " border-violet-200" : ""}`
+            : `border-slate-200 bg-white shadow-sm${ro ? " border-violet-300" : ""}`
       }`}
     >
       {/* Cabeçalho */}
@@ -394,6 +405,15 @@ export function DayCard({
                 </span>
               </Badge>
             )}
+            {/* 4G.1 — camada visual de consolidação: DERIVADA da consolidação
+                ACTIVE (sem estado persistido); some automaticamente ao reabrir.
+                NÃO substitui a situação semântica — soma um selo discreto. */}
+            {ro && (
+              <Badge tone="violet" className="shrink-0 gap-1 py-1">
+                <Lock size={12} className="shrink-0" aria-hidden />
+                <span>Consolidado</span>
+              </Badge>
+            )}
             {d.open && isToday && (
               <span className="inline-flex items-center gap-1 text-[11px] font-bold text-indigo-500"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-indigo-500" /> em andamento</span>
             )}
@@ -445,25 +465,29 @@ export function DayCard({
                 <div className="mb-3 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2.5 text-xs font-medium text-amber-800">
                   <p className="font-extrabold uppercase tracking-wide">Registro incompleto</p>
                   <p className="mt-0.5">Há uma entrada sem a saída correspondente. Corrija as batidas para finalizar o registro.</p>
-                  <Button size="sm" className="mt-2" onClick={() => setPunchModal("correct")}>
-                    <Wrench size={13} /> Corrigir registros
-                  </Button>
+                  {!ro && (
+                    <Button size="sm" className="mt-2" onClick={() => setPunchModal("correct")}>
+                      <Wrench size={13} /> Corrigir registros
+                    </Button>
+                  )}
                 </div>
               )}
               {inconsistent && (
                 <div className="mb-3 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2.5 text-xs font-medium text-amber-800">
                   <p className="font-extrabold uppercase tracking-wide">Registro inconsistente</p>
                   <p className="mt-0.5">A sequência de registros deste dia não está correta. Corrija as batidas para finalizar o registro.</p>
-                  <Button size="sm" className="mt-2" onClick={() => setPunchModal("correct")}>
-                    <Wrench size={13} /> Corrigir registros
-                  </Button>
+                  {!ro && (
+                    <Button size="sm" className="mt-2" onClick={() => setPunchModal("correct")}>
+                      <Wrench size={13} /> Corrigir registros
+                    </Button>
+                  )}
                 </div>
               )}
             </>
           ) : (
             <>
           {/* Assistente de saída (somente para o dia em andamento; nunca no futuro) */}
-          {d.open && isToday && !punchPending && (
+          {d.open && isToday && !punchPending && !ro && (
             <div className="mb-4">
               <SmartExit
                 date={d.date}
@@ -491,12 +515,12 @@ export function DayCard({
               <p className="font-extrabold uppercase tracking-wide">⚠ Sem registro</p>
               <p className="mt-0.5">Este dia tinha jornada prevista, mas não possui registros ou justificativa.</p>
               <div className="mt-2 flex flex-wrap gap-2">
-                {onFillDayRecords && (
+                {!ro && onFillDayRecords && (
                   <Button size="sm" onClick={onFillDayRecords}>
                     Preencher registros do dia
                   </Button>
                 )}
-                {onRegisterFalta && (
+                {!ro && onRegisterFalta && (
                   <Button size="sm" variant="secondary" onClick={onRegisterFalta}>
                     <Ban size={13} /> Registrar falta
                   </Button>
@@ -507,7 +531,7 @@ export function DayCard({
           {historicalEmpty && !missingExpected && (
             <div className="mb-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs font-medium text-slate-600">
               <p>Dia anterior ao início do controle. Você pode lançar a jornada historicamente.</p>
-              {onFillDayRecords && (
+              {!ro && onFillDayRecords && (
                 <Button size="sm" className="mt-2" onClick={onFillDayRecords}>
                   Preencher registros do dia
                 </Button>
@@ -592,21 +616,23 @@ export function DayCard({
                   <span>· Nenhuma batida registrada — déficit gerado pela jornada do dia.</span>
                 ) : null}
               </div>
-              <div className="mt-2">
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="!text-rose-600 hover:!bg-rose-100"
-                  disabled={busyFalta}
-                  onClick={() => {
-                    if (busyFalta) return;
-                    setBusyFalta(true);
-                    void Promise.resolve(onRemoveFalta?.(falta.id)).finally(() => setBusyFalta(false));
-                  }}
-                >
-                  <Trash2 size={13} /> {falta.status === "prevista" ? "Cancelar falta" : "Excluir falta"}
-                </Button>
-              </div>
+              {!ro && (
+                <div className="mt-2">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="!text-rose-600 hover:!bg-rose-100"
+                    disabled={busyFalta}
+                    onClick={() => {
+                      if (busyFalta) return;
+                      setBusyFalta(true);
+                      void Promise.resolve(onRemoveFalta?.(falta.id)).finally(() => setBusyFalta(false));
+                    }}
+                  >
+                    <Trash2 size={13} /> {falta.status === "prevista" ? "Cancelar falta" : "Excluir falta"}
+                  </Button>
+                </div>
+              )}
             </div>
           )}
 
@@ -670,7 +696,7 @@ export function DayCard({
             <div className="mt-3 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2.5">
               <SpecialExcessUseSummary
                 view={specialExcess}
-                onOpen={specialExcess.canComplete && onCompleteJornada ? () => onCompleteJornada(d.date) : undefined}
+                onOpen={!ro && specialExcess.canComplete && onCompleteJornada ? () => onCompleteJornada(d.date) : undefined}
               />
             </div>
           )}
@@ -696,8 +722,8 @@ export function DayCard({
                 // 4C.1B (§15): BANCO [10+] disponível da MESMA visão canônica —
                 // com 0, o card antecipa a verdade e não oferece "Planejar mais".
                 bankAvailableMinutes={specialExcess ? specialExcess.bankAvailableMinutes : null}
-                onResolvePlan={onResolvePlan}
-                onPlan={onPlanSpecial}
+                onResolvePlan={ro ? undefined : onResolvePlan}
+                onPlan={ro ? undefined : onPlanSpecial}
               />
             </div>
           )}
@@ -707,7 +733,7 @@ export function DayCard({
               integral, férias/afastamento integral, fim de semana comum e
               COMPENSAR com base 0 não convidam a reservar — a regra
               destinationDate > hoje continua soberana no store 4A). */}
-          {futureDay && onPlanSpecial && (planningCapacityMinutes === undefined || planningCapacityMinutes > 0) && !(specialPlans && specialPlans.length > 0) && (
+          {futureDay && !ro && onPlanSpecial && (planningCapacityMinutes === undefined || planningCapacityMinutes > 0) && !(specialPlans && specialPlans.length > 0) && (
             <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2.5">
               <Badge tone="violet" className="shrink-0 py-1">
                 <CalendarClock size={13} aria-hidden /> [10+]
@@ -741,7 +767,7 @@ export function DayCard({
                   <span className="text-amber-600">
                     · {d.derivedBreak ? "intervalo automático" : "intervalo previsto"} {formatMinutes(breakChip.minutes)}
                   </span>
-                  {!futureDay && !abonoDay && (
+                  {!futureDay && !abonoDay && !ro && (
                     <button
                       type="button"
                       className="rounded-md p-0.5 text-amber-700 hover:bg-amber-100 cursor-pointer"
@@ -790,14 +816,16 @@ export function DayCard({
                   {(d.plannedEntries ?? []).some((p) => p.id === e.id) && (
                     <Badge tone="sky" className="!px-1.5 !py-0 text-[9px]">Prevista</Badge>
                   )}
-                  <div className="ml-auto flex shrink-0 items-center opacity-100 sm:opacity-0 sm:transition-opacity sm:group-hover:opacity-100">
-                    <button onClick={() => startEdit(e)} className="rounded-md p-1 text-slate-400 hover:bg-white hover:text-slate-700 cursor-pointer sm:p-1.5" aria-label="Editar">
-                      <Pencil size={13} />
-                    </button>
-                    <button onClick={() => remove(e)} className="rounded-md p-1 text-slate-400 hover:bg-rose-50 hover:text-rose-500 cursor-pointer sm:p-1.5" aria-label="Excluir">
-                      <Trash2 size={13} />
-                    </button>
-                  </div>
+                  {!ro && (
+                    <div className="ml-auto flex shrink-0 items-center opacity-100 sm:opacity-0 sm:transition-opacity sm:group-hover:opacity-100">
+                      <button onClick={() => startEdit(e)} className="rounded-md p-1 text-slate-400 hover:bg-white hover:text-slate-700 cursor-pointer sm:p-1.5" aria-label="Editar">
+                        <Pencil size={13} />
+                      </button>
+                      <button onClick={() => remove(e)} className="rounded-md p-1 text-slate-400 hover:bg-rose-50 hover:text-rose-500 cursor-pointer sm:p-1.5" aria-label="Excluir">
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  )}
                 </div>
               ),
             )}
@@ -812,7 +840,7 @@ export function DayCard({
               "Adicionar batida" abre o MESMO modal de sequência do dia
               (CorrectPunchesModal) — batida única, com tipo inferido pela
               sequência e observação opcional. Nenhum formulário inline. */}
-          {!missingExpected && !historicalEmpty && !incompletePast && !inconsistent && (
+          {!ro && !missingExpected && !historicalEmpty && !incompletePast && !inconsistent && (
           <div className="mt-3 flex min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
             {!futureDay && !abonoDay && (
               <button
@@ -902,7 +930,7 @@ export function DayCard({
           if (id != null) void onDeleteEntry(id);
         }}
       />
-      {punchModal && (
+      {punchModal && !ro && (
         <CorrectPunchesModal
           open
           mode={punchModal}

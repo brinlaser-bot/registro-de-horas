@@ -31,7 +31,9 @@ import {
   getNextPointPeriod,
   getPointPeriod,
   getPreviousPointPeriod,
+  PERIOD_CONTEXT_LABEL,
   periodLabel,
+  pointPeriodContext,
   type PointPeriod,
 } from "@/lib/periods";
 import { buildDebtDays, checkSourceOverflow } from "@/lib/debt";
@@ -63,7 +65,7 @@ import { DaySituationChips, DaySituationFilter } from "@/components/day-situatio
 import { Button, Card, EmptyState, Skeleton } from "@/components/ui";
 import { useToast } from "@/components/toast";
 import { PeriodNavigator } from "@/components/period-navigator";
-import { consolidationLockCoveringRange } from "@/lib/period-consolidation";
+import { consolidationLockCoveringRange, consolidationLockForDate } from "@/lib/period-consolidation";
 
 interface RangeSummary {
   cycle: string;
@@ -143,6 +145,15 @@ function RegistrosBody() {
   // (no escopo ciclo/consulta a faixa é ampla demais para o banner; o lock real é por motor.)
   const lockBound =
     !query && !wantCycleScope ? consolidationLockCoveringRange(periodConsolidations, period.from, period.to) : null;
+  // 4G.1 — CONTEXTO do período exibido (informação; derivação única em periods.ts)
+  // e MODO HISTÓRICO (período do ponto ≠ período atual): as faixas globais de
+  // Atenção pertencem ao CICLO ATUAL — exibi-las numa consulta histórica
+  // contradiz o resumo do período exibido (ex.: "Sem registro 0" + faixa
+  // "Dia sem registro: 8" de outras datas). No período ATUAL nada muda.
+  const contextoPeriodo = pointPeriodContext(period, getPointPeriod(todayStr));
+  const historicalPeriodView = !wantCycleScope && !query && contextoPeriodo !== "current";
+  /** 4G.1 — o período exibido é o atual? (mesma derivação única do contexto) */
+  const samePointPeriodCurrent = contextoPeriodo === "current";
   const focusDateRaw = searchParams.get("data");
   const focusDate = focusDateRaw && /^\d{4}-\d{2}-\d{2}$/.test(focusDateRaw) ? focusDateRaw : null;
 
@@ -680,19 +691,13 @@ function RegistrosBody() {
               : `${period.from.slice(8)}/${period.from.slice(5, 7)} → ${period.to.slice(8)}/${period.to.slice(5, 7)}`}
             onPrev={() => { setQuery(null); setPeriod(getPreviousPointPeriod(period)); }}
             onNext={() => { setQuery(null); setPeriod(getNextPointPeriod(period)); }}
+            contextLabel={query || wantCycleScope ? undefined : PERIOD_CONTEXT_LABEL[contextoPeriodo]}
+            onBackToCurrent={
+              query || !samePointPeriodCurrent
+                ? () => { setQuery(null); setPeriod(getPointPeriod(todayStr)); }
+                : undefined
+            }
           />
-          {(query || periodLabel(period) !== periodLabel(getPointPeriod(todayStr))) && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                setQuery(null);
-                setPeriod(getPointPeriod(todayStr));
-              }}
-            >
-              Período atual
-            </Button>
-          )}
           {query && (
             <Button variant="ghost" size="sm" onClick={() => setQuery(null)}>
               <X size={13} /> Limpar consulta
@@ -840,7 +845,7 @@ function RegistrosBody() {
           Registros. Ocultas quando um filtro específico está ativo (Parte C)
           e somente com contagem > 0. CTA aplica o filtro na própria página:
           1 item ⇒ + foco na data (card expandido). */}
-      {!pendingOnly && !missingOnly && !planoOnly && !situationActive && (
+      {!historicalPeriodView && !pendingOnly && !missingOnly && !planoOnly && !situationActive && (
         <section aria-label="Atenção agora" className="space-y-2">
           {attention.inconsistente.length > 0 && (
             <div className="flex flex-col gap-2 rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
@@ -990,6 +995,7 @@ function RegistrosBody() {
                * com o foco ativo o usuário ainda recolhe/expande manualmente
                * (a key só muda de novo quando o foco sai). */
               key={focusDate === date ? `${date}-atencao` : date}
+              consolidated={consolidationLockForDate(periodConsolidations, date) !== null}
               result={displayDay}
               settings={settings}
               allComps={compensations}

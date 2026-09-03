@@ -101,6 +101,23 @@ export function samePointPeriod(a: PointPeriod, b: PointPeriod): boolean {
   return a.from === b.from && a.to === b.to;
 }
 
+/* ── 4G.1 — CONTEXTO DO PERÍODO EXIBIDO (informação, NÃO ação) ──
+ * Derivação única compartilhada por Registros e Resumo: nunca "Período
+ * anterior" — o usuário pode estar vários períodos para trás. */
+export type PointPeriodContext = "past" | "current" | "future";
+
+/** selected == current ⇒ "current" · selected < current ⇒ "past" · senão "future". */
+export function pointPeriodContext(period: PointPeriod, current: PointPeriod): PointPeriodContext {
+  if (samePointPeriod(period, current)) return "current";
+  return period.from < current.from ? "past" : "future";
+}
+
+export const PERIOD_CONTEXT_LABEL: Record<PointPeriodContext, string> = {
+  past: "Período passado",
+  current: "Período atual",
+  future: "Período futuro",
+};
+
 /** Todas as datas (YYYY-MM-DD) entre from e to, inclusive. */
 export function listDaysBetween(from: string, to: string): string[] {
   const days: string[] = [];
