@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { AlertTriangle, Ban, CalendarOff, ChevronLeft, ChevronRight, Clock3, FileWarning, Hourglass, Search, X } from "lucide-react";
@@ -191,9 +191,13 @@ function RegistrosBody() {
   }, [entries, absences, companyCalendars, settings, faltas, specialExcessUses, specialExcessPlans, user.controlStartDate, todayStr, range]);
 
   // Linha do tempo completa: UM card por data do intervalo, mesmo sem batidas.
+  // 4E.1 — ORDEM CRONOLÓGICA CRESCENTE na RENDERIZAÇÃO (21/08 → 20/09; ciclo
+  // 01/05 → 30/04; filtros herdam a ordem). Somente apresentação: os motores
+  // (saldos, situações, atenção, banco [10+]) não dependem da ordem — as
+  // somas são aditivas e as contagens são ordem-independentes.
   const days = useMemo(() => {
     return registrosTimelineDates(range)
-      .sort((a, b) => b.localeCompare(a))
+      .sort((a, b) => a.localeCompare(b))
       .map((date) => {
         const cctx = companyDayContext(date, entries, absences, companyCalendars, settings, date === todayStr ? nowMinutes : undefined);
         const baseView = companyDayBalanceView(cctx);
@@ -422,6 +426,34 @@ function RegistrosBody() {
     : situationActive
     ? days.filter((d) => dayMatchesSituations(d.situations, situationIds))
     : days;
+
+  /* 4E.1 — POSICIONAMENTO AUTOMÁTICO DO FOCO (complemento da 4D.5.2):
+   * com ?data=YYYY-MM-DD, após o card focado existir no DOM (expansão já
+   * garantida pelo remount com key), a viewport rola até ele compensando o
+   * header sticky (h-16). Sem setState derivado — efeito dedicado a scroll/
+   * navegação; sem ?data= NADA acontece. Sem hardcode de datas: funciona
+   * para qualquer link interno que use data= (Central, Visão Geral,
+   * Atenção agora). */
+  const listedCount = listedDays.length;
+  const lastFocusScrolled = useRef<string | null>(null);
+  useEffect(() => {
+    if (!focusDate || lastFocusScrolled.current === focusDate) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let tries = 0;
+    const attempt = () => {
+      const el = document.getElementById(`dia-card-${focusDate}`);
+      if (el) {
+        const HEADER_STICKY_OFFSET = 76; // h-16 (64px) + folga visual
+        const y = el.getBoundingClientRect().top + window.scrollY - HEADER_STICKY_OFFSET;
+        window.scrollTo({ top: Math.max(0, y), behavior: "smooth" });
+        lastFocusScrolled.current = focusDate;
+        return;
+      }
+      if (tries++ < 10) timer = setTimeout(attempt, 60);
+    };
+    timer = setTimeout(attempt, 60);
+    return () => clearTimeout(timer);
+  }, [focusDate, listedCount]);
 
   const writeSituacao = (ids: DaySituationId[]) => {
     const params = new URLSearchParams();
@@ -921,6 +953,7 @@ function RegistrosBody() {
               (fonte única attention-now), exibida no modo normal; com o filtro
               plano-10 ativo resta apenas o contexto violeta do filtro. */}          <div className={missingOnly || pendingOnly || planoOnly ? "space-y-4" : "space-y-2"}>
           {listedDays.map(({ date, balanceView, displayDay, absence, calendarLabel, falta, workedInAbonoMinutes, abonoParcial, missingExpected, historicalEmpty, compact, specialExcess, specialPlans, planningCapacityMinutes, calendarSemantics }) => (
+            <div key={date} id={`dia-card-${date}`}>
             <DayCard
               /* 4D.5.2 — a identidade muda quando o FOCO transiciona: navegando
                * client-side na MESMA página (muda ?data=), o card focado é
@@ -975,6 +1008,7 @@ function RegistrosBody() {
               // 4C: resolução individual do plano (modal "Usar planejamento").
               onResolvePlan={(planId) => setResolvePlanId(planId)}
             />
+            </div>
           ))}
           </div>
         </>

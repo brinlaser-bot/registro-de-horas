@@ -188,16 +188,20 @@ export default function CompensacoesPage() {
       {tab === "banco" && (
         <>
           {/* Quatro métricas — mesma fonte; DISPONÍVEL com prioridade visual. */}
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {/* 4E.1 — MOBILE: grid 2×2 (linha 1: Disponível | Gerado — indicador
+              de decisão + dimensão total; linha 2: Reservado | Utilizado —
+              consumo). DESKTOP (lg): inalterado, 4 cards em uma única linha. */}
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
             <StatCard
+              className="order-1 lg:order-1"
               label="Disponível [10+]"
               value={formatMinutes(bank.availableMinutes)}
               sub="gerado − reservado − utilizado"
               tone={bank.availableMinutes > 0 ? "indigo" : "slate"}
             />
-            <StatCard compact label="Reservado" value={formatMinutes(bank.reservedMinutes)} sub="reservas em aberto" tone={bank.reservedMinutes > 0 ? "amber" : "slate"} />
-            <StatCard compact label="Utilizado" value={formatMinutes(bank.usedMinutes)} sub="aplicado em jornadas" tone="emerald" />
-            <StatCard compact label="Gerado" value={formatMinutes(bank.generatedMinutes)} sub={`excedente acima de 10h · ciclo ${cicloAtivo}`} tone="slate" />
+            <StatCard compact className="order-3 lg:order-2" label="Reservado" value={formatMinutes(bank.reservedMinutes)} sub="reservas em aberto" tone={bank.reservedMinutes > 0 ? "amber" : "slate"} />
+            <StatCard compact className="order-4 lg:order-3" label="Utilizado" value={formatMinutes(bank.usedMinutes)} sub="aplicado em jornadas" tone="emerald" />
+            <StatCard compact className="order-2 lg:order-4" label="Gerado" value={formatMinutes(bank.generatedMinutes)} sub={`excedente acima de 10h · ciclo ${cicloAtivo}`} tone="slate" />
           </div>
 
           {/* Origens do [10+] */}
@@ -416,11 +420,23 @@ export default function CompensacoesPage() {
                           {formatDateShortBR(e.date)} — {e.descricao}
                           <Badge tone="slate">{tratamentoLabel(e.tratamento)}</Badge>
                         </p>
+                        <p className="mt-0.5 text-xs font-medium text-slate-500">
+                          Base referência <b className="text-slate-700">{formatMinutes(e.baseReferenciaMinutes)}</b> · Crédito calendário{" "}
+                          <b className="text-slate-700">{formatMinutes(e.creditoCalendarioMinutes)}</b> · Jornada a cumprir{" "}
+                          <b className="text-slate-700">{formatMinutes(e.jornadaACumprirMinutes)}</b>
+                        </p>
                         <p className="text-xs font-medium text-slate-500">
                           {e.tratamento === "ABONADO" && "Dia abonado — neutro (sem impacto)."}
                           {e.tratamento === "ABONADO_PARCIAL" && "Parcial: crédito do calendário + jornada regular a cumprir — sem impacto automático."}
-                          {e.tratamento === "COMPENSAR" && "Folga integral a compensar — impacto conhecido no futuro."}
-                          {e.impactoFuturoConhecidoMinutes !== null && (
+                          {/* 4E.1: a classificação vem do contexto canônico
+                              (jornadaParcial) — COMPENSAR parcial (ex.: Cinzas
+                              4h+4h) NUNCA é "folga integral" nem recebe impacto
+                              futuro automático; integral mantém o rótulo. */}
+                          {e.tratamento === "COMPENSAR" &&
+                            (e.jornadaParcial
+                              ? "Jornada parcial — sem impacto futuro automático."
+                              : "Folga integral a compensar — impacto conhecido no futuro.")}
+                          {e.impactoFuturoConhecidoMinutes !== null && !e.jornadaParcial && (
                             <span className="ml-1 font-bold text-amber-700">Impacto conhecido: {formatMinutes(e.impactoFuturoConhecidoMinutes)}</span>
                           )}
                         </p>

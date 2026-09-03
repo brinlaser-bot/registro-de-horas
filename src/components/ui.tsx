@@ -316,6 +316,7 @@ export function StatCard({
   icon,
   onClick,
   compact = false,
+  className,
 }: {
   label: string;
   value: ReactNode;
@@ -325,6 +326,8 @@ export function StatCard({
   onClick?: () => void;
   /** Menor padding vertical e gap interno — ícone e número permanecem iguais. */
   compact?: boolean;
+  /** Opt-in (4E.1): classes extras de grid/order — nada muda sem ela. */
+  className?: string;
 }) {
   const tones: Record<string, string> = {
     emerald: "text-emerald-600",
@@ -347,7 +350,7 @@ export function StatCard({
       onClick={onClick}
       className={`flex h-full flex-col justify-center rounded-2xl border border-slate-200 bg-white shadow-sm ${
         compact ? "px-3 py-2.5" : "p-4"
-      } ${onClick ? "cursor-pointer transition-shadow hover:shadow-md" : ""}`}
+      } ${onClick ? "cursor-pointer transition-shadow hover:shadow-md" : ""} ${className ?? ""}`}
     >
       <div className="flex items-start justify-between gap-2">
         <p

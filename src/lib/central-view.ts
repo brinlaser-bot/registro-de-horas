@@ -69,6 +69,10 @@ export interface CentralCalendarEventRow {
   baseReferenciaMinutes: number;
   creditoCalendarioMinutes: number;
   jornadaACumprirMinutes: number;
+  /** COMPENSAR com crédito de calendário + jornada menor que a base (ex.:
+   *  Cinzas 4h+4h) — JORNADA PARCIAL: nunca "folga integral" nem impacto
+   *  futuro automático. Derivado do contexto canônico (companyDayContext). */
+  jornadaParcial?: boolean;
   /** Só para eventos futuros/hoje-pendente que o forecast expõe (≤ 0). */
   impactoFuturoConhecidoMinutes: number | null;
   /** Só para eventos realizados: fato do dia. */
@@ -114,20 +118,35 @@ export function centralCalendarEvents(opts: {
   });
   const impactoPorData = new Map(forecast.events.map((e) => [e.date, e.impactMinutes]));
 
+  /** Classificação de apresentação (4E.1) lida do contexto canônico: folga
+   *  INTEGRAL (crédito 0, jornada a cumprir = base) × JORNADA PARCIAL
+   *  (crédito > 0 e jornada a cumprir < base — ex.: Cinzas 4h+4h). Nenhuma
+   *  matemática nova: apenas comparação entre campos de companyDayContext. */
+  const jornadaParcialDe = (tratamento: CalendarTreatment, cctx: ReturnType<typeof companyDayContext>): boolean =>
+    tratamento === "COMPENSAR" &&
+    cctx.calendarCreditMinutes > 0 &&
+    cctx.requiredWorkMinutes > 0 &&
+    cctx.requiredWorkMinutes < cctx.referenceBaseMinutes;
+
   const future: CentralCalendarEventRow[] = [];
   const past: CentralCalendarEventRow[] = [];
   for (const date of listDaysBetween(from, to)) {
     const entry = entryOnDate(opts.calendars, date);
     if (!entry) continue;
     if (date > opts.today) {
+      // Futuro: o mesmo contexto canônico do realizado resolve a APRESENTAÇÃO
+      // (base referência / crédito calendário / jornada a cumprir) — o efeito
+      // factual continua sendo só o do forecast (impacto conhecido, previsão).
+      const cctx = companyDayContext(date, opts.entries, opts.absences, opts.calendars, opts.settings);
       future.push({
         date,
         descricao: entry.descricao,
         categoria: entry.categoria,
         tratamento: entry.tratamento,
-        baseReferenciaMinutes: 0,
-        creditoCalendarioMinutes: 0,
-        jornadaACumprirMinutes: 0,
+        baseReferenciaMinutes: cctx.referenceBaseMinutes,
+        creditoCalendarioMinutes: cctx.calendarCreditMinutes,
+        jornadaACumprirMinutes: cctx.requiredWorkMinutes,
+        jornadaParcial: jornadaParcialDe(entry.tratamento, cctx),
         impactoFuturoConhecidoMinutes: impactoPorData.get(date) ?? null,
       });
       continue;
@@ -142,6 +161,7 @@ export function centralCalendarEvents(opts: {
       baseReferenciaMinutes: cctx.referenceBaseMinutes,
       creditoCalendarioMinutes: cctx.calendarCreditMinutes,
       jornadaACumprirMinutes: cctx.requiredWorkMinutes,
+      jornadaParcial: jornadaParcialDe(entry.tratamento, cctx),
       impactoFuturoConhecidoMinutes: null,
       trabalhadoMinutes: cctx.ctx.day.workedMinutes,
       saldoFactualMinutes: dayBalanceContribution(cctx, opts.faltas ?? [], date, opts.today),
