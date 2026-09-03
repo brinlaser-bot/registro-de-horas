@@ -676,8 +676,10 @@ function RegistrosBody() {
 
   return (
     <div className="space-y-6">
-      {/* Navegação por período oficial + consulta personalizada (4G: controle
-          único compacto — [‹][rótulo][›] numa linha no mobile) */}
+      {/* A/B (4G.2 — ORDEM EM REGISTROS): A. navegação do período → B. filtros
+          (DE/ATÉ/Situação/Consultar/Limpar). C. banner de consolidação →
+          D. faixa-resumo → E. ações do período → F. atenções → G. dias.
+          (4G: controle único compacto — [‹][rótulo][›] numa linha no mobile) */}
       <div className="space-y-2">
         <div className="flex flex-wrap items-center gap-2">
           <PeriodNavigator
@@ -705,31 +707,9 @@ function RegistrosBody() {
           )}
         </div>
 
-        {/* 4G — Lançamento manual / Registrar falta em linha separada no mobile
-            (desktop permanece lado a lado); desabilitados sob período consolidado. */}
-        <div className="flex w-full flex-wrap gap-2 sm:w-auto">
-          <Button
-            size="sm"
-            disabled={!!lockBound}
-            title={lockBound ? "Período consolidado — reabra o período no Resumo para editar." : undefined}
-            className="flex-1 sm:flex-none"
-            onClick={() => setManualOpen(true)}
-          >
-            Lançamento manual
-          </Button>
-          <Button
-            variant="secondary"
-            size="sm"
-            disabled={!!lockBound}
-            title={lockBound ? "Período consolidado — reabra o período no Resumo para editar." : undefined}
-            className="flex-1 sm:flex-none"
-            onClick={() => { setFaltaInitialDate(null); setFaltaOpen(true); }}
-          >
-            <Ban size={14} /> Registrar falta
-          </Button>
-        </div>
-
-        {/* Consulta personalizada */}
+        {/* B — FILTROS (4G.2: consulta personalizada imediatamente após a
+            navegação; as AÇÕES DO PERÍODO descem para logo abaixo da
+            faixa-resumo — funções diferentes, blocos diferentes). */}
         <div className="flex flex-wrap items-end gap-2">
           <label className="text-[11px] font-bold uppercase tracking-wide text-slate-400">
             De
@@ -761,14 +741,17 @@ function RegistrosBody() {
           </p>
         </div>
       </div>
-      {/* 4G — aviso de período consolidado (dados e DayCards continuam visíveis;
-          apenas mutações são bloqueadas — a segurança real está no motor). */}
+      {/* C — 4G — aviso de período consolidado (dados e DayCards continuam visíveis;
+          apenas mutações são bloqueadas — a segurança real está no motor).
+          4G.2 — "Abrir Resumo" preserva o PERÍODO exibido (query ?data= com a
+          própria data do período; o Resumo deriva com getPointPeriod — nenhuma
+          segunda matemática 21→20, nenhum hardcode). */}
       {lockBound && (
         <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-violet-300 bg-violet-50/60 px-4 py-2.5">
           <p className="min-w-0 flex-1 text-sm font-bold text-violet-900">
             Período consolidado — registros protegidos. Reabra o período no Resumo para editar.
           </p>
-          <Link href="/resumo">
+          <Link href={`/resumo?data=${period.from}`}>
             <Button size="sm" variant="secondary">Abrir Resumo</Button>
           </Link>
         </div>
@@ -800,6 +783,34 @@ function RegistrosBody() {
           </div>
         );
       })()}
+
+      {/* E — AÇÕES DO PERÍODO (4G.2): imediatamente abaixo da faixa-resumo —
+          separadas da navegação/filtros (funções diferentes, blocos diferentes).
+          Comportamento funcional intacto; em período consolidado continuam
+          disabled (somente leitura, conforme 4G). Registrar falta usa a MESMA
+          linguagem amarelo/laranja do "Registro de hoje" (variant=warning);
+          Lançamento manual permanece verde (primary). */}
+      <div className="flex w-full flex-wrap gap-2 sm:w-auto">
+        <Button
+          size="sm"
+          disabled={!!lockBound}
+          title={lockBound ? "Período consolidado — reabra o período no Resumo para editar." : undefined}
+          className="flex-1 sm:flex-none"
+          onClick={() => setManualOpen(true)}
+        >
+          Lançamento manual
+        </Button>
+        <Button
+          variant="warning"
+          size="sm"
+          disabled={!!lockBound}
+          title={lockBound ? "Período consolidado — reabra o período no Resumo para editar." : undefined}
+          className="flex-1 sm:flex-none"
+          onClick={() => { setFaltaInitialDate(null); setFaltaOpen(true); }}
+        >
+          <Ban size={14} /> Registrar falta
+        </Button>
+      </div>
 
       {situationActive && (
         <DaySituationChips

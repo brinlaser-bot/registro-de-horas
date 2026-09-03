@@ -262,8 +262,11 @@ check("TESTE 09 DE 18 — R1 permanece visível no histórico durante Reaberto p
   assert.equal(lista[0].reopenNote, "corrigir 29/07");
   // UI: histórico acessível SEM revisão ACTIVE (toggle próprio), não só pelo banner:
   const p = page().replace(/\s+/g, " ");
-  assert.ok(p.includes("revisoesDoPeriodo.length > 0 && !consolidacaoAtiva && !histOpen"),
-    "acesso ao histórico quando não existe ACTIVE");
+  // 4G.2 (SUPERADO): a linha "Histórico de consolidações" ficou PERMANENTE
+  // (toggle completo Ver/Ocultar) — a condição perdeu o "!histOpen"; o acesso
+  // sem ACTIVE continua garantido e o conteúdo segue controlado por histOpen.
+  assert.ok(p.includes("revisoesDoPeriodo.length > 0 && !consolidacaoAtiva && ("),
+    "acesso ao histórico quando não existe ACTIVE (4G.2: linha permanente com toggle)");
   assert.ok(p.includes("Histórico de consolidações"), "título do histórico");
   // item exibe Reaberta + reopenedAt + motivo:
   const item = page().replace(/\s+/g, " ");
@@ -391,7 +394,12 @@ check("TESTE 17 DE 18 — 'Ir para o período atual' é botão real, só fora do
   assert.ok(nav.includes('aria-label="Ir para o período atual"'), "acessibilidade");
   assert.ok(nav.includes("<Undo2 size={14}"), "ícone de retorno");
   // botão REAL (Button com variant/secondary — borda/background/hover/foco):
-  assert.ok(nav.includes('{onBackToCurrent && (\n        <Button\n          variant="secondary"\n          size="sm"\n          onClick={onBackToCurrent}'), "renderiza SOMENTE quando a página passa a ação (fora do atual)");
+  // 4G.2 (SUPERADO): o botão de retorno agora existe em DUAS apresentações
+  // (mobile no bloco de contexto sm:hidden; desktop inline) — segue botão
+  // REAL, renderizado SOMENTE quando a página passa a ação (fora do atual).
+  assert.ok(nav.includes('onClick={onBackToCurrent}') && nav.split('aria-label="Ir para o período atual"').length - 1 === 2,
+    "botão real de retorno nas duas apresentações (mobile/desktop), só fora do atual");
+  assert.ok(nav.includes("{onBackToCurrent && ("), "renderiza somente quando a página passa a ação");
   // páginas passam undefined no período atual (botão some):
   const p = page();
   assert.ok(p.includes("onBackToCurrent={viewingCurrentPeriod ? undefined : () => setPeriod(currentPeriod)}"),
@@ -403,7 +411,8 @@ check("TESTE 17 DE 18 — 'Ir para o período atual' é botão real, só fora do
     "contexto informativo em Registros");
   assert.ok(p.includes("contextLabel={PERIOD_CONTEXT_LABEL[contextoPeriodo]}"), "contexto informativo no Resumo");
   // navegador aprovado preservado:
-  assert.ok(nav.includes('className="flex w-full min-w-0 items-center gap-2 sm:w-auto"'), "controle único");
+  // 4G.2 (SUPERADO): container virou coluna no mobile / linha no desktop.
+  assert.ok(nav.includes('className="flex w-full min-w-0 flex-col gap-2 sm:w-auto sm:flex-row sm:items-center sm:gap-2"'), "controle único (4G.2)");
   assert.ok(nav.includes('aria-label="Período anterior"') && nav.includes('aria-label="Próximo período"'), "setas preservadas");
 });
 

@@ -35,6 +35,14 @@ interface Props {
    * antecipa a verdade: nenhum CTA ativo que termina em impossibilidade.
    */
   bankAvailableMinutes?: number | null;
+  /**
+   * 4G.2 — SOMENTE LEITURA (destino em período com consolidação ACTIVE):
+   * esconde "Cancelar reserva"/"Liberar reserva" (o store recusa cancelar
+   * plano com destino consolidado). "Usar planejamento" já some via
+   * `onResolvePlan`/`onPlan` = undefined vindos do card. Informações das
+   * reservas (minutos, origem, modo) continuam visíveis.
+   */
+  readOnly?: boolean;
 }
 
 /**
@@ -57,7 +65,7 @@ interface Props {
  * - "Concluir"/conversão automática NÃO existem nesta UI (a resolução é
  *   sempre uma decisão explícita pelo modal; PLANO → USO no store 4C).
  */
-export function SpecialExcessPlanSummary({ plans, isFuture, eligible = null, remainingNeedMinutes = null, onResolvePlan, onPlan, bankAvailableMinutes = null, planCapacityMinutes = null }: Props) {
+export function SpecialExcessPlanSummary({ plans, isFuture, eligible = null, remainingNeedMinutes = null, onResolvePlan, onPlan, bankAvailableMinutes = null, planCapacityMinutes = null, readOnly = false }: Props) {
   // 4D.3: capacidade canônica de planejamento do dia futuro (null = sem
   // restrição conhecida — comportamento anterior).
   const canPlanMore = planCapacityMinutes === null || planCapacityMinutes > 0;
@@ -77,7 +85,9 @@ export function SpecialExcessPlanSummary({ plans, isFuture, eligible = null, rem
   const cancelLabel = needZero ? "Liberar reserva" : "Cancelar reserva";
 
   const doCancel = async () => {
-    if (!cancelTarget || busy) return;
+    // 4G.2: em somente leitura NADA é cancelado daqui (defesa extra; o guard
+    // canônico "plano com destino consolidado" continua no store).
+    if (readOnly || !cancelTarget || busy) return;
     const id = cancelTarget.id;
     const minutes = specialExcessPlanMinutes(cancelTarget);
     setBusy(true);
@@ -192,14 +202,19 @@ export function SpecialExcessPlanSummary({ plans, isFuture, eligible = null, rem
                     <CalendarClock size={12} /> Usar planejamento
                   </Button>
                 )}
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="w-full !px-2 !text-rose-600 hover:!bg-rose-50 sm:w-auto"
-                  onClick={() => setCancelTarget(p)}
-                >
-                  {cancelLabel}
-                </Button>
+                {/* 4G.2: destino consolidado = somente leitura — sem
+                    "Cancelar reserva"/"Liberar reserva" (o store recusa:
+                    plano com destino em período consolidado). */}
+                {!readOnly && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="w-full !px-2 !text-rose-600 hover:!bg-rose-50 sm:w-auto"
+                    onClick={() => setCancelTarget(p)}
+                  >
+                    {cancelLabel}
+                  </Button>
+                )}
               </span>
             </li>
           );

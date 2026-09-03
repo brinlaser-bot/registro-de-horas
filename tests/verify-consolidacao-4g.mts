@@ -434,7 +434,10 @@ check("TESTE 20 DE 24 — Factual e consolidado são leituras SEPARADAS (factual
 check("TESTE 21 DE 24 — Lock em Registros NÃO esconde dados: banner + DayCards visíveis, botões desabilitados", () => {
   const r = registros();
   assert.ok(r.includes("Período consolidado — registros protegidos. Reabra o período no Resumo para editar."), "banner de lock");
-  assert.ok(r.includes('href="/resumo"') && r.includes("Abrir Resumo"), "CTA Abrir Resumo");
+  // 4G.2 (SUPERADO): "Abrir Resumo" agora PRESERVA o período exibido via
+  // ?data= com a própria data inicial do período (getPointPeriod deriva no
+  // Resumo — sem hardcode e sem segunda matemática 21→20).
+  assert.ok(r.includes("href={`/resumo?data=${period.from}`}") && r.includes("Abrir Resumo"), "CTA Abrir Resumo preserva o período (4G.2)");
   assert.ok(r.includes("listedDays.map("), "DayCards seguem renderizados");
   assert.ok(!/if \(lockBound\) return/.test(r), "lock nunca esconde a lista");
   assert.ok(r.includes("disabled={!!lockBound}"), "Lançamento manual/Falta desabilitados sob lock");
@@ -445,7 +448,9 @@ check("TESTE 22 DE 24 — Nav mobile [‹][21/08 → 20/09][›] numa linha (320
   const nav = src("src/components/period-navigator.tsx");
   const p = page();
   const r = registros();
-  assert.ok(nav.includes('className="flex w-full min-w-0 items-center gap-2 sm:w-auto"'), "controle único, sem quebra de linha");
+  // 4G.2 (SUPERADO): container agora é COLUNA no mobile (linha 1 = só
+  // navegação; linha 2 = contexto) e linha única no desktop (sm:flex-row).
+  assert.ok(nav.includes('className="flex w-full min-w-0 flex-col gap-2 sm:w-auto sm:flex-row sm:items-center sm:gap-2"'), "controle único (4G.2: linha 1 só navegação no mobile)");
   assert.ok(nav.includes('aria-label={fullLabel}'), "aria-label completo");
   assert.ok(nav.includes('aria-label="Período anterior"') && nav.includes('aria-label="Próximo período"'), "setas acessíveis");
   assert.ok(nav.includes("<span className=\"sm:hidden\" title={fullLabel}>{shortLabel}</span>"), "mobile: rótulo curto");

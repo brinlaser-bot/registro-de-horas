@@ -14,6 +14,15 @@ interface Props {
   view: SpecialExcessDayView;
   /** Abre o modal "Completar jornada com [10+]". */
   onOpen?: () => void;
+  /**
+   * 4G.2 — SOMENTE LEITURA (destino em período com consolidação ACTIVE):
+   * esconde "Cancelar uso de [10+]" e impede o modal de cancelamento —
+   * minutos utilizados, origens, seleção automática/manual, projeção e
+   * rastreabilidade continuam visíveis. O guard do store (cancelSpecial
+   * ExcessUse → "Uso protegido por período consolidado.") continua sendo a
+   * defesa real; esta é apenas a camada de clareza da UI.
+   */
+  readOnly?: boolean;
 }
 
 /**
@@ -25,8 +34,10 @@ interface Props {
  * - Cancelamento é INDIVIDUAL (cancelSpecialExcessUse, 3D) — "Cancelar uso"
  *   (nunca remoção definitiva): o histórico permanece rastreável como cancelado.
  * - Vários usos no mesmo destino → card mostra o total + cada uso em linha.
+ * - 4G.2: `readOnly` remove APENAS os controles mutáveis (cancelamento) —
+ *   nenhuma informação é escondida.
  */
-export function SpecialExcessUseSummary({ view, onOpen }: Props) {
+export function SpecialExcessUseSummary({ view, onOpen, readOnly = false }: Props) {
   const toast = useToast();
   const [cancelTarget, setCancelTarget] = useState<SpecialExcessUse | null>(null);
   const [busy, setBusy] = useState(false);
@@ -34,7 +45,9 @@ export function SpecialExcessUseSummary({ view, onOpen }: Props) {
   const hasActive = view.activeUses.length > 0;
 
   const doCancel = async () => {
-    if (!cancelTarget || busy) return;
+    // 4G.2: em somente leitura NADA é cancelado daqui (defesa extra; o guard
+    // canônico continua no store).
+    if (readOnly || !cancelTarget || busy) return;
     const id = cancelTarget.id;
     const minutes = specialExcessUseMinutes(cancelTarget);
     setBusy(true);
@@ -135,14 +148,19 @@ export function SpecialExcessUseSummary({ view, onOpen }: Props) {
                     · {u.allocationStrategy === "fifo" ? "Seleção automática" : "Origem escolhida manualmente"}
                   </span>
                 </span>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="w-full !px-2 !text-rose-600 hover:!bg-rose-50 sm:w-auto"
-                  onClick={() => setCancelTarget(u)}
-                >
-                  Cancelar uso de [10+]
-                </Button>
+                {/* 4G.2: destino em período consolidado = somente leitura —
+                    sem "Cancelar uso de [10+]" (o store recusaria; a UI não
+                    oferece o controle). Informações do uso permanecem. */}
+                {!readOnly && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="w-full !px-2 !text-rose-600 hover:!bg-rose-50 sm:w-auto"
+                    onClick={() => setCancelTarget(u)}
+                  >
+                    Cancelar uso de [10+]
+                  </Button>
+                )}
               </li>
             );
           })}

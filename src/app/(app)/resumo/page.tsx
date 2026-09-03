@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { Suspense, useMemo, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { BarChart3, CalendarClock, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Clock3, Download, ExternalLink, Hourglass, TriangleAlert, TrendingUp, Wallet } from "lucide-react";
 import { actions, settingsOf, useAppData, useIsClient } from "@/lib/store";
 import { formatMinutes, todayString, weekdayShort } from "@/lib/time";
@@ -52,18 +53,55 @@ function formatDateTimeBR(ts: number): string {
   return `${dd}/${mm}/${d.getFullYear()} ${hh}:${mi}`;
 }
 
+/* 4G.2 — ?data=YYYY-MM-DD (link "Abrir Resumo" de Registros) abre o Resumo no
+ * PERÍODO da data: a derivação usa a MESMA matemática canônica getPointPeriod
+ * (nenhuma segunda matemática 21→20, nenhum hardcode). Sem o parâmetro, abre
+ * no período atual como sempre. */
+function ResumoSkeleton() {
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-28" />)}
+      </div>
+      <Skeleton className="h-64" />
+      <Skeleton className="h-80" />
+    </div>
+  );
+}
+
 export default function ResumoPage() {
+  return (
+    <Suspense fallback={<ResumoSkeleton />}>
+      <ResumoBody />
+    </Suspense>
+  );
+}
+
+function ResumoBody() {
   const mounted = useIsClient();
+  const searchParams = useSearchParams();
   const { user, entries, compensations, absences, companyCalendars, faltas, specialExcessUses, specialExcessPlans, periodConsolidations } = useAppData();
   const settings = settingsOf(user);
   const toast = useToast();
   const todayStr = todayString();
   const currentPeriod = getPointPeriod(todayStr);
-  const [period, setPeriod] = useState<PointPeriod>(() => getPointPeriod(todayString()));
+  // 4G.2 — contexto vindo de Registros: ?data=YYYY-MM-DD ⇒ período da data.
+  // Sem o parâmetro, o período inicial é o ATUAL com a matemática canônica
+  // (getPointPeriod(todayString()) — nunca toISOString). A derivação do
+  // parâmetro usa a MESMA função (nenhuma segunda matemática 21→20).
+  // O initializer cobre a navegação real ("Abrir Resumo" vem de Registros ⇒
+  // a página REMONTA). Sem efeito/sincronização: nenhum setState automático
+  // (espírito 4F preservado); navegação local por ‹/› permanece livre.
+  const dataParamRaw = searchParams.get("data");
+  const dataParam = dataParamRaw && /^\d{4}-\d{2}-\d{2}$/.test(dataParamRaw) ? dataParamRaw : null;
+  const periodoInicial = dataParam ? getPointPeriod(dataParam) : getPointPeriod(todayString());
+  const [period, setPeriod] = useState<PointPeriod>(() => periodoInicial);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [consolidarOpen, setConsolidarOpen] = useState(false);
   const [reabrirOpen, setReabrirOpen] = useState(false);
   const [reopenNote, setReopenNote] = useState("");
+  // 4G.2 — estado exclusivamente VISUAL/LOCAL do histórico: RECOLHIDO por
+  // padrão, nunca persistido; R1/R2 permanecem intocadas.
   const [histOpen, setHistOpen] = useState(false);
   const viewingCurrentPeriod = samePointPeriod(period, currentPeriod);
   // 4G.1 — CONTEXTO do período exibido (informação; derivação única em periods.ts)
@@ -119,6 +157,11 @@ export default function ResumoPage() {
   const revisoesDoPeriodo = (periodConsolidations ?? [])
     .filter((c) => c.periodStart === period.from && c.periodEnd === period.to)
     .sort((a, b) => b.revision - a.revision);
+  // 4G.2 — RECONSOLIDAÇÃO = NOVA REVISÃO: "Reaberto para ajustes" + histórico
+  // anterior ⇒ o modal deixa claro que uma nova revisão será criada e a
+  // anterior permanecerá no histórico (R1 jamais sobrescrita — mecânica 4G.1
+  // intocada: consolidatePeriod cria revision+1 e somente uma ACTIVE).
+  const reconsolidando = estadoPeriodo === "reaberto-para-ajustes";
 
   // 4F — MOVIMENTAÇÃO [10+] DO PERÍODO (origens/destinos em 21→20;
   // ≠ saldo total do ciclo, que é da Central).
@@ -377,8 +420,11 @@ export default function ResumoPage() {
             O factual preserva a jornada real; a consolidação salva o resultado considerado no ponto.
           </p>
           <div className="mt-2 flex flex-wrap gap-2">
+            {/* 4G.2 — toggle completo: recolhido "Ver histórico" · aberto
+                "Ocultar histórico" (clicar recolhe). Estado só visual/local. */}
             <Button variant="secondary" size="sm" onClick={() => setHistOpen((v) => !v)}>
-              Ver histórico
+              {histOpen ? "Ocultar histórico" : "Ver histórico"}
+              {histOpen ? <ChevronUp size={14} aria-hidden /> : <ChevronDown size={14} aria-hidden />}
             </Button>
             <Button variant="secondary" size="sm" onClick={() => { setReopenNote(""); setReabrirOpen(true); }}>
               Reabrir período
@@ -389,12 +435,16 @@ export default function ResumoPage() {
 
       {/* ── 4G.1 — HISTÓRICO sempre acessível quando houver QUALQUER revisão
           (Consolidado · Reaberto para ajustes · estados futuros): a revisão
-          NÃO pode ficar invisível só porque não existe uma ACTIVE. ── */}
-      {revisoesDoPeriodo.length > 0 && !consolidacaoAtiva && !histOpen && (
+          NÃO pode ficar invisível só porque não existe uma ACTIVE.
+          4G.2 — TOGGLE COMPLETO: título fixo "Histórico de consolidações";
+          recolhido ⇒ "Ver histórico"; aberto ⇒ "Ocultar histórico" (clicar
+          recolhe); recolhido por padrão; estado só visual/local. ── */}
+      {revisoesDoPeriodo.length > 0 && !consolidacaoAtiva && (
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2.5">
           <p className="text-sm font-bold text-slate-700">Histórico de consolidações</p>
-          <Button variant="secondary" size="sm" onClick={() => setHistOpen(true)}>
-            Ver histórico
+          <Button variant="secondary" size="sm" onClick={() => setHistOpen((v) => !v)}>
+            {histOpen ? "Ocultar histórico" : "Ver histórico"}
+            {histOpen ? <ChevronUp size={14} aria-hidden /> : <ChevronDown size={14} aria-hidden />}
           </Button>
         </div>
       )}
@@ -591,11 +641,15 @@ export default function ResumoPage() {
         </Card>
       )}
 
-      {/* ── 4G — CONFIRMAÇÃO DA CONSOLIDAÇÃO (dados exatos) ── */}
+      {/* ── 4G — CONFIRMAÇÃO DA CONSOLIDAÇÃO (dados exatos)
+          4G.2 — LINGUAGEM DE NOVA REVISÃO: primeira consolidação mantém
+          "Consolidar período"; após reabertura o modal vira "Consolidar
+          novamente" e diz inequivocamente que UMA NOVA REVISÃO será criada
+          e a anterior permanece no histórico. Mecânica intocada. ── */}
       <Modal
         open={consolidarOpen}
         onClose={() => setConsolidarOpen(false)}
-        title="Consolidar período"
+        title={reconsolidando ? "Consolidar novamente" : "Consolidar período"}
         subtitle={periodLabel(period)}
         footer={
           <>
@@ -613,7 +667,7 @@ export default function ResumoPage() {
                 }
               }}
             >
-              Consolidar período
+              {reconsolidando ? "Consolidar novamente" : "Consolidar período"}
             </Button>
           </>
         }
@@ -633,6 +687,13 @@ export default function ResumoPage() {
             Seu saldo factual continuará mostrando o que realmente aconteceu na jornada. Ao consolidar, o resultado no
             ponto será registrado e os dados deste período ficarão protegidos contra alterações.
           </p>
+          {/* 4G.2 — inequívoco na reconsolidação: cria R(n+1); a anterior
+              permanece no histórico (nunca sobrescreve; mecânica 4G.1). */}
+          {reconsolidando && (
+            <p className="rounded-lg bg-violet-50 px-3 py-2 text-xs font-bold text-violet-800">
+              Uma nova revisão será criada e a anterior permanecerá no histórico.
+            </p>
+          )}
         </div>
       </Modal>
 

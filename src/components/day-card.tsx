@@ -696,6 +696,10 @@ export function DayCard({
             <div className="mt-3 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2.5">
               <SpecialExcessUseSummary
                 view={specialExcess}
+                // 4G.2: consolidado = somente leitura — sem "Cancelar uso de
+                // [10+]" (minutos/origem/seleção/projeção continuam visíveis;
+                // o guard do store permanece a defesa real).
+                readOnly={ro}
                 onOpen={!ro && specialExcess.canComplete && onCompleteJornada ? () => onCompleteJornada(d.date) : undefined}
               />
             </div>
@@ -722,6 +726,10 @@ export function DayCard({
                 // 4C.1B (§15): BANCO [10+] disponível da MESMA visão canônica —
                 // com 0, o card antecipa a verdade e não oferece "Planejar mais".
                 bankAvailableMinutes={specialExcess ? specialExcess.bankAvailableMinutes : null}
+                // 4G.2: consolidado = somente leitura — também sem "Cancelar
+                // reserva"/"Liberar reserva" (controle mutável residual da
+                // auditoria 4G.2; o store já recusava o cancelamento).
+                readOnly={ro}
                 onResolvePlan={ro ? undefined : onResolvePlan}
                 onPlan={ro ? undefined : onPlanSpecial}
               />

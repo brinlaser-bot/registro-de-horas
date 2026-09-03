@@ -320,7 +320,14 @@ check("TESTE 18 DE 18 — Zero persistência nova; números do ciclo; sentinelas
   const usosActions = p.split("actions.").length - 1;
   assert.equal(usosActions, 2, "actions apenas em consolidar/reabrir (confirmação explícita)");
   assert.ok(p.includes("actions.consolidatePeriod(") && p.includes("actions.reopenPeriod("), "consolidação/reabertura explícitas");
-  assert.ok(!p.includes("localStorage") && !p.includes("useSearchParams"), "sem persistência/URL-state novo");
+  // 4G.2 (SUPERADO): o Resumo agora LÊ ?data=YYYY-MM-DD (useSearchParams) para
+  // PRESERVAR o período vindo de Registros ("Abrir Resumo" do banner de
+  // consolidação) — contexto somente de leitura via query param, exigido pela
+  // 4G.2 ("preferir query param"); continua SEM persistência (nada de
+  // localStorage) e o período segue sendo estado local (useState, nunca
+  // persistido, derivado com a matemática canônica getPointPeriod).
+  assert.ok(!p.includes("localStorage"), "sem persistência");
+  assert.ok(p.includes("useSearchParams") && p.includes('searchParams.get("data")'), "contexto ?data= por query param (4G.2)");
   const antes = JSON.stringify(st());
   view(); pend(); movement();
   assert.equal(JSON.stringify(st()), JSON.parse(JSON.stringify(antes)) && antes, "helpers 100% puros");
