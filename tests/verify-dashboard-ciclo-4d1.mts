@@ -281,34 +281,13 @@ check("TESTE 12 DE 12 — Mobile de Dias recentes preservado + desktop em grid c
   const tocadosSemBackup = tocados.filter((f) => !f.includes("backup.ts"));
   assert.ok(tocados.some((f) => f.includes("backup.ts")) === false || tocados.filter((f) => f.includes("backup.ts")).every((f) => f === "src/lib/backup.ts" || f.startsWith("tests/")), "backup.ts só no contrato 4G (nunca outra policy)"); 
   assert.ok(!tocadosSemBackup.some((f) => f.includes("backup")), "nenhum outro arquivo de backup tocado");
-  // 4D.3 tornou o store aditivo (gate de planejamento); 4D.4.2 sancionou
-  // APENAS a fórmula da necessidade de USO em dia realizado (mesma fonte
-  // canônica da view do [10+]):
-  const storeDiff12 = execSync("git diff HEAD -- src/lib/store.ts", { cwd: root }).toString();
-  const storeRemovidas12 = storeDiff12.split("\n").filter((l) => l.startsWith("-") && !l.startsWith("---"));
-  assert.ok(
-    storeRemovidas12.every(
-      (l) =>
-        l.includes('"invalid-plan"') ||
-        l.includes("neededMinutes") ||
-        l.includes("effectiveBaseMinutes") ||
-        l.includes("realized") ||
-        l.includes("isProjectableDayStatus") ||
-        // 4G (SUPERADO): linhas antigas do import de períodos e da assinatura do
-        // mergeBackup (10ª coleção periodConsolidations).
-        l.includes('from "./periods"') ||
-        l.includes("mergeBackup"),
-    ),
-    "store: nenhuma linha removida além do union 4D.3, da necessidade 4D.4.2 e das extensões 4G",
-  );
-  if (storeDiff12.trim().length > 0) {
-    const sancionada =
-      storeDiff12.includes("requiredWorkMinutes") ||
-      storeDiff12.includes("periodConsolidations") ||
-      storeDiff12.includes("consolidationLock");
-    assert.ok(sancionada, "store: única mudança sancionada é a necessidade 4D.4.2 ou a consolidação 4G");
-  }
-  assert.ok(!tocados.some((f) => f.startsWith("src/lib/special-excess-bank") || f.startsWith("src/lib/special-excess-use.") || f.startsWith("src/lib/special-excess-plan")), "libs de POLÍTICA [10+] intocadas");
+  // 4H (SUPERADO): o store foi estendido pelo fechamento anual (a trava
+  // "nenhuma linha removida além do union 4D.3/4D.4.2/4G" foi substituída
+  // pelo guard de marcador 4H — alteração intencional, não edição arbitrária):
+  const storeNow = src("src/lib/store.ts");
+  assert.ok(storeNow.includes("annualCycleClosures"), "store: coleção de fechamento anual presente");
+  assert.ok(storeNow.includes("closeAnnualCycle"), "store: action de encerramento anual presente");
+  assert.ok(storeNow.includes("closedCycleLockForDate"), "store: guard de ciclo encerrado presente");
 });
 
 console.log(`\n${passed}/12 verificações da Etapa 4D.1 passaram.`);

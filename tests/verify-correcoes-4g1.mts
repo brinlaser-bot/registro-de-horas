@@ -428,7 +428,7 @@ check("TESTE 18 DE 18 — Backup/revisions/4G/4F/4E.1 e sentinelas permanecem í
   const parsed = parseBackup(JSON.stringify(buildBackupPayload(st())));
   assert.ok(parsed.ok);
   assert.deepEqual(parsed.backup!.periodConsolidations!.map((c) => c.revision).sort((a, b) => a - b), [1, 2]);
-  assert.equal(BACKUP_COLLECTIONS.length, 10, "nenhuma coleção nova criada");
+  assert.equal(BACKUP_COLLECTIONS.length, 11, "contrato com 11 coleções (4H adiciona annualCycleClosures)");
   // sem schema novo além do existente:
   assert.ok(src("src/lib/types.ts").includes("periodConsolidations?"), "mesmo campo opcional da 4G");
   assert.ok(src("src/lib/seed-data.ts").includes("periodConsolidations: []"), "seed intocada");

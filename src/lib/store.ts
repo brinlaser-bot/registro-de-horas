@@ -60,6 +60,18 @@ import {
   planSpecialExcessReconciliation,
   type SpecialReconciliationPlan,
 } from "./special-excess-reconciliation";
+import {
+  closureIdOf,
+  dateFallsInClosedCycle,
+  carriedSlicesIntoCycle,
+  type AnnualCycleClosure,
+  type AnnualClosureDisposition,
+} from "./annual-cycle-closure";
+import {
+  checkCycleClose,
+  computeClosingExcess,
+  type CycleCloseEligibility,
+} from "./annual-cycle-close";
 
 /** Resultado estruturado de operações que podem ser rejeitadas por validação. */
 export interface ActionResult {
@@ -100,7 +112,15 @@ export interface ActionResult {
     | "plan-already-concluded"
     | "invalid-plan"
     | "destination-no-planning-capacity"
-    | "requested-exceeds-planning-capacity";
+    | "requested-exceeds-planning-capacity"
+    | "cycle-closed"
+    | "cycle-already-closed"
+    | "cycle-not-ended"
+    | "cycle-blocking-pendency"
+    | "cycle-periods-not-consolidated"
+    | "cycle-pending-plan"
+    | "saldo-requires-decision"
+    | "saldo-zero";
   /** Capacidade disponível no dia de destino (quando code = over-capacity). */
   available?: number;
   limitMinutes?: number;
@@ -193,6 +213,9 @@ export function parseStoredAppData(raw: string): AppData | null {
     const specialExcessPlans = Array.isArray(parsed.specialExcessPlans) ? parsed.specialExcessPlans : [];
     // 4G: dados antigos sem consolidações → [] (retrocompatível).
     const periodConsolidations = Array.isArray(parsed.periodConsolidations) ? parsed.periodConsolidations : [];
+    // 4H: dados antigos sem fechamentos anuais → [] (ausência = nenhum ciclo
+    // formalmente encerrado; NUNCA autoencerra ciclos antigos ao importar).
+    const annualCycleClosures = Array.isArray(parsed.annualCycleClosures) ? parsed.annualCycleClosures : [];
     return {
       user: parsed.user,
       entries: parsed.entries,
@@ -204,6 +227,7 @@ export function parseStoredAppData(raw: string): AppData | null {
       specialExcessUses,
       specialExcessPlans,
       periodConsolidations,
+      annualCycleClosures,
     };
   } catch {
     return null;
@@ -336,6 +360,28 @@ const USE_CONSOLIDATED_MSG = "Uso protegido por período consolidado.";
 const CALENDAR_CONSOLIDATED_MSG = "Este calendário altera um período consolidado. Reabra o período antes de modificar essas datas.";
 const SPECIAL_PERIOD_CLOSED_MSG =
   "O período já está fechado: não é possível criar, editar ou cancelar usos de [10+].";
+// 4H — bloqueio DEFINITIVO do ciclo anual encerrado.
+const CYCLE_CLOSED_MSG =
+  "Este ciclo anual já foi encerrado: os registros ficaram protegidos e não podem mais ser alterados, e os períodos não podem ser reabertos.";
+
+/** 4H — bloqueio definitivo do ciclo encerrado: retorna erro quando a DATA cai
+ *  em um ciclo com fechamento registrado. O domínio/store NUNCA depende só da
+ *  UI esconder botões. */
+function closedCycleLockForDate(d: AppData, date: string): ActionResult | null {
+  if (dateFallsInClosedCycle(d.annualCycleClosures, date)) {
+    return { ok: false, code: "cycle-closed", error: CYCLE_CLOSED_MSG };
+  }
+  return null;
+}
+
+/** 4H — variante por intervalo [from,to] (eventos/afastamentos/calendário). */
+function closedCycleLockForRange(d: AppData, from: string, to: string): ActionResult | null {
+  const closed = (d.annualCycleClosures ?? []).some(
+    (c) => c.status === "closed" && to >= c.cycleStart && from <= c.cycleEnd,
+  );
+  if (closed) return { ok: false, code: "cycle-closed", error: CYCLE_CLOSED_MSG };
+  return null;
+}
 
 /** id string do novo modelo: "seu-<n>" (n = maior sufixo numérico + 1, sem colisão). */
 const nextSpecialUseId = (rows: SpecialExcessUse[]) =>
@@ -369,8 +415,9 @@ function specialBankOf(
   asOf: string,
   excludeUseId: string | null,
 ): SpecialExcessBankSummary {
+  const cycle = getAnnualPointCycle(destinationDate);
   return buildSpecialExcessBank({
-    cycle: getAnnualPointCycle(destinationDate),
+    cycle,
     asOfDate: asOf,
     entries: d.entries,
     absences: d.absences,
@@ -380,6 +427,8 @@ function specialBankOf(
     controlStartDate: d.user.controlStartDate ?? "",
     uses: (d.specialExcessUses ?? []).filter((u) => u.id !== excludeUseId),
     plans: (d.specialExcessPlans ?? []).filter((p) => p.status === "planned"),
+    // 4H — saldo formalmente TRANSPORTADO para este ciclo (fechamento anterior).
+    carried: carriedSlicesIntoCycle(d.annualCycleClosures, cycle),
   });
 }
 
@@ -499,6 +548,7 @@ function validateManualSelection(
     totals.set(a.originDate, (totals.get(a.originDate) ?? 0) + a.minutes);
   }
   const lotByDate = new Map(bank.lots.map((l) => [l.originDate, l]));
+  const carriedOrigins = new Set(bank.lots.filter((l) => l.carried).map((l) => l.originDate));
   for (const originDate of totals.keys()) {
     if (originDate > asOf) {
       return {
@@ -510,7 +560,10 @@ function validateManualSelection(
         allocations: [],
       };
     }
-    if (getAnnualPointCycle(originDate) !== bank.cycle) {
+    // 4H — saldo TRANSPORTADO (origem factual de ciclo anterior, autorizado no
+    // fechamento) é origem operacional VÁLIDA neste ciclo. Qualquer outro
+    // cruzamento COMUM entre ciclos continua PROIBIDO.
+    if (!carriedOrigins.has(originDate) && getAnnualPointCycle(originDate) !== bank.cycle) {
       return {
         error: {
           ok: false,
@@ -1142,6 +1195,11 @@ export const actions = {
         result = { ok: false, code: "invalid", error: FUTURE_DATE_ERROR };
         return d;
       }
+      // 4H — GUARD: ciclo anual formalmente encerrado é bloqueio DEFINITIVO.
+      if (closedCycleLockForDate(d, p.date)) {
+        result = closedCycleLockForDate(d, p.date)!;
+        return d;
+      }
       // 4G — GUARD: data dentro de período consolidado ATIVO é mutação bloqueada.
       if (consolidationLockForDate(d.periodConsolidations, p.date)) {
         result = { ok: false, code: "consolidated", error: PERIOD_CONSOLIDATED_MSG };
@@ -1198,6 +1256,13 @@ export const actions = {
       for (const p of list) {
         if (isFutureDate(p.date)) {
           result = { ok: false, code: "invalid", error: FUTURE_DATE_ERROR };
+          return d;
+        }
+      }
+      // 4H — GUARD: nenhum lançamento em lote em data de ciclo encerrado.
+      for (const p of list) {
+        if (closedCycleLockForDate(d, p.date)) {
+          result = closedCycleLockForDate(d, p.date)!;
           return d;
         }
       }
@@ -1277,6 +1342,16 @@ export const actions = {
         result = { ok: false, code: "not-found", error: "Registro não encontrado." };
         return d;
       }
+      // 4H — GUARD: edição de batida em ciclo encerrado é bloqueada (origem ou
+      // novo destino quando a data muda).
+      {
+        const newDate = patch.date ?? target.date;
+        const lock = closedCycleLockForDate(d, target.date) ?? closedCycleLockForDate(d, newDate);
+        if (lock) {
+          result = lock;
+          return d;
+        }
+      }
       // 4G — GUARD: edição/exclusão de batida em período consolidado é bloqueada
       // (dia de origem e dia de destino, quando a data muda).
       if (consolidationLockForDate(d.periodConsolidations, target.date) || (patch.date && consolidationLockForDate(d.periodConsolidations, patch.date))) {
@@ -1339,6 +1414,11 @@ export const actions = {
       const target = d.entries.find((e) => e.id === id);
       if (!target) {
         result = { ok: false, code: "not-found", error: "Registro não encontrado." };
+        return d;
+      }
+      // 4H — GUARD: exclusão de batida em ciclo encerrado é bloqueada.
+      if (closedCycleLockForDate(d, target.date)) {
+        result = closedCycleLockForDate(d, target.date)!;
         return d;
       }
       // 4G — GUARD: exclusão de batida em período consolidado é bloqueada.
@@ -1602,6 +1682,11 @@ export const actions = {
   addFalta(date: string): ActionResult {
     let result: ActionResult = OK;
     mutate((d) => {
+      // 4H — GUARD: falta em ciclo encerrado é bloqueada.
+      if (closedCycleLockForDate(d, date)) {
+        result = closedCycleLockForDate(d, date)!;
+        return d;
+      }
       // 4G — GUARD: falta retroativa em período consolidado é bloqueada.
       if (consolidationLockForDate(d.periodConsolidations, date)) {
         result = { ok: false, code: "consolidated", error: PERIOD_CONSOLIDATED_MSG };
@@ -1639,6 +1724,11 @@ export const actions = {
       const target = d.faltas.find((f) => f.id === id);
       if (!target) {
         result = { ok: false, code: "not-found", error: "Falta não encontrada." };
+        return d;
+      }
+      // 4H — GUARD: remover falta em ciclo encerrado é bloqueado.
+      if (closedCycleLockForDate(d, target.date)) {
+        result = closedCycleLockForDate(d, target.date)!;
         return d;
       }
       // 4G — GUARD: remover falta de período consolidado é bloqueado.
@@ -2277,6 +2367,132 @@ export const actions = {
     return result;
   },
 
+  /* ── ETAPA 4H — FECHAMENTO ANUAL DEFINITIVO DO CICLO ──
+     Encerra o ciclo (01/05→30/04) após o seu término, com decisão explícita
+     sobre o saldo [10+] final. Depois de encerrado, o bloqueio é DEFINITIVO
+     (ver guards `closedCycleLockForDate`/`closedCycleLockForRange`). */
+
+  /**
+   * Confere os PRÉ-REQUISITOS de fechamento do ciclo (informação pura — não
+   * persiste nada). Devolve a elegibilidade estruturada para a UI montar o
+   * modal ("Encerrar ciclo") e mostrar o que falta quando houver bloqueios.
+   */
+  annualCycleCloseCheck(p: { cycleLabel: string; today?: string }): CycleCloseEligibility & { ok: boolean } {
+    const d = getAppData();
+    const today = p.today ?? todayString();
+    const el = checkCycleClose({
+      today,
+      label: p.cycleLabel,
+      closures: d.annualCycleClosures,
+      entries: d.entries,
+      absences: d.absences,
+      calendars: d.companyCalendars,
+      settings: settingsOf(d.user),
+      faltas: d.faltas,
+      controlStartDate: d.user.controlStartDate,
+      plans: d.specialExcessPlans ?? [],
+      consolidations: d.periodConsolidations,
+    });
+    return { ...el, ok: el.ok };
+  },
+
+  /**
+   * ENCERRA o ciclo (action atômica). Exige hoje > cycleEnd (data civil local),
+   * pré-requisitos satisfeitos e, quando há saldo [10+] final, decisão
+   * explícita "liquidated" ou "carried" (disposition "none" só com saldo 0).
+   * Persiste o fechamento em `annualCycleClosures` (backup v4). NADA é
+   * transformado em factual: liquidar/transportar só registra a destinação do
+   * saldo [10+] final preservando origem/proveniência.
+   */
+  closeAnnualCycle(p: {
+    cycleLabel: string;
+    disposition?: AnnualClosureDisposition;
+    today?: string;
+    now?: number;
+    note?: string | null;
+  }): ActionResult {
+    const d0 = getAppData();
+    const today = p.today ?? todayString();
+    const el = checkCycleClose({
+      today,
+      label: p.cycleLabel,
+      closures: d0.annualCycleClosures,
+      entries: d0.entries,
+      absences: d0.absences,
+      calendars: d0.companyCalendars,
+      settings: settingsOf(d0.user),
+      faltas: d0.faltas,
+      controlStartDate: d0.user.controlStartDate,
+      plans: d0.specialExcessPlans ?? [],
+      consolidations: d0.periodConsolidations,
+    });
+    if (!el.ok) {
+      let code: ActionResult["code"] = "cycle-blocking-pendency";
+      if (el.alreadyClosed) code = "cycle-already-closed";
+      else if (!el.ended) code = "cycle-not-ended";
+      else if (el.missingConsolidationLabels.length > 0) code = "cycle-periods-not-consolidated";
+      else if (el.pendingPlans > 0) code = "cycle-pending-plan";
+      return { ok: false, code, error: el.blockers.join(" ") };
+    }
+    const comp = computeClosingExcess({
+      label: p.cycleLabel,
+      closures: d0.annualCycleClosures,
+      entries: d0.entries,
+      absences: d0.absences,
+      calendars: d0.companyCalendars,
+      settings: settingsOf(d0.user),
+      faltas: d0.faltas,
+      controlStartDate: d0.user.controlStartDate,
+      uses: d0.specialExcessUses ?? [],
+      plans: d0.specialExcessPlans ?? [],
+    });
+    const closing = comp.closingMinutes;
+    const disposition: AnnualClosureDisposition =
+      closing <= 0 ? "none" : (p.disposition ?? "none");
+    if (closing > 0 && disposition !== "liquidated" && disposition !== "carried") {
+      return {
+        ok: false,
+        code: "saldo-requires-decision",
+        error: `Há ${formatMinutes(closing)} de saldo [10+] a destinar: escolha Liquidar ou Transportar para o próximo ciclo.`,
+      };
+    }
+    if (closing <= 0 && p.disposition && p.disposition !== "none") {
+      return {
+        ok: false,
+        code: "saldo-zero",
+        error: "Sem saldo [10+] a destinar neste fechamento.",
+      };
+    }
+    const bounds = annualCycleBounds(p.cycleLabel);
+    const activeCons = (d0.periodConsolidations ?? []).filter(
+      (c) => c.status === "active" && c.periodStart >= bounds.from && c.periodEnd <= bounds.to,
+    );
+    const closure: AnnualCycleClosure = {
+      id: closureIdOf(p.cycleLabel),
+      cycleLabel: p.cycleLabel,
+      cycleStart: bounds.from,
+      cycleEnd: bounds.to,
+      status: "closed",
+      closedAt: p.now ?? Date.now(),
+      periodConsolidationIds: activeCons.map((c) => c.id),
+      closingSpecialExcessMinutes: closing,
+      disposition,
+      ...(disposition === "carried"
+        ? { destinationCycleStart: `${Number(p.cycleLabel.split("/")[0]) + 1}-05-01` }
+        : {}),
+      sourceSlices: comp.slices,
+      note: p.note ?? null,
+    };
+    mutate((d) => ({
+      ...d,
+      annualCycleClosures: [
+        ...(d.annualCycleClosures ?? []).filter((c) => c.id !== closure.id),
+        closure,
+      ],
+    }));
+    return OK;
+  },
+
   updateUser(patch: Partial<User>) {
     mutate((d) => ({ ...d, user: { ...d.user, ...patch } }));
   },
@@ -2326,6 +2542,7 @@ export const actions = {
     specialExcessUses?: SpecialExcessUse[];
     specialExcessPlans?: SpecialExcessPlan[];
     periodConsolidations?: PeriodConsolidation[];
+    annualCycleClosures?: AnnualCycleClosure[];
   }) {
     resetCreateGuard();
     mutate(() => ({
@@ -2339,6 +2556,7 @@ export const actions = {
       specialExcessUses: p.specialExcessUses ?? [],
       specialExcessPlans: p.specialExcessPlans ?? [],
       periodConsolidations: p.periodConsolidations ?? [],
+      annualCycleClosures: p.annualCycleClosures ?? [],
     }));
   },
 
@@ -2346,7 +2564,7 @@ export const actions = {
    * Mescla o backup com os dados atuais, preservando eventos distintos.
    * Deduplicação segura via ID + conteúdo completo (nunca apenas dias/minutos).
    */
-  mergeBackup(p: { entries: TimeEntry[]; compensations: Compensation[]; absences?: Absence[]; companyCalendars?: CompanyCalendars; faltas?: Falta[]; excessReasons?: ExcessReason[]; specialExcessUses?: SpecialExcessUse[]; specialExcessPlans?: SpecialExcessPlan[]; periodConsolidations?: PeriodConsolidation[] }) {
+  mergeBackup(p: { entries: TimeEntry[]; compensations: Compensation[]; absences?: Absence[]; companyCalendars?: CompanyCalendars; faltas?: Falta[]; excessReasons?: ExcessReason[]; specialExcessUses?: SpecialExcessUse[]; specialExcessPlans?: SpecialExcessPlan[]; periodConsolidations?: PeriodConsolidation[]; annualCycleClosures?: AnnualCycleClosure[] }) {
     mutate((d) => {
       const entryMerge = mergeByIdAndContent(d.entries, p.entries, entriesEqual);
       const compMerge = mergeByIdAndContent(d.compensations, p.compensations, compsEqual);
@@ -2407,6 +2625,15 @@ export const actions = {
         consIds.add(c.id);
         consMerge.push(c);
       }
+      // 4H — Fechamentos anuais: união por id (uma decisão definitiva por
+      // ciclo; colisão → prevalece o local). Nunca autoencerra ciclos.
+      const closureMerge = [...(d.annualCycleClosures ?? [])];
+      const closureIds = new Set(closureMerge.map((c) => c.id));
+      for (const c of p.annualCycleClosures ?? []) {
+        if (closureIds.has(c.id)) continue;
+        closureIds.add(c.id);
+        closureMerge.push(c);
+      }
       return {
         ...d,
         entries: entryMerge.merged,
@@ -2418,6 +2645,7 @@ export const actions = {
         specialExcessUses: useMerge,
         specialExcessPlans: planMerge,
         periodConsolidations: consMerge,
+        annualCycleClosures: closureMerge,
       };
     });
   },
@@ -2433,6 +2661,15 @@ export const actions = {
     const today = p.asOfDate ?? todayString();
     if (!(p.periodStart < p.periodEnd)) {
       return { ok: false, code: "invalid", error: "Período inválido para consolidação." };
+    }
+    // 4H — GUARD: ciclo encerrado NÃO aceita nova consolidação/revisão (R4)
+    // de um período seu.
+    if (dateFallsInClosedCycle(d0.annualCycleClosures, p.periodStart)) {
+      return {
+        ok: false,
+        code: "cycle-closed",
+        error: "O ciclo anual deste período já foi encerrado: não é possível consolidar períodos deste ciclo.",
+      };
     }
     // 1) Encerrado temporalmente? (passar o dia 21 NÃO consolida automaticamente)
     if (today <= p.periodEnd) {
@@ -2529,6 +2766,15 @@ export const actions = {
    *  preservado, consolidatedAt original intocado) e o período desbloqueia. */
   reopenPeriod(p: { periodStart: string; periodEnd: string; note?: string | null; now?: number }): ActionResult {
     const d0 = getAppData();
+    // 4H — GUARD: período de um ciclo JÁ ENCERRADO não pode ser reaberto
+    // (nenhum botão e nenhuma chamada de domínio).
+    if (dateFallsInClosedCycle(d0.annualCycleClosures, p.periodStart)) {
+      return {
+        ok: false,
+        code: "cycle-closed",
+        error: "O ciclo anual deste período já foi encerrado: o período não pode mais ser reaberto.",
+      };
+    }
     const active = activeConsolidationForPeriod(d0.periodConsolidations, p.periodStart, p.periodEnd);
     if (!active) {
       return { ok: false, code: "not-found", error: "Não há consolidação ativa para reabrir neste período." };
@@ -2630,6 +2876,11 @@ export const actions = {
       const asOf = p.asOfDate ?? todayString();
       if (p.periodClosed) {
         result = { ok: false, code: "period-closed", error: SPECIAL_PERIOD_CLOSED_MSG };
+        return d;
+      }
+      // 4H — GUARD: novo uso de [10+] em ciclo encerrado é bloqueado.
+      if (closedCycleLockForDate(d, p.destinationDate)) {
+        result = closedCycleLockForDate(d, p.destinationDate)!;
         return d;
       }
       // 4G — GUARD: novo uso retroativo em período consolidado é bloqueado.
@@ -2740,6 +2991,16 @@ export const actions = {
       if (!target) {
         result = { ok: false, code: "use-not-found", error: "Uso de [10+] não encontrado." };
         return d;
+      }
+      // 4H — GUARD: edição de uso de [10+] em ciclo encerrado é bloqueada
+      // (destino atual ou novo destino).
+      {
+        const newDest = p.destinationDate ?? target.destinationDate;
+        const lock = closedCycleLockForDate(d, target.destinationDate) ?? closedCycleLockForDate(d, newDest);
+        if (lock) {
+          result = lock;
+          return d;
+        }
       }
       // 4G — GUARD: edição de uso de período consolidado é bloqueada
       // (destino atual ou novo destino dentro do consolidado).
@@ -2852,6 +3113,11 @@ export const actions = {
         result = { ok: false, code: "use-not-found", error: "Uso de [10+] não encontrado." };
         return d;
       }
+      // 4H — GUARD: cancelar uso de [10+] em ciclo encerrado é bloqueado.
+      if (closedCycleLockForDate(d, target.destinationDate)) {
+        result = closedCycleLockForDate(d, target.destinationDate)!;
+        return d;
+      }
       // 4G — GUARD: uso com DESTINO em período consolidado não é cancelado.
       if (consolidationLockForDate(d.periodConsolidations, target.destinationDate)) {
         result = { ok: false, code: "consolidated", error: USE_CONSOLIDATED_MSG };
@@ -2917,6 +3183,11 @@ export const actions = {
         result = { ok: false, code: "period-closed", error: SPECIAL_PLAN_PERIOD_CLOSED_MSG };
         return d;
       }
+      // 4H — GUARD: nova reserva [10+] em ciclo encerrado é bloqueada.
+      if (closedCycleLockForDate(d, p.destinationDate)) {
+        result = closedCycleLockForDate(d, p.destinationDate)!;
+        return d;
+      }
       // 4G — GUARD: plano com destino retroativo em período consolidado é bloqueado.
       if (consolidationLockForDate(d.periodConsolidations, p.destinationDate)) {
         result = { ok: false, code: "consolidated", error: PERIOD_CONSOLIDATED_MSG };
@@ -2946,10 +3217,18 @@ export const actions = {
         result = { ok: false, code: "destination-not-future", error: SPECIAL_PLAN_FUTURE_MSG };
         return d;
       }
-      // §9: seleção manual nunca atravessa o fechamento anual (30/04).
+      // §9: seleção manual nunca atravessa o fechamento anual (30/04) — a MENOS
+      // que a origem seja saldo TRANSPORTADO formalmente para este ciclo.
       if (isManual) {
+        const carriedOrigins = new Set(
+          carriedSlicesIntoCycle(d.annualCycleClosures, getAnnualPointCycle(p.destinationDate)).map((s) => s.originalOriginDate),
+        );
         for (const a of manualRequested) {
-          if (/^\d{4}-\d{2}-\d{2}$/.test(a.originDate) && !sameAnnualCycle(a.originDate, p.destinationDate)) {
+          if (
+            /^\d{4}-\d{2}-\d{2}$/.test(a.originDate) &&
+            !carriedOrigins.has(a.originDate) &&
+            !sameAnnualCycle(a.originDate, p.destinationDate)
+          ) {
             result = {
               ok: false,
               code: "cross-cycle",

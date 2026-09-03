@@ -137,13 +137,18 @@ export function validateSpecialExcessPlan(plan: SpecialExcessPlan): SpecialExces
         errors.push(`origem-duplicada: ${a.originDate}`);
       }
       seen.add(a.originDate);
-      // Ciclo anual: a reserva NUNCA atravessa o fechamento em 30/04.
-      if (
-        isValidYmd(a.originDate) &&
-        isValidYmd(plan.destinationDate) &&
-        !sameAnnualCycle(plan.destinationDate, a.originDate)
-      ) {
-        errors.push(`ciclos-diferentes: origem ${a.originDate} x destino ${plan.destinationDate}`);
+      // Ciclo anual: a reserva NUNCA atravessa o fechamento em 30/04 — a menos
+      // que seja saldo TRANSPORTADO (a.carried === true), autorizado pelo
+      // fechamento do ciclo anterior (origem factual num ciclo ANTERIOR).
+      if (isValidYmd(a.originDate) && isValidYmd(plan.destinationDate)) {
+        const sameCycle = sameAnnualCycle(plan.destinationDate, a.originDate);
+        if (a.carried === true) {
+          if (sameCycle) {
+            errors.push(`carried-no-mesmo-ciclo: origem ${a.originDate} e destino ${plan.destinationDate}`);
+          }
+        } else if (!sameCycle) {
+          errors.push(`ciclos-diferentes: origem ${a.originDate} x destino ${plan.destinationDate}`);
+        }
       }
     }
   }

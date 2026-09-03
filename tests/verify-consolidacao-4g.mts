@@ -499,7 +499,7 @@ check("TESTE 24 DE 24 — Sentinelas: 4F · 4E.1/Central · Registros · banco �
   assert.ok(src("src/lib/company-calendar.ts").includes("export function parseCompanyCalendarCsv"), "calendário intacto");
   // Seed/backup:
   assert.ok(src("src/lib/seed-data.ts").includes("periodConsolidations: []"), "seed com coleção vazia");
-  assert.equal(BACKUP_COLLECTIONS.length, 10, "contrato com 10 coleções");
+  assert.equal(BACKUP_COLLECTIONS.length, 11, "contrato com 11 coleções (4H adiciona annualCycleClosures)");
 });
 
 /* helper de teste usa a MESMA função pura do componente (import dinâmico evita acoplamento de bundler): */

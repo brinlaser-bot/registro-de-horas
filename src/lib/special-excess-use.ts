@@ -42,6 +42,15 @@ export interface SpecialExcessAllocation {
   originDate: string; // YYYY-MM-DD
   /** Minutos retirados desta origem (> 0, inteiro; a origem pode ser fracionada entre usos). */
   minutes: number;
+  /**
+   * 4H — true quando esta origem é saldo TRANSPORTADO: nasceu em um ciclo
+   * ANTERIOR e foi formalmente autorizado para este ciclo pelo fechamento
+   * anual (disposition "carried"). Por isso originDate (dia factual original)
+   * vive fora do ciclo do destino. Falsy/ausente em origens FACTUAIS do
+   * MESMO ciclo. Transações COMUNS entre ciclos (sem `carried`) continuam
+   * proibidas (ver validador).
+   */
+  carried?: boolean;
 }
 
 export type SpecialExcessUseStatus = "utilizado" | "cancelado";
@@ -125,14 +134,23 @@ export function validateSpecialExcessUse(use: SpecialExcessUse): SpecialExcessUs
         errors.push(`origem-duplicada: ${a.originDate}`);
       }
       seen.add(a.originDate);
-      if (
-        isValidYmd(a.originDate) &&
-        isValidYmd(use.destinationDate) &&
-        !sameAnnualCycle(use.destinationDate, a.originDate)
-      ) {
-        errors.push(
-          `ciclos-diferentes: origem ${a.originDate} (${getAnnualPointCycle(a.originDate)}) x destino ${use.destinationDate} (${getAnnualPointCycle(use.destinationDate)})`,
-        );
+      if (isValidYmd(a.originDate) && isValidYmd(use.destinationDate)) {
+        const sameCycle = sameAnnualCycle(use.destinationDate, a.originDate);
+        if (a.carried === true) {
+          // Saldo TRANSPORTADO: nasceu em ciclo ANTERIOR (origem fora do ciclo
+          // do destino) — permitido SOMENTE pela autorização formal do
+          // fechamento. Um allocation marcado carried no MESMO ciclo é
+          // inconsistente (transporte nunca é intra-ciclo).
+          if (sameCycle) {
+            errors.push(
+              `carried-no-mesmo-ciclo: origem ${a.originDate} e destino ${use.destinationDate} no mesmo ciclo não podem ser transporte`,
+            );
+          }
+        } else if (!sameCycle) {
+          errors.push(
+            `ciclos-diferentes: origem ${a.originDate} (${getAnnualPointCycle(a.originDate)}) x destino ${use.destinationDate} (${getAnnualPointCycle(use.destinationDate)})`,
+          );
+        }
       }
     }
   }

@@ -132,6 +132,13 @@ export interface AppData {
    * dados antigos — a hidratação preenche [].
    */
   periodConsolidations?: import("./period-consolidation").PeriodConsolidation[];
+  /**
+   * FECHAMENTOS ANUAIS DEFINITIVOS (Etapa 4H). Registram a decisão formal de
+   * encerramento de cada ciclo (01/05→30/04): se foi liquidado/transportado o
+   * saldo [10+] final e a proveniência. Opcional em dados antigos — a
+   * hidratação preenche [] (ausência = nenhum ciclo formalmente encerrado).
+   */
+  annualCycleClosures?: import("./annual-cycle-closure").AnnualCycleClosure[];
 }
 
 /** Códigos do MOTIVO DO EXCEDENTE acima de 10h (select do modal). */

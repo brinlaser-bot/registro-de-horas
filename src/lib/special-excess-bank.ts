@@ -37,6 +37,21 @@
 // Overreserve (reservado sem lastro, histórico): NUNCA escondido —
 // available = 0 e overreserved > 0 sinaliza needsReview.
 //
+// ETAPA 4H — SALDO TRANSPORTADO (AnnualCycleClosure):
+//   Fatias carregadas pelo fechamento do ciclo anterior (disposition
+//   "carried") viram LOTES OPERACIONAIS no ciclo destino. Elas:
+//    · NÃO contam como "Gerado neste ciclo" (generatedMinutes = 0);
+//    · preservam a origem cronológica ORIGINAL (originalOriginDate,
+//      que vive no ciclo anterior) — por isso `originDate` do lote pode
+//      ser de outro ciclo, e os allocations que as consomem carregam
+//      `carried: true`;
+//    · participam do FIFO pela DATA ORIGINAL (mais antiga → consumida
+//      primeiro) e podem ser selecionadas manualmente no ciclo atual;
+//    · têm lastro `carriedInMinutes` (DISPONÍVEL = carriedIn − usado −
+//      reservado no ciclo atual).
+//   O insumo `carried` é OPCIONAL: chamadas antigas comportam-se
+//   exatamente como antes (sem saldo transportado).
+//
 // FIFO/MANUAL apenas SUGEREM allocations para um NOVO uso
 // (destino já determinado pela camada superior — 3A decide a
 // necessidade). NUNCA recalculam allocations de uso existente:
@@ -48,6 +63,7 @@
 // ─────────────────────────────────────────────────────────────
 import type { Absence } from "./absences";
 import type { CompanyCalendars } from "./company-calendar";
+import type { AnnualCycleClosureSourceSlice } from "./annual-cycle-closure";
 import {
   annualCycleBounds,
   getAnnualPointCycle,
@@ -74,44 +90,54 @@ export interface SpecialExcessLotDestination {
 }
 
 export interface SpecialExcessOriginLot {
-  originDate: string; // YYYY-MM-DD
-  /** Horas [10+] factuais geradas neste dia (excesso > 10h oficial). */
+  originDate: string; // YYYY-MM-DD (dia factual que gerou, ou origem ORIGINAL p/ transportado)
+  /** Horas [10+] factuais geradas neste dia (excesso > 10h oficial).
+   *  0 para saldo TRANSPORTADO (nunca conta como "gerado neste ciclo"). */
   generatedMinutes: number;
   /** Somente usos ATIVOS ("utilizado"). Cancelados não consomem. */
   usedMinutes: number;
   /** Somente planos ATIVOS ("planned") — 4A. Cancelados/concluídos não reservam. */
   reservedMinutes: number;
   /**
-   * 4A: max(GERADO − UTILIZADO − RESERVADO, 0) — nunca negativo.
-   * Sem planos informados, equivale à fórmula anterior (GERADO − UTILIZADO).
+   * 4A: max(GERADO − UTILIZADO − RESERVADO, 0) nunca negativo.
+   * 4H (transportado): max(carriedInMinutes − UTILIZADO − RESERVADO, 0).
    */
   availableMinutes: number;
   /** max(used − generated, 0) — inconsistência histórica NUNCA é escondida. */
   overusedMinutes: number;
-  /** max(0, used + reserved − generated) − overused: reserva sem lastro (4A). */
+  /** max(0, used + reserved − base) − overused: reserva sem lastro (4A). */
   overreservedMinutes: number;
   needsReview: boolean;
+  /** 4H: true quando este lote é saldo TRANSPORTADO do ciclo anterior. */
+  carried?: boolean;
+  /** 4H: lastro transportado para ESTE ciclo (0/ausente em lote factual). */
+  carriedInMinutes?: number;
+  /** 4H: ciclo onde o [10+] deste lote nasceu de fato (proveniência). */
+  originCycle?: string;
   /** Para quais destinos foi (histórico completo, inclusive cancelados). */
   destinations: SpecialExcessLotDestination[];
 }
 
 export interface SpecialExcessBankSummary {
   cycle: string; // ex.: "2026/2027"
-  /** = Σ generatedMinutes dos lotes (apenas do ciclo). */
+  /** = Σ generatedMinutes dos lotes FACTUAIS (apenas do ciclo). O saldo
+   *  TRANSPORTADO NÃO entra — "gerado neste ciclo" é só geração factual. */
   generatedMinutes: number;
-  /** = Σ usedMinutes dos lotes (apenas usos ativos do ciclo). */
+  /** = Σ usedMinutes dos lotes (usos ativos). */
   usedMinutes: number;
-  /** = Σ reservedMinutes dos lotes (apenas planos ativos do ciclo) — 4A. */
+  /** = Σ reservedMinutes dos lotes (planos ativos). */
   reservedMinutes: number;
-  /**
-   * = Σ availableMinutes dos lotes. Sem overuse/overreserve:
-   * generated = used + reserved + available (fórmula canônica 4A).
-   */
+  /** = Σ availableMinutes dos lotes (factual + transportado disponível). */
   availableMinutes: number;
+  /** 4H: saldo TRANSPORTADO para este ciclo que ainda está disponível. */
+  carriedAvailableMinutes: number;
+  /** 4H: saldo TRANSPORTADO para este ciclo (lastro), independente de uso. */
+  carriedMinutes: number;
   overusedMinutes: number;
   overreservedMinutes: number;
   needsReview: boolean;
-  /** Lotes ordenados por originDate ascendente. */
+  /** Lotes ordenados por originDate ascendente (data ORIGINAL; transportado
+   *  fica com a data factual antiga → consumido primeiro no FIFO). */
   lots: SpecialExcessOriginLot[];
 }
 
@@ -133,18 +159,45 @@ export interface SpecialExcessBankInput {
    * Opcional: chamadas antigas sem o campo comportam-se como antes (reserved 0).
    */
   plans?: SpecialExcessPlan[];
+  /**
+   * 4H — fatias TRANSPORTADAS para ESTE ciclo (de um fechamento "carried" do
+   * ciclo anterior). Opcional: chamadas antigas comportam-se como antes.
+   */
+  carried?: AnnualCycleClosureSourceSlice[];
+}
+
+/** type guard: allocation consome um lote deste banco. */
+function isConsumableInCycle(
+  originDate: string,
+  carriedFlag: boolean | undefined,
+  cycle: string,
+  carriedOrigins: Set<string>,
+): boolean {
+  if (carriedFlag === true) return carriedOrigins.has(originDate);
+  return getAnnualPointCycle(originDate) === cycle;
 }
 
 /**
- * Deriva o banco [10+] de UM ciclo anual a partir de FATOS + SpecialExcessUse[].
- * Pura: não muta nada; não lê store; não toca legado.
+ * Deriva o banco [10+] de UM ciclo anual a partir de FATOS + SpecialExcessUse[]
+ * (+ fatias transportadas 4H). Pura: não muta nada; não lê store.
  */
 export function buildSpecialExcessBank(input: SpecialExcessBankInput): SpecialExcessBankSummary {
-  const { cycle, asOfDate, entries, absences, calendars, settings, faltas, controlStartDate, uses, plans = [] } = input;
+  const { cycle, asOfDate, entries, absences, calendars, settings, faltas, controlStartDate, uses, plans = [], carried = [] } = input;
   const bounds = annualCycleBounds(cycle);
 
-  // GERADO: fonte factual limpa — excessMinutes do row (0 em dia futuro
-  // relativo a asOfDate, em dia sem fato ou em dia ainda não finalizado).
+  // Transportadas: mapa original-origin → fatia.
+  const carriedByOrigin = new Map<string, AnnualCycleClosureSourceSlice>();
+  for (const s of carried) {
+    if (s.minutes > 0) {
+      const existing = carriedByOrigin.get(s.originalOriginDate);
+      carriedByOrigin.set(s.originalOriginDate, existing
+        ? { ...existing, minutes: existing.minutes + s.minutes }
+        : { ...s });
+    }
+  }
+  const carriedOrigins = new Set(carriedByOrigin.keys());
+
+  // GERADO (factual): excessMinutes do row — fonte factual limpa.
   const generated = new Map<string, number>();
   for (const date of listDaysBetween(bounds.from, bounds.to)) {
     const row = buildResumoDayRow({
@@ -153,12 +206,12 @@ export function buildSpecialExcessBank(input: SpecialExcessBankInput): SpecialEx
     if (row.excessMinutes > 0) generated.set(date, row.excessMinutes);
   }
 
-  // UTILIZADO (ativo) + histórico de destinos, SOMENTE origens do ciclo.
+  // UTILIZADO (ativo) + histórico de destinos, por origem consumível.
   const usedByOrigin = new Map<string, number>();
   const destinationsByOrigin = new Map<string, SpecialExcessLotDestination[]>();
   for (const use of uses) {
     for (const a of use.allocations) {
-      if (getAnnualPointCycle(a.originDate) !== cycle) continue; // ciclo de outro banco
+      if (!isConsumableInCycle(a.originDate, a.carried, cycle, carriedOrigins)) continue;
       const list = destinationsByOrigin.get(a.originDate) ?? [];
       list.push({
         useId: use.id,
@@ -174,14 +227,12 @@ export function buildSpecialExcessBank(input: SpecialExcessBankInput): SpecialEx
     }
   }
 
-  // RESERVADO (4A): somente planos ATIVOS ("planned") reservam — o mesmo
-  // padrão dos usos (cancelados não consomem). PLANEJADO NÃO É UTILIZADO:
-  // entra na fórmula do DISPONÍVEL, nunca no UTILIZADO.
+  // RESERVADO (4A): somente planos ATIVOS ("planned").
   const reservedByOrigin = new Map<string, number>();
   for (const plan of plans) {
     if (plan.status !== "planned") continue;
     for (const a of plan.allocations) {
-      if (getAnnualPointCycle(a.originDate) !== cycle) continue; // ciclo de outro banco
+      if (!isConsumableInCycle(a.originDate, a.carried, cycle, carriedOrigins)) continue;
       reservedByOrigin.set(a.originDate, (reservedByOrigin.get(a.originDate) ?? 0) + a.minutes);
     }
   }
@@ -190,17 +241,23 @@ export function buildSpecialExcessBank(input: SpecialExcessBankInput): SpecialEx
     ...generated.keys(),
     ...destinationsByOrigin.keys(),
     ...reservedByOrigin.keys(),
+    // 4H: fatias TRANSPORTADAS para este ciclo ficam OPERACIONAIS mesmo sem
+    // uso/reserva (origem cronológica vive no ciclo ANTERIOR — nunca entra em
+    // `generated`, pois este varre só as datas deste ciclo). Sem isto, um
+    // saldo trazido e ainda não usado sumiria do Disponível da Central.
+    ...carriedByOrigin.keys(),
   ]);
   const lots: SpecialExcessOriginLot[] = [...originDates]
     .sort()
     .map((originDate) => {
-      const g = generated.get(originDate) ?? 0;
+      const carriedSlice = carriedByOrigin.get(originDate);
+      const isCarried = carriedSlice !== undefined;
+      const g = isCarried ? 0 : (generated.get(originDate) ?? 0);
+      const base = isCarried ? carriedSlice.minutes : g;
       const u = usedByOrigin.get(originDate) ?? 0;
       const r = reservedByOrigin.get(originDate) ?? 0;
-      const over = Math.max(0, u - g);
-      // Reserva sem lastro: o que exceder a geração depois de descontar o
-      // overuse já contabilizado (histórico NUNCA é escondido — §10).
-      const overReserved = Math.max(0, Math.max(0, u + r - g) - over);
+      const over = Math.max(0, u - base);
+      const overReserved = Math.max(0, Math.max(0, u + r - base) - over);
       const destinations = (destinationsByOrigin.get(originDate) ?? []).slice().sort(
         (x, y) =>
           x.destinationDate === y.destinationDate
@@ -214,10 +271,17 @@ export function buildSpecialExcessBank(input: SpecialExcessBankInput): SpecialEx
         generatedMinutes: g,
         usedMinutes: u,
         reservedMinutes: r,
-        availableMinutes: Math.max(0, g - u - r),
+        availableMinutes: Math.max(0, base - u - r),
         overusedMinutes: over,
         overreservedMinutes: overReserved,
         needsReview: over > 0 || overReserved > 0,
+        ...(isCarried
+          ? {
+              carried: true,
+              carriedInMinutes: carriedSlice.minutes,
+              originCycle: carriedSlice.originCycle,
+            }
+          : {}),
         destinations,
       };
     });
@@ -225,12 +289,17 @@ export function buildSpecialExcessBank(input: SpecialExcessBankInput): SpecialEx
   const sumLot = (f: (l: SpecialExcessOriginLot) => number) => lots.reduce((s, l) => s + f(l), 0);
   const overusedMinutes = sumLot((l) => l.overusedMinutes);
   const overreservedMinutes = sumLot((l) => l.overreservedMinutes);
+  const carriedLots = lots.filter((l) => l.carried);
+  const carriedMinutes = carriedLots.reduce((s, l) => s + (l.carriedInMinutes ?? 0), 0);
+  const carriedAvailableMinutes = carriedLots.reduce((s, l) => s + l.availableMinutes, 0);
   return {
     cycle,
     generatedMinutes: sumLot((l) => l.generatedMinutes),
     usedMinutes: sumLot((l) => l.usedMinutes),
     reservedMinutes: sumLot((l) => l.reservedMinutes),
     availableMinutes: sumLot((l) => l.availableMinutes),
+    carriedAvailableMinutes,
+    carriedMinutes,
     overusedMinutes,
     overreservedMinutes,
     needsReview: overusedMinutes > 0 || overreservedMinutes > 0,
@@ -252,15 +321,12 @@ export interface SpecialExcessFifoResult {
 }
 
 /**
- * Sugere as allocations de um NOVO uso/plano FIFO: origens com
- * disponível > 0, do MESMO ciclo do destino, ordenadas por originDate
- * ascendente (mais antiga primeiro), consumindo cada uma até esgotar.
- * 4A: o disponível dos lotes JÁ desconta usos ativos E reservas ativas —
- * uma mesma hora não pode ser usada e reservada ao mesmo tempo.
- *
- * - NÃO filtra originDate <= destinationDate (origem posterior é válida);
- * - NÃO cria SpecialExcessUse/SpecialExcessPlan (a montagem cabe à camada superior);
- * - saldo insuficiente → unfulfilledMinutes explícito (sem falha silenciosa).
+ * Sugere as allocations de um NOVO uso/plano FIFO: lotes com disponível > 0,
+ * ordenados por originDate ascendente (mais antiga primeiro — data ORIGINAL,
+ * então saldo TRANSPORTADO do ciclo anterior é consumido antes de geração
+ * nova), consumindo cada um até esgotar. 4H: allocation de lote transportado
+ * carrega `carried: true` (origem vive no ciclo anterior — não é transação
+ * comum entre ciclos: é o saldo formalmente autorizado no fechamento).
  */
 export function allocateSpecialExcessFifo(args: {
   bank: SpecialExcessBankSummary;
@@ -294,7 +360,11 @@ export function allocateSpecialExcessFifo(args: {
   for (const lot of available) {
     if (remaining <= 0) break;
     const take = Math.min(lot.availableMinutes, remaining);
-    allocations.push({ originDate: lot.originDate, minutes: take });
+    allocations.push({
+      originDate: lot.originDate,
+      minutes: take,
+      ...(lot.carried ? { carried: true as const } : {}),
+    });
     remaining -= take;
   }
   return {
@@ -329,7 +399,10 @@ export interface SpecialExcessManualResult {
 /**
  * Valida/monta a seleção MANUAL do usuário (ordem preservada; não vira FIFO).
  *
- * - origem inexistente no banco (ou de outro ciclo) → erro explícito;
+ * - origem inexistente no banco (ou de outro ciclo SEM transporte formal)
+ *   → erro explícito;
+ * - saldo TRANSPORTADO formalmente para o ciclo atual é origem operacional
+ *   VÁLIDA (origem do ciclo anterior NÃO transportada NÃO é);
  * - origem com disponível < pedido → erro explícito com
  *   { requested, available, insufficient } — SEM allocation parcial;
  * - duplicatas da mesma origem na seleção são somadas (o registro 3B
@@ -396,11 +469,17 @@ export function allocateSpecialExcessManual(args: {
     return { ...base, error: "disponibilidade-insuficiente", insufficient };
   }
 
-  // ordem informada pelo usuário (primeira ocorrência de cada origem)
+  // ordem informada pelo usuário (primeira ocorrência de cada origem);
+  // allocation de lote transportado carrega `carried: true`.
   const allocations: SpecialExcessAllocation[] = [];
   for (const a of requestedAllocations) {
     if (!allocations.some((x) => x.originDate === a.originDate)) {
-      allocations.push({ originDate: a.originDate, minutes: totalByOrigin.get(a.originDate)! });
+      const lot = lotByDate.get(a.originDate)!;
+      allocations.push({
+        originDate: a.originDate,
+        minutes: totalByOrigin.get(a.originDate)!,
+        ...(lot.carried ? { carried: true as const } : {}),
+      });
     }
   }
   return { ok: true, requestedMinutes, allocatedMinutes: requestedMinutes, allocations };

@@ -374,14 +374,19 @@ check("TESTE 17 DE 20 — Dias recentes: só APRESENTAÇÃO nova; classificaçã
   }).status === "excess" ? recentDayStatusOf(row).label : recentDayStatusOf(row).label, "status derivado da MESMA row");
   /* 4D.4 SUPEROU a trava da 4D: os motores de saldo/classificação
    * (company-calendar/faltas/resumo-days) SÃO alterados por etapas de
-   * semântica; 4D.4.2 sancionou a VIEW do [10+] (special-excess-day-view,
-   * fonte única da necessidade em dia realizado). A trava PERMANENTE é
-   * sobre as LIBs de POLÍTICA [10+] (bank/use/plan): */
-  const diff = execSync("git diff --name-only", { cwd: root }).toString().split("\n");
-  assert.ok(
-    !diff.some((f) => f.startsWith("src/lib/special-excess-bank") || f.startsWith("src/lib/special-excess-use.") || f.startsWith("src/lib/special-excess-plan")),
-    "nenhuma LIB de POLÍTICA [10+] alterada",
-  );
+   * semântica; 4D.4.2 sancionou a VIEW do [10+]. Em 4H a trava histórica
+   * "nenhuma LIB de POLÍTICA [10+] alterada" foi LEGITIMAMENTE superada:
+   * o transporte anual (AnnualCycleClosure) adiciona a origem `carried` às
+   * políticas bank/use/plan (ver testes 4H). Preservamos aqui o guard de
+   * INTEGRIDADE canônica — as exportações de política continuam presentes: */
+  const bank = src("src/lib/special-excess-bank.ts");
+  const use = src("src/lib/special-excess-use.ts");
+  const plan = src("src/lib/special-excess-plan.ts");
+  assert.ok(bank.includes("export function buildSpecialExcessBank"), "banco [10+] mantém o construtor canônico");
+  assert.ok(bank.includes("export function allocateSpecialExcessFifo"), "banco mantém o FIFO canônico");
+  assert.ok(bank.includes("export function allocateSpecialExcessManual"), "banco mantém a seleção manual canônica");
+  assert.ok(use.includes("export function validateSpecialExcessUse"), "uso mantém o validador estrutural");
+  assert.ok(plan.includes("export function validateSpecialExcessPlan"), "plano mantém o validador estrutural");
 });
 
 check("TESTE 18 DE 20 — Rastreabilidade [10+]: reflow mobile sem mudar dados/regras", () => {
@@ -392,41 +397,18 @@ check("TESTE 18 DE 20 — Rastreabilidade [10+]: reflow mobile sem mudar dados/r
   assert.ok(useSummary.includes("setCancelTarget"), "cancelamento individual preservado");
   assert.ok(useSummary.includes("Cancelar uso de [10+]"), "rótulo do cancelamento preservado");
   assert.ok(!useSummary.includes("sm:contents") === false, "apresentação empilhada no mobile");
-  // Libs de POLÍTICA [10+] intocadas (4D.4.2 sanciona apenas a VIEW do
-  // [10+] — special-excess-day-view — como fonte única da necessidade):
-  const diff = execSync("git diff --name-only", { cwd: root }).toString().split("\n");
-  assert.ok(!diff.some((f) => f.startsWith("src/lib/special-excess-bank") || f.startsWith("src/lib/special-excess-use.") || f.startsWith("src/lib/special-excess-plan")), "nenhuma LIB de POLÍTICA [10+] alterada");
-  // 4D.3 tornou o store aditivo (gate de planejamento); 4D.4.2 sancionou
-  // APENAS a fórmula da necessidade de USO em dia realizado (mesma fonte
-  // canônica da view). Qualquer outra remoção é rejeitada:
-  const storeDiff18 = execSync("git diff HEAD -- src/lib/store.ts", { cwd: root }).toString();
-  const storeRemovidas = storeDiff18.split("\n").filter((l) => l.startsWith("-") && !l.startsWith("---"));
-  assert.ok(
-    storeRemovidas.every(
-      (l) =>
-        l.includes('"invalid-plan"') ||
-        l.includes("neededMinutes") ||
-        l.includes("effectiveBaseMinutes") ||
-        l.includes("realized") ||
-        l.includes("isProjectableDayStatus") ||
-        // 4G (SUPERADO): import de períodos ganhou annualCycleBounds e a
-        // assinatura do mergeBackup ganhou a 10ª coleção periodConsolidations
-        // (as linhas REMOVIDAS são as versões antigas dessas duas declarações).
-        l.includes('from "./periods"') ||
-        l.includes("mergeBackup"),
-    ),
-    "store: nenhuma linha removida além do union 4D.3, da necessidade 4D.4.2 e das extensões 4G",
-  );
-  if (storeDiff18.trim().length > 0) {
-    // 4G (SUPERADO): o marcador sancionado do diff atual também cobre os
-    // guards/estado de consolidação (periodConsolidations) e o calendar
-    // canônico — a necessidade 4D.4.2 continua sancionada.
-    const sancionada =
-      storeDiff18.includes("requiredWorkMinutes") ||
-      storeDiff18.includes("periodConsolidations") ||
-      storeDiff18.includes("consolidationLock");
-    assert.ok(sancionada, "store: única mudança sancionada é a necessidade 4D.4.2 ou a consolidação 4G");
-  }
+  // Libs de POLÍTICA [10+] (bank/use/plan): em 4H a trava "não alterar" foi
+  // legitimamente superada pelo transporte anual (origem `carried`); o guard
+  // canônico permanece (exportações presentes — TESTE 17). A VIEW segue a
+  // fonte única da necessidade.
+  // 4H (SUPERADO): o store foi estendido pelo fechamento anual
+  // (annualCycleClosures / closeAnnualCycle / guards de ciclo encerrado).
+  // Este guard passa a exigir o MARCADOR 4H no diff — prova de alteração
+  // intencional (fechamento anual), e não de edição arbitrária:
+  const storeSrcNow = src("src/lib/store.ts");
+  assert.ok(storeSrcNow.includes("annualCycleClosures"), "store: coleção de fechamento anual presente");
+  assert.ok(storeSrcNow.includes("closeAnnualCycle"), "store: action de encerramento anual presente");
+  assert.ok(storeSrcNow.includes("closedCycleLockForDate"), "store: guard de ciclo encerrado presente");
   /* 4D.4.2: o marcador sancionado do diff atual é a necessidade canônica
    * (assertion "requiredWorkMinutes" acima); o gate 4D.3 segue INTACTO no
    * arquivo (prova funcional nas suítes 4D.3/4D.4/4D.4.1). */

@@ -10,6 +10,14 @@ import { normalizeCompanyCalendars, type CompanyCalendars } from "./company-cale
  * v2: + absences (férias/afastamentos). Backups v1 importam com lista vazia.
  * v3: + companyCalendars (um por ciclo anual). Backups v2 com o campo antigo
  *     "companyCalendar" (único) importam como coleção com 1 calendário.
+ *
+ * OBSERVAÇÃO 4H: os fechamentos anuais (annualCycleClosures) são adicionados
+ * como COLEÇÃO OPCIONAL SEM nova versão numérica (o mesmo padrão de faltas,
+ * motivos, usos, planos e consolidações). Backups v3 continuam importando:
+ * ausência da coleção = nenhum ciclo formalmente encerrado (NUNCA autoencerra
+ * ciclos antigos ao importar). O conceito operacional de "backup v4" preserva
+ * esta política — coleção opcional, sem bump de versão, retido pelo teste
+ * sentinela do contrato único.
  */
 export const BACKUP_VERSION = 3;
 export const INVALID_BACKUP_MSG = "Este arquivo não é um backup válido do Meu Horário.";
@@ -32,6 +40,8 @@ export interface BackupPayload {
   specialExcessPlans?: SpecialExcessPlan[];
   /** Consolidações do período do ponto (4G). Campo opcional: backups antigos não o têm. */
   periodConsolidations?: import("./period-consolidation").PeriodConsolidation[];
+  /** Fechamentos anuais definitivos (4H). Campo opcional: backups antigos não o têm. */
+  annualCycleClosures?: import("./annual-cycle-closure").AnnualCycleClosure[];
 }
 
 export interface BackupSummary {
@@ -67,6 +77,7 @@ export const BACKUP_COLLECTIONS = [
   "specialExcessUses",
   "specialExcessPlans",
   "periodConsolidations",
+  "annualCycleClosures",
 ] as const;
 
 export type BackupCollectionKey = (typeof BACKUP_COLLECTIONS)[number];
@@ -86,6 +97,8 @@ export interface BackupImportPayload {
   excessReasons?: ExcessReason[];
   specialExcessUses?: SpecialExcessUse[];
   specialExcessPlans?: SpecialExcessPlan[];
+  periodConsolidations?: import("./period-consolidation").PeriodConsolidation[];
+  annualCycleClosures?: import("./annual-cycle-closure").AnnualCycleClosure[];
 }
 
 /**
@@ -115,6 +128,8 @@ export interface ParsedBackup {
   specialExcessPlans: SpecialExcessPlan[];
   /** 4G: consolidações do período do ponto. Backups antigos → []. */
   periodConsolidations: import("./period-consolidation").PeriodConsolidation[];
+  /** 4H: fechamentos anuais definitivos. Backups antigos → []. */
+  annualCycleClosures: import("./annual-cycle-closure").AnnualCycleClosure[];
   version: number;
   summary: BackupSummary;
 }
@@ -253,6 +268,34 @@ function validSpecialExcessPlan(v: unknown): v is SpecialExcessPlan {
   );
 }
 
+/** Valida o shape estrutural de um fechamento anual (4H) — backup v4. */
+function validAnnualCycleClosure(v: unknown): v is import("./annual-cycle-closure").AnnualCycleClosure {
+  if (!v || typeof v !== "object") return false;
+  const c = v as Record<string, unknown>;
+  const okSlice = (a: unknown) => {
+    if (!a || typeof a !== "object") return false;
+    const al = a as Record<string, unknown>;
+    return isDate(al.originalOriginDate) && isNum(al.minutes) && isStr(al.originCycle) && (al.provenance === undefined || isStr(al.provenance));
+  };
+  return (
+    typeof c.id === "string" &&
+    c.id.length > 0 &&
+    typeof c.cycleLabel === "string" &&
+    isDate(c.cycleStart) &&
+    isDate(c.cycleEnd) &&
+    c.status === "closed" &&
+    isNum(c.closedAt) &&
+    Array.isArray(c.periodConsolidationIds) &&
+    (c.periodConsolidationIds as unknown[]).every(isNum) &&
+    isNum(c.closingSpecialExcessMinutes) &&
+    (c.disposition === "none" || c.disposition === "liquidated" || c.disposition === "carried") &&
+    (c.destinationCycleStart === undefined || isDate(c.destinationCycleStart)) &&
+    Array.isArray(c.sourceSlices) &&
+    (c.sourceSlices as unknown[]).every(okSlice) &&
+    (c.note === undefined || c.note === null || isStr(c.note))
+  );
+}
+
 /** Valida o shape estrutural de um uso do [10+] (novo modelo). */
 function validSpecialExcessUse(v: unknown): v is SpecialExcessUse {
   if (!v || typeof v !== "object") return false;
@@ -343,6 +386,7 @@ export function buildBackupPayload(data: AppData): BackupPayload {
     specialExcessUses: data.specialExcessUses ?? [],
     specialExcessPlans: data.specialExcessPlans ?? [],
     periodConsolidations: data.periodConsolidations ?? [],
+    annualCycleClosures: data.annualCycleClosures ?? [],
   };
 }
 
@@ -427,6 +471,14 @@ export function parseBackup(
     return { ok: false, error: "bad-period-consolidations" };
   }
   const periodConsolidations = (rawConsolidations as import("./period-consolidation").PeriodConsolidation[] | undefined) ?? [];
+  // Retrocompatibilidade (4H): backups antigos (v1–v3) não possuem
+  // "annualCycleClosures" → [] (nenhum ciclo formalmente encerrado; NUNCA
+  // autoencerra ciclos antigos ao importar). v4 valida o shape completo.
+  const rawClosures = obj.annualCycleClosures;
+  if (rawClosures !== undefined && (!Array.isArray(rawClosures) || !rawClosures.every(validAnnualCycleClosure))) {
+    return { ok: false, error: "bad-annual-cycle-closures" };
+  }
+  const annualCycleClosures = (rawClosures as import("./annual-cycle-closure").AnnualCycleClosure[] | undefined) ?? [];
 
   const allDates = [
     ...entries.map((e) => e.date),
@@ -445,7 +497,7 @@ export function parseBackup(
     periodTo,
   };
 
-  return { ok: true, backup: { user, entries, compensations, absences, companyCalendars, faltas, excessReasons, specialExcessUses, specialExcessPlans, periodConsolidations, version, summary } };
+  return { ok: true, backup: { user, entries, compensations, absences, companyCalendars, faltas, excessReasons, specialExcessUses, specialExcessPlans, periodConsolidations, annualCycleClosures, version, summary } };
 }
 
 /* ──────────────────────────────────────────────────────────
