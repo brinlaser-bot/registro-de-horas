@@ -20,9 +20,21 @@ import {
 } from "./hour-bank";
 import { abonoDayDecision, abonoInCycle, validateAbsence, type Absence, type AbsenceSplit } from "./absences";
 import { canRegisterFalta } from "./faltas";
-import { getAnnualPointCycle, sameAnnualCycle } from "./periods";
+import { annualCycleBounds, getAnnualPointCycle, sameAnnualCycle } from "./periods";
 import { companyDayContext, normalizeCompanyCalendars, type CompanyCalendar, type CompanyCalendars } from "./company-calendar";
 import { buildResumoDayRow } from "./resumo-days";
+import {
+  buildResumoPeriodView,
+  resumoPeriodPendencies,
+  resumoSpecialPeriodMovement,
+} from "./resumo-period-view";
+import {
+  activeConsolidationForPeriod,
+  consolidatedCalendarConflicts,
+  consolidationLockForDate,
+  rangeIntersectsConsolidation,
+  type PeriodConsolidation,
+} from "./period-consolidation";
 import { isProjectableDayStatus, projectRealizedDayOfficial } from "./official-projection";
 import {
   allocateSpecialExcessFifo,
@@ -55,6 +67,7 @@ export interface ActionResult {
   /** Mensagem pronta para exibição na interface. */
   error?: string;
   code?:
+    | "consolidated"
     | "over-capacity"
     | "invalid"
     | "not-found"
@@ -178,6 +191,8 @@ export function parseStoredAppData(raw: string): AppData | null {
     const specialExcessUses = Array.isArray(parsed.specialExcessUses) ? parsed.specialExcessUses : [];
     // 4A: dados antigos sem planos → [] (retrocompatível; nada é reinterpretado).
     const specialExcessPlans = Array.isArray(parsed.specialExcessPlans) ? parsed.specialExcessPlans : [];
+    // 4G: dados antigos sem consolidações → [] (retrocompatível).
+    const periodConsolidations = Array.isArray(parsed.periodConsolidations) ? parsed.periodConsolidations : [];
     return {
       user: parsed.user,
       entries: parsed.entries,
@@ -188,6 +203,7 @@ export function parseStoredAppData(raw: string): AppData | null {
       excessReasons,
       specialExcessUses,
       specialExcessPlans,
+      periodConsolidations,
     };
   } catch {
     return null;
@@ -315,6 +331,9 @@ const nextId = (rows: { id: number }[]) =>
      intacto; nada é persistido parcialmente.
    ───────────────────────────────────────────────────────────── */
 
+const PERIOD_CONSOLIDATED_MSG = "Período consolidado — reabra o período no Resumo para editar.";
+const USE_CONSOLIDATED_MSG = "Uso protegido por período consolidado.";
+const CALENDAR_CONSOLIDATED_MSG = "Este calendário altera um período consolidado. Reabra o período antes de modificar essas datas.";
 const SPECIAL_PERIOD_CLOSED_MSG =
   "O período já está fechado: não é possível criar, editar ou cancelar usos de [10+].";
 
@@ -1123,6 +1142,11 @@ export const actions = {
         result = { ok: false, code: "invalid", error: FUTURE_DATE_ERROR };
         return d;
       }
+      // 4G — GUARD: data dentro de período consolidado ATIVO é mutação bloqueada.
+      if (consolidationLockForDate(d.periodConsolidations, p.date)) {
+        result = { ok: false, code: "consolidated", error: PERIOD_CONSOLIDATED_MSG };
+        return d;
+      }
       const created: TimeEntry = { id: nextId(d.entries), ...p, source: p.source ?? "live" };
       // §28: erro CONTEXTUAL — alternância clássica no fim do dia; mensagem
       // específica para horário cronologicamente inválido NO MEIO da sequência.
@@ -1174,6 +1198,13 @@ export const actions = {
       for (const p of list) {
         if (isFutureDate(p.date)) {
           result = { ok: false, code: "invalid", error: FUTURE_DATE_ERROR };
+          return d;
+        }
+      }
+      // 4G — GUARD: nenhum lançamento em lote dentro de período consolidado.
+      for (const p of list) {
+        if (consolidationLockForDate(d.periodConsolidations, p.date)) {
+          result = { ok: false, code: "consolidated", error: PERIOD_CONSOLIDATED_MSG };
           return d;
         }
       }
@@ -1246,6 +1277,12 @@ export const actions = {
         result = { ok: false, code: "not-found", error: "Registro não encontrado." };
         return d;
       }
+      // 4G — GUARD: edição/exclusão de batida em período consolidado é bloqueada
+      // (dia de origem e dia de destino, quando a data muda).
+      if (consolidationLockForDate(d.periodConsolidations, target.date) || (patch.date && consolidationLockForDate(d.periodConsolidations, patch.date))) {
+        result = { ok: false, code: "consolidated", error: PERIOD_CONSOLIDATED_MSG };
+        return d;
+      }
       const next = { ...target, ...patch, edited: true as const };
       // Sequência cronológica final válida em TODOS os dias afetados (§28:
       // mensagem contextual para edição que retrocede na linha do tempo)
@@ -1302,6 +1339,11 @@ export const actions = {
       const target = d.entries.find((e) => e.id === id);
       if (!target) {
         result = { ok: false, code: "not-found", error: "Registro não encontrado." };
+        return d;
+      }
+      // 4G — GUARD: exclusão de batida em período consolidado é bloqueada.
+      if (consolidationLockForDate(d.periodConsolidations, target.date)) {
+        result = { ok: false, code: "consolidated", error: PERIOD_CONSOLIDATED_MSG };
         return d;
       }
       const sim = { ...d, entries: d.entries.filter((e) => e.id !== id) };
@@ -1560,6 +1602,11 @@ export const actions = {
   addFalta(date: string): ActionResult {
     let result: ActionResult = OK;
     mutate((d) => {
+      // 4G — GUARD: falta retroativa em período consolidado é bloqueada.
+      if (consolidationLockForDate(d.periodConsolidations, date)) {
+        result = { ok: false, code: "consolidated", error: PERIOD_CONSOLIDATED_MSG };
+        return d;
+      }
       const gate = canRegisterFalta(
         date,
         d.entries,
@@ -1594,6 +1641,11 @@ export const actions = {
         result = { ok: false, code: "not-found", error: "Falta não encontrada." };
         return d;
       }
+      // 4G — GUARD: remover falta de período consolidado é bloqueado.
+      if (consolidationLockForDate(d.periodConsolidations, target.date)) {
+        result = { ok: false, code: "consolidated", error: PERIOD_CONSOLIDATED_MSG };
+        return d;
+      }
       const linked = d.compensations.some(
         (c) =>
           c.sourceDate === target.date &&
@@ -1625,6 +1677,11 @@ export const actions = {
   ): ActionResult {
     let result: ActionResult = OK;
     mutate((d) => {
+      // 4G — GUARD: férias/afastamentos que afetem datas de período consolidado.
+      if (rangeIntersectsConsolidation(d.periodConsolidations, draft.startDate, draft.endDate)) {
+        result = { ok: false, code: "consolidated", error: PERIOD_CONSOLIDATED_MSG };
+        return d;
+      }
       const v = validateAbsence(draft, d.absences, d.entries, undefined, d.faltas);
       if (!v.ok) {
         result = { ok: false, code: v.code, error: v.error, split: v.split };
@@ -1645,6 +1702,14 @@ export const actions = {
         result = { ok: false, code: "not-found", error: "Evento não encontrado." };
         return d;
       }
+      // 4G — GUARD: alteração de afastamento em período consolidado (antes/depois).
+      if (
+        rangeIntersectsConsolidation(d.periodConsolidations, target.startDate, target.endDate) ||
+        rangeIntersectsConsolidation(d.periodConsolidations, patch.startDate ?? target.startDate, patch.endDate ?? target.endDate)
+      ) {
+        result = { ok: false, code: "consolidated", error: PERIOD_CONSOLIDATED_MSG };
+        return d;
+      }
       const next = { ...target, ...patch };
       const v = validateAbsence(next, d.absences, d.entries, id, d.faltas);
       if (!v.ok) {
@@ -1663,6 +1728,11 @@ export const actions = {
       const target = d.absences.find((a) => a.id === id);
       if (!target) {
         result = { ok: false, code: "not-found", error: "Evento não encontrado." };
+        return d;
+      }
+      // 4G — GUARD: excluir afastamento de período consolidado é bloqueado.
+      if (rangeIntersectsConsolidation(d.periodConsolidations, target.startDate, target.endDate)) {
+        result = { ok: false, code: "consolidated", error: PERIOD_CONSOLIDATED_MSG };
         return d;
       }
       // Preserva histórico: avisa se houver compensações ligadas ao período,
@@ -2248,6 +2318,7 @@ export const actions = {
     excessReasons?: ExcessReason[];
     specialExcessUses?: SpecialExcessUse[];
     specialExcessPlans?: SpecialExcessPlan[];
+    periodConsolidations?: PeriodConsolidation[];
   }) {
     resetCreateGuard();
     mutate(() => ({
@@ -2260,6 +2331,7 @@ export const actions = {
       excessReasons: p.excessReasons ?? [],
       specialExcessUses: p.specialExcessUses ?? [],
       specialExcessPlans: p.specialExcessPlans ?? [],
+      periodConsolidations: p.periodConsolidations ?? [],
     }));
   },
 
@@ -2267,7 +2339,7 @@ export const actions = {
    * Mescla o backup com os dados atuais, preservando eventos distintos.
    * Deduplicação segura via ID + conteúdo completo (nunca apenas dias/minutos).
    */
-  mergeBackup(p: { entries: TimeEntry[]; compensations: Compensation[]; absences?: Absence[]; companyCalendars?: CompanyCalendars; faltas?: Falta[]; excessReasons?: ExcessReason[]; specialExcessUses?: SpecialExcessUse[]; specialExcessPlans?: SpecialExcessPlan[] }) {
+  mergeBackup(p: { entries: TimeEntry[]; compensations: Compensation[]; absences?: Absence[]; companyCalendars?: CompanyCalendars; faltas?: Falta[]; excessReasons?: ExcessReason[]; specialExcessUses?: SpecialExcessUse[]; specialExcessPlans?: SpecialExcessPlan[]; periodConsolidations?: PeriodConsolidation[] }) {
     mutate((d) => {
       const entryMerge = mergeByIdAndContent(d.entries, p.entries, entriesEqual);
       const compMerge = mergeByIdAndContent(d.compensations, p.compensations, compsEqual);
@@ -2319,6 +2391,15 @@ export const actions = {
         planIds.add(pl.id);
         planMerge.push(pl);
       }
+      // 4G — Consolidações: união por id (colisão → prevalece o local);
+      // revisions/histórico de ambos os dispositivos são preservados.
+      const consMerge = [...(d.periodConsolidations ?? [])];
+      const consIds = new Set(consMerge.map((c) => c.id));
+      for (const c of p.periodConsolidations ?? []) {
+        if (consIds.has(c.id)) continue;
+        consIds.add(c.id);
+        consMerge.push(c);
+      }
       return {
         ...d,
         entries: entryMerge.merged,
@@ -2329,8 +2410,130 @@ export const actions = {
         excessReasons: reasonMerge.merged,
         specialExcessUses: useMerge,
         specialExcessPlans: planMerge,
+        periodConsolidations: consMerge,
       };
     });
+  },
+
+  /* ── CONSOLIDAÇÃO SEGURA DO PERÍODO (4G) ──
+     A consolidação CONGELA a fotografia do resultado que o usuário decidiu
+     considerar no sistema oficial. NUNCA transforma projeção em factual.
+     Sem fechamento automático: exige ação explícita, com pendências = 0. */
+
+  /** Consolida o período 21→20 (snapshot imutável; revision sequencial). */
+  consolidatePeriod(p: { periodStart: string; periodEnd: string; asOfDate?: string; now?: number }): ActionResult {
+    const d0 = getAppData();
+    const today = p.asOfDate ?? todayString();
+    if (!(p.periodStart < p.periodEnd)) {
+      return { ok: false, code: "invalid", error: "Período inválido para consolidação." };
+    }
+    // 1) Encerrado temporalmente? (passar o dia 21 NÃO consolida automaticamente)
+    if (today <= p.periodEnd) {
+      return { ok: false, code: "invalid", error: "O período ainda está em andamento — a consolidação só é possível após o fim do período." };
+    }
+    // 2) Já consolidado (ativo)?
+    if (activeConsolidationForPeriod(d0.periodConsolidations, p.periodStart, p.periodEnd)) {
+      return { ok: false, code: "invalid", error: "Este período já está consolidado." };
+    }
+    // 3) Pendências bloqueantes (classificador canônico 4D.5 no recorte do período)?
+    const pend = resumoPeriodPendencies({
+      today,
+      period: { from: p.periodStart, to: p.periodEnd },
+      entries: d0.entries,
+      absences: d0.absences,
+      calendars: d0.companyCalendars,
+      settings: settingsOf(d0.user),
+      faltas: d0.faltas,
+      controlStartDate: d0.user.controlStartDate ?? null,
+      plans: d0.specialExcessPlans ?? [],
+    });
+    if (pend.total > 0) {
+      return { ok: false, code: "invalid", error: "Resolva as pendências antes de consolidar este período." };
+    }
+    // 4) Fotografia (MESMAS fontes da tela — nenhuma segunda matemática):
+    const view = buildResumoPeriodView({
+      period: { from: p.periodStart, to: p.periodEnd },
+      today,
+      entries: d0.entries,
+      absences: d0.absences,
+      calendars: d0.companyCalendars,
+      settings: settingsOf(d0.user),
+      faltas: d0.faltas,
+      controlStartDate: d0.user.controlStartDate ?? null,
+      uses: d0.specialExcessUses ?? [],
+      plans: d0.specialExcessPlans ?? [],
+    });
+    const movement = resumoSpecialPeriodMovement({
+      period: { from: p.periodStart, to: p.periodEnd },
+      today,
+      cycle: getAnnualPointCycle(p.periodStart),
+      entries: d0.entries,
+      absences: d0.absences,
+      calendars: d0.companyCalendars,
+      settings: settingsOf(d0.user),
+      faltas: d0.faltas,
+      controlStartDate: d0.user.controlStartDate ?? null,
+      uses: d0.specialExcessUses ?? [],
+      plans: d0.specialExcessPlans ?? [],
+    });
+    const usosDoPeriodo = (d0.specialExcessUses ?? []).filter(
+      (u) => u.status === "utilizado" && u.destinationDate >= p.periodStart && u.destinationDate <= p.periodEnd,
+    );
+    const cycleBounds = annualCycleBounds(getAnnualPointCycle(p.periodStart));
+    const samePeriod = (d0.periodConsolidations ?? []).filter(
+      (c) => c.periodStart === p.periodStart && c.periodEnd === p.periodEnd,
+    );
+    const nowTs = p.now ?? Date.now();
+    const consolidation: PeriodConsolidation = {
+      id: nowTs,
+      periodStart: p.periodStart,
+      periodEnd: p.periodEnd,
+      cycleStart: cycleBounds.from,
+      cycleEnd: cycleBounds.to,
+      consolidatedAt: nowTs,
+      revision: samePeriod.reduce((max, c) => Math.max(max, c.revision), 0) + 1,
+      status: "active",
+      factualBalanceMinutes: view.cards.regularBalanceMinutes,
+      projectedBalanceMinutes: view.cards.projection.projectedBalanceMinutes,
+      regularPositiveMinutes: view.composition.generatedCreditMinutes,
+      regularNegativeMinutes: view.composition.generatedDeficitMinutes,
+      trackedDays: view.totals.trackedDays,
+      specialExcessUsedMinutes: movement.usedMinutes,
+      useIds: usosDoPeriodo.map((u) => u.id),
+      allocations: usosDoPeriodo.flatMap((u) => u.allocations.map((a) => ({ originDate: a.originDate, minutes: a.minutes }))),
+      pendingCountAtConsolidation: pend.total,
+      reopenedAt: null,
+      reopenNote: null,
+    };
+    mutate((d) => ({
+      ...d,
+      // Nova revisão NUNCA sobrescreve a anterior; somente uma fica ativa:
+      periodConsolidations: [
+        ...(d.periodConsolidations ?? []).map((c) =>
+          c.periodStart === p.periodStart && c.periodEnd === p.periodEnd ? { ...c, status: "superseded" as const } : c,
+        ),
+        consolidation,
+      ],
+    }));
+    return OK;
+  },
+
+  /** Reabre o período consolidado: a revisão atual vira superseded (histórico
+   *  preservado, consolidatedAt original intocado) e o período desbloqueia. */
+  reopenPeriod(p: { periodStart: string; periodEnd: string; note?: string | null; now?: number }): ActionResult {
+    const d0 = getAppData();
+    const active = activeConsolidationForPeriod(d0.periodConsolidations, p.periodStart, p.periodEnd);
+    if (!active) {
+      return { ok: false, code: "not-found", error: "Não há consolidação ativa para reabrir neste período." };
+    }
+    const nowTs = p.now ?? Date.now();
+    mutate((d) => ({
+      ...d,
+      periodConsolidations: (d.periodConsolidations ?? []).map((c) =>
+        c.id === active.id ? { ...c, status: "superseded" as const, reopenedAt: nowTs, reopenNote: p.note ?? null } : c,
+      ),
+    }));
+    return OK;
   },
 
   /**
@@ -2342,12 +2545,30 @@ export const actions = {
     if (existing.some((c) => c.cycleStart === calendar.cycleStart)) {
       return { ok: false, code: "overlap", error: `Já existe um calendário para o ciclo ${calendar.cycleLabel}.` };
     }
+    // 4G — GUARD: importar calendário que cria contexto em data consolidada é bloqueado.
+    {
+      const conflitos = consolidatedCalendarConflicts({ consolidations: getAppData().periodConsolidations, after: calendar.entries });
+      if (conflitos.length > 0) {
+        return { ok: false, code: "consolidated", error: CALENDAR_CONSOLIDATED_MSG };
+      }
+    }
     mutate((d) => ({ ...d, companyCalendars: [...(d.companyCalendars ?? []), calendar].sort((a, b) => a.cycleStart.localeCompare(b.cycleStart)) }));
     return OK;
   },
 
   /** Substitui SOMENTE o calendário do mesmo ciclo (demais ciclos intactos). */
   replaceCompanyCalendar(calendar: CompanyCalendar): ActionResult {
+    // 4G — GUARD: comparação CANÔNICA por data (tratamento/horas/jornada/abono —
+    // não metadados de importação). Calendário idêntico prossegue; mudança em
+    // data de período consolidado é bloqueada.
+    {
+      const d0 = getAppData();
+      const before = (d0.companyCalendars ?? []).find((c) => c.cycleStart === calendar.cycleStart);
+      const conflitos = consolidatedCalendarConflicts({ consolidations: d0.periodConsolidations, before: before?.entries, after: calendar.entries });
+      if (conflitos.length > 0) {
+        return { ok: false, code: "consolidated", error: CALENDAR_CONSOLIDATED_MSG };
+      }
+    }
     mutate((d) => {
       const list = (d.companyCalendars ?? []).filter((c) => c.cycleStart !== calendar.cycleStart);
       return { ...d, companyCalendars: [...list, calendar].sort((a, b) => a.cycleStart.localeCompare(b.cycleStart)) };
@@ -2357,6 +2578,16 @@ export const actions = {
 
   /** Remove SOMENTE o calendário do ciclo informado (registros de ponto intactos). */
   removeCompanyCalendar(cycleStart: string): ActionResult {
+    // 4G — GUARD: remover calendário com datas consolidadas muda o contexto do
+    // período — bloqueado (reabra antes).
+    {
+      const d0 = getAppData();
+      const before = (d0.companyCalendars ?? []).find((c) => c.cycleStart === cycleStart);
+      const conflitos = consolidatedCalendarConflicts({ consolidations: d0.periodConsolidations, before: before?.entries });
+      if (conflitos.length > 0) {
+        return { ok: false, code: "consolidated", error: CALENDAR_CONSOLIDATED_MSG };
+      }
+    }
     mutate((d) => {
       const list = (d.companyCalendars ?? []).filter((c) => c.cycleStart !== cycleStart);
       return { ...d, companyCalendars: list.length > 0 ? list : undefined };
@@ -2392,6 +2623,11 @@ export const actions = {
       const asOf = p.asOfDate ?? todayString();
       if (p.periodClosed) {
         result = { ok: false, code: "period-closed", error: SPECIAL_PERIOD_CLOSED_MSG };
+        return d;
+      }
+      // 4G — GUARD: novo uso retroativo em período consolidado é bloqueado.
+      if (consolidationLockForDate(d.periodConsolidations, p.destinationDate)) {
+        result = { ok: false, code: "consolidated", error: USE_CONSOLIDATED_MSG };
         return d;
       }
       const isManual = p.allocationStrategy === "manual";
@@ -2498,6 +2734,15 @@ export const actions = {
         result = { ok: false, code: "use-not-found", error: "Uso de [10+] não encontrado." };
         return d;
       }
+      // 4G — GUARD: edição de uso de período consolidado é bloqueada
+      // (destino atual ou novo destino dentro do consolidado).
+      if (
+        consolidationLockForDate(d.periodConsolidations, target.destinationDate) ||
+        (p.destinationDate !== undefined && consolidationLockForDate(d.periodConsolidations, p.destinationDate))
+      ) {
+        result = { ok: false, code: "consolidated", error: USE_CONSOLIDATED_MSG };
+        return d;
+      }
       if (target.status === "cancelado") {
         result = {
           ok: false,
@@ -2600,6 +2845,11 @@ export const actions = {
         result = { ok: false, code: "use-not-found", error: "Uso de [10+] não encontrado." };
         return d;
       }
+      // 4G — GUARD: uso com DESTINO em período consolidado não é cancelado.
+      if (consolidationLockForDate(d.periodConsolidations, target.destinationDate)) {
+        result = { ok: false, code: "consolidated", error: USE_CONSOLIDATED_MSG };
+        return d;
+      }
       if (target.status === "cancelado") {
         result = {
           ok: false,
@@ -2658,6 +2908,11 @@ export const actions = {
       const asOf = p.asOfDate ?? todayString();
       if (p.periodClosed) {
         result = { ok: false, code: "period-closed", error: SPECIAL_PLAN_PERIOD_CLOSED_MSG };
+        return d;
+      }
+      // 4G — GUARD: plano com destino retroativo em período consolidado é bloqueado.
+      if (consolidationLockForDate(d.periodConsolidations, p.destinationDate)) {
+        result = { ok: false, code: "consolidated", error: PERIOD_CONSOLIDATED_MSG };
         return d;
       }
       const isManual = p.selectionMode === "manual";
@@ -2798,6 +3053,11 @@ export const actions = {
         result = { ok: false, code: "plan-not-found", error: SPECIAL_PLAN_NOT_FOUND_MSG };
         return d;
       }
+      // 4G — GUARD: plano com destino em período consolidado não é cancelado.
+      if (consolidationLockForDate(d.periodConsolidations, target.destinationDate)) {
+        result = { ok: false, code: "consolidated", error: PERIOD_CONSOLIDATED_MSG };
+        return d;
+      }
       if (target.status === "concluded") {
         result = { ok: false, code: "plan-already-concluded", error: SPECIAL_PLAN_ALREADY_CONCLUDED_MSG };
         return d;
@@ -2848,6 +3108,11 @@ export const actions = {
       const target = (d.specialExcessPlans ?? []).find((pl) => pl.id === p.id);
       if (!target) {
         result = { ok: false, code: "plan-not-found", error: SPECIAL_PLAN_NOT_FOUND_MSG };
+        return d;
+      }
+      // 4G — GUARD: resolução em destino consolidado é bloqueada.
+      if (consolidationLockForDate(d.periodConsolidations, target.destinationDate)) {
+        result = { ok: false, code: "consolidated", error: USE_CONSOLIDATED_MSG };
         return d;
       }
       if (target.status === "cancelled") {

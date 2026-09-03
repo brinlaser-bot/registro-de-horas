@@ -108,9 +108,11 @@ check("TESTE 01 DE 18 — Resumo usa o período do ponto 21→20 (navegação pr
   assert.ok(p.includes("<h1"), "título na página");
   assert.ok(p.includes("Resumo do período"), "título");
   assert.ok(p.includes("Veja como o período se formou, o saldo factual e a projeção considerando o uso do [10+]."), "subtítulo");
-  assert.ok(p.includes("Período do ponto: {periodLabel(period)}"), "período exibido");
+  // 4G (SUPERADO): rótulo completo preservado via PeriodNavigator.fullLabel;
+  // status temporal derivou para periodConsolidationState (5 estados, sem manual).
+  assert.ok(p.includes("Período do ponto: ${periodLabel(period)}"), "período exibido (fullLabel do navegador)");
   assert.ok(p.includes("getPreviousPointPeriod(period)") && p.includes("getNextPointPeriod(period)"), "navegação anterior/próximo preservada");
-  assert.ok(p.includes('"Encerrado" : "Em andamento"'), "status temporal derivado");
+  assert.ok(p.includes("periodConsolidationState("), "status temporal derivado (máquina 4G)");
   assert.ok(!p.includes("setPeriodoFechado") && !p.includes("fecharPeríodo"), "status nunca é fechamento manual");
 });
 
@@ -311,9 +313,13 @@ check("TESTE 18 DE 18 — Zero persistência nova; números do ciclo; sentinelas
   assert.equal(m.generatedMinutes + 100, 130, "gerado do ciclo 2h10 (100 de 18/08 + 30 de 28/08)");
   assert.equal(m.usedMinutes, 60, "usado 1h");
   assert.equal(m.reservedMinutes, 0, "reservado 0");
-  // A página não muta nada (leitura/apuração):
+  // A página não muta nada no RENDER (leitura/apuração). 4G (SUPERADO): as
+  // únicas actions são consolidatePeriod/reopenPeriod, disparadas EXPLICITAMENTE
+  // pelos botões de confirmação — nunca em efeito/render automático.
   const p = page();
-  assert.ok(!p.includes("actions."), "nenhuma action na página do Resumo");
+  const usosActions = p.split("actions.").length - 1;
+  assert.equal(usosActions, 2, "actions apenas em consolidar/reabrir (confirmação explícita)");
+  assert.ok(p.includes("actions.consolidatePeriod(") && p.includes("actions.reopenPeriod("), "consolidação/reabertura explícitas");
   assert.ok(!p.includes("localStorage") && !p.includes("useSearchParams"), "sem persistência/URL-state novo");
   const antes = JSON.stringify(st());
   view(); pend(); movement();

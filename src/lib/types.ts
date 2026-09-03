@@ -124,6 +124,14 @@ export interface AppData {
    * dados antigos — a hidratação preenche [].
    */
   specialExcessPlans?: import("./special-excess-plan").SpecialExcessPlan[];
+  /**
+   * CONSOLIDAÇÕES DO PERÍODO DO PONTO (Etapa 4G). Congelam a fotografia do
+   * resultado considerado no sistema oficial — NUNCA transformam projeção
+   * em factual (o saldo factual permanece história real). Revisões antigas
+   * nunca são sobrescritas; somente uma revisão fica "active". Opcional em
+   * dados antigos — a hidratação preenche [].
+   */
+  periodConsolidations?: import("./period-consolidation").PeriodConsolidation[];
 }
 
 /** Códigos do MOTIVO DO EXCEDENTE acima de 10h (select do modal). */

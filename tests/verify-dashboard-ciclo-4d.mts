@@ -402,11 +402,30 @@ check("TESTE 18 DE 20 — Rastreabilidade [10+]: reflow mobile sem mudar dados/r
   const storeDiff18 = execSync("git diff HEAD -- src/lib/store.ts", { cwd: root }).toString();
   const storeRemovidas = storeDiff18.split("\n").filter((l) => l.startsWith("-") && !l.startsWith("---"));
   assert.ok(
-    storeRemovidas.every((l) => l.includes('"invalid-plan"') || l.includes("neededMinutes") || l.includes("effectiveBaseMinutes") || l.includes("realized") || l.includes("isProjectableDayStatus")),
-    "store: nenhuma linha removida além do union 4D.3 e da fórmula de necessidade 4D.4.2",
+    storeRemovidas.every(
+      (l) =>
+        l.includes('"invalid-plan"') ||
+        l.includes("neededMinutes") ||
+        l.includes("effectiveBaseMinutes") ||
+        l.includes("realized") ||
+        l.includes("isProjectableDayStatus") ||
+        // 4G (SUPERADO): import de períodos ganhou annualCycleBounds e a
+        // assinatura do mergeBackup ganhou a 10ª coleção periodConsolidations
+        // (as linhas REMOVIDAS são as versões antigas dessas duas declarações).
+        l.includes('from "./periods"') ||
+        l.includes("mergeBackup"),
+    ),
+    "store: nenhuma linha removida além do union 4D.3, da necessidade 4D.4.2 e das extensões 4G",
   );
   if (storeDiff18.trim().length > 0) {
-    assert.ok(storeDiff18.includes("requiredWorkMinutes"), "store: única mudança sancionada é a necessidade canônica 4D.4.2");
+    // 4G (SUPERADO): o marcador sancionado do diff atual também cobre os
+    // guards/estado de consolidação (periodConsolidations) e o calendar
+    // canônico — a necessidade 4D.4.2 continua sancionada.
+    const sancionada =
+      storeDiff18.includes("requiredWorkMinutes") ||
+      storeDiff18.includes("periodConsolidations") ||
+      storeDiff18.includes("consolidationLock");
+    assert.ok(sancionada, "store: única mudança sancionada é a necessidade 4D.4.2 ou a consolidação 4G");
   }
   /* 4D.4.2: o marcador sancionado do diff atual é a necessidade canônica
    * (assertion "requiredWorkMinutes" acima); o gate 4D.3 segue INTACTO no

@@ -111,6 +111,7 @@ export function createEmptyState(today: string = todayString()): AppData {
     excessReasons: [],
     specialExcessUses: [],
     specialExcessPlans: [],
+    periodConsolidations: [],
   };
 }
 

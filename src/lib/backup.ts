@@ -30,6 +30,8 @@ export interface BackupPayload {
   specialExcessUses?: SpecialExcessUse[];
   /** Planos/reservas futuras [10+] (4A). Campo opcional: backups antigos não o têm. */
   specialExcessPlans?: SpecialExcessPlan[];
+  /** Consolidações do período do ponto (4G). Campo opcional: backups antigos não o têm. */
+  periodConsolidations?: import("./period-consolidation").PeriodConsolidation[];
 }
 
 export interface BackupSummary {
@@ -64,6 +66,7 @@ export const BACKUP_COLLECTIONS = [
   "excessReasons",
   "specialExcessUses",
   "specialExcessPlans",
+  "periodConsolidations",
 ] as const;
 
 export type BackupCollectionKey = (typeof BACKUP_COLLECTIONS)[number];
@@ -110,6 +113,8 @@ export interface ParsedBackup {
   specialExcessUses: SpecialExcessUse[];
   /** 4A: planos/reservas futuras. Backups antigos → []. */
   specialExcessPlans: SpecialExcessPlan[];
+  /** 4G: consolidações do período do ponto. Backups antigos → []. */
+  periodConsolidations: import("./period-consolidation").PeriodConsolidation[];
   version: number;
   summary: BackupSummary;
 }
@@ -188,6 +193,39 @@ function validFalta(v: unknown): v is Falta {
 }
 
 /** Valida o shape estrutural de um plano/reserva futura [10+] (4A). */
+/** 4G — validador da coleção de consolidações (histórico nunca rejeitado por campos novos). */
+function validPeriodConsolidation(v: unknown): v is import("./period-consolidation").PeriodConsolidation {
+  if (!v || typeof v !== "object") return false;
+  const c = v as Record<string, unknown>;
+  return (
+    isNum(c.id) &&
+    isDate(c.periodStart) &&
+    isDate(c.periodEnd) &&
+    isDate(c.cycleStart) &&
+    isDate(c.cycleEnd) &&
+    isNum(c.consolidatedAt) &&
+    isNum(c.revision) &&
+    (c.status === "active" || c.status === "superseded") &&
+    isNum(c.factualBalanceMinutes) &&
+    isNum(c.projectedBalanceMinutes) &&
+    isNum(c.regularPositiveMinutes) &&
+    isNum(c.regularNegativeMinutes) &&
+    isNum(c.trackedDays) &&
+    isNum(c.specialExcessUsedMinutes) &&
+    Array.isArray(c.useIds) &&
+    (c.useIds as unknown[]).every((u) => isStr(u)) &&
+    Array.isArray(c.allocations) &&
+    (c.allocations as unknown[]).every((a) => {
+      if (!a || typeof a !== "object") return false;
+      const al = a as Record<string, unknown>;
+      return isDate(al.originDate) && isNum(al.minutes);
+    }) &&
+    isNum(c.pendingCountAtConsolidation) &&
+    (c.reopenedAt === undefined || c.reopenedAt === null || isNum(c.reopenedAt)) &&
+    (c.reopenNote === undefined || c.reopenNote === null || isStr(c.reopenNote))
+  );
+}
+
 function validSpecialExcessPlan(v: unknown): v is SpecialExcessPlan {
   if (!v || typeof v !== "object") return false;
   const p = v as Record<string, unknown>;
@@ -304,6 +342,7 @@ export function buildBackupPayload(data: AppData): BackupPayload {
     excessReasons: data.excessReasons ?? [],
     specialExcessUses: data.specialExcessUses ?? [],
     specialExcessPlans: data.specialExcessPlans ?? [],
+    periodConsolidations: data.periodConsolidations ?? [],
   };
 }
 
@@ -381,6 +420,13 @@ export function parseBackup(
     return { ok: false, error: "bad-special-excess-plans" };
   }
   const specialExcessPlans = (rawPlans as SpecialExcessPlan[] | undefined) ?? [];
+  // Retrocompatibilidade: backups antigos não possuem "periodConsolidations" → []
+  // (4G — campo opcional introduzido sem nova versão, como faltas/motivos/usos/planos).
+  const rawConsolidations = obj.periodConsolidations;
+  if (rawConsolidations !== undefined && (!Array.isArray(rawConsolidations) || !rawConsolidations.every(validPeriodConsolidation))) {
+    return { ok: false, error: "bad-period-consolidations" };
+  }
+  const periodConsolidations = (rawConsolidations as import("./period-consolidation").PeriodConsolidation[] | undefined) ?? [];
 
   const allDates = [
     ...entries.map((e) => e.date),
@@ -399,7 +445,7 @@ export function parseBackup(
     periodTo,
   };
 
-  return { ok: true, backup: { user, entries, compensations, absences, companyCalendars, faltas, excessReasons, specialExcessUses, specialExcessPlans, version, summary } };
+  return { ok: true, backup: { user, entries, compensations, absences, companyCalendars, faltas, excessReasons, specialExcessUses, specialExcessPlans, periodConsolidations, version, summary } };
 }
 
 /* ──────────────────────────────────────────────────────────

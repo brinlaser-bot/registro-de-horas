@@ -34,6 +34,7 @@ import {
   Settings,
 } from "lucide-react";
 import { settingsOf, useAppData, useIsClient } from "@/lib/store";
+import { consolidationLockForDate } from "@/lib/period-consolidation";
 import { annualCycleBounds, getAnnualPointCycle } from "@/lib/periods";
 import { formatDateShortBR, formatMinutes, todayString } from "@/lib/time";
 import { buildSpecialExcessBank } from "@/lib/special-excess-bank";
@@ -50,7 +51,7 @@ const STATUS_USO: Record<string, string> = { utilizado: "Utilizado", cancelado: 
 
 export default function CompensacoesPage() {
   const mounted = useIsClient();
-  const { user, entries, absences, companyCalendars, faltas, excessReasons, specialExcessUses, specialExcessPlans, compensations } = useAppData();
+  const { user, entries, absences, companyCalendars, faltas, excessReasons, specialExcessUses, specialExcessPlans, compensations, periodConsolidations } = useAppData();
   const settings = settingsOf(user);
   const todayStr = todayString();
 
@@ -326,6 +327,10 @@ export default function CompensacoesPage() {
                         <ArrowLeftRight size={14} aria-hidden className="mr-1 inline" />
                         {formatDateShortBR(u.destinationDate)} → <b className="tabular-nums">{formatMinutes(specialExcessUseMinutes(u))}</b>
                         <span className="ml-1.5 font-medium text-emerald-700/80">· {modoDaEstrategia(u.allocationStrategy)} · {STATUS_USO[u.status] ?? u.status}</span>
+                        {/* 4G — rastreabilidade: uso com destino em período consolidado */}
+                        {consolidationLockForDate(periodConsolidations, u.destinationDate) && (
+                          <span className="ml-1.5 rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide text-violet-800">Consolidado</span>
+                        )}
                       </p>
                       <p className="text-xs font-medium text-emerald-700">
                         Origem: {u.allocations.map((a, i) => (

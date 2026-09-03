@@ -200,14 +200,16 @@ check("TESTE 11 DE 14 — Com filtro específico ativo: faixas globais ocultas; 
 
 check("TESTE 12 DE 14 — Modo período: header/resumo 21→20 corretos", () => {
   const page = reg();
-  assert.ok(page.includes("Período do ponto: {periodLabel(period)}"), "header do período no modo padrão");
+  // 4G (SUPERADO): rótulo completo do período agora vive em PeriodNavigator.fullLabel.
+  assert.ok(page.includes("Período do ponto: ${periodLabel(period)}"), "header do período no modo padrão (fullLabel do navegador)");
   assert.ok(page.includes(": `Período ${periodLabel(period)}`}"), "resumo rotulado com o período");
   assert.ok(page.includes("let r = wantCycleScope ? cycleRange : query ?? period;"), "default continua o período do ponto");
 });
 
 check("TESTE 13 DE 14 — Modo ciclo: header/resumo 01/05→30/04, o MESMO range da lista", () => {
   const page = reg();
-  assert.ok(page.includes("Ciclo {getAnnualPointCycle(todayStr)} — {formatDateShortBR(cycleRange.from)} → {formatDateShortBR(cycleRange.to)}"), "header do ciclo");
+  // 4G (SUPERADO): header do ciclo também em PeriodNavigator.fullLabel.
+  assert.ok(page.includes("`Ciclo ${getAnnualPointCycle(todayStr)} — ${formatDateShortBR(cycleRange.from)} → ${formatDateShortBR(cycleRange.to)}`"), "header do ciclo (fullLabel do navegador)");
   assert.ok(page.includes("`Ciclo ${getAnnualPointCycle(todayStr)} (${formatDateShortBR(cycleRange.from)} → ${formatDateShortBR(cycleRange.to)})`"), "resumo rotulado com o ciclo");
   // Resumo usa exatamente o range efetivo (sem outra matemática):
   assert.ok(page.includes("const debts = buildDebtDays(entries, compensations, settings, range,"), "métricas do resumo derivadas do range efetivo");

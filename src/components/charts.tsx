@@ -239,6 +239,21 @@ const hatch = {
     "repeating-linear-gradient(135deg, rgb(148 163 184) 0 4px, rgb(203 213 225) 4px 8px)",
 };
 
+/**
+ * 4G — REFINO MOBILE: em telas pequenas o eixo X mostra o primeiro dia, o
+ * último e marcos regulares derivados do tamanho da série (passo ≈ 1/5),
+ * sem scroll horizontal e SEM mudar o desktop (a partir de `sm` todos os
+ * rótulos voltam). Puro — nenhum valor fixo de data.
+ */
+export function mobileAxisKeptIndexes(count: number): Set<number> {
+  if (count <= 0) return new Set();
+  if (count <= 6) return new Set(Array.from({ length: count }, (_, i) => i));
+  const step = Math.max(1, Math.round(count / 5));
+  const kept = new Set<number>([0, count - 1]);
+  for (let i = step; i < count - 1; i += step) kept.add(i);
+  return kept;
+}
+
 export function StackedBarsChart({
   data,
   expected,
@@ -391,26 +406,31 @@ export function StackedBarsChart({
         })}
       </div>
 
-      {/* Datas + ícone da situação do dia */}
+      {/* Datas + ícone da situação do dia (4G: mobile mantém primeiro/último/
+          marcos regulares; desktop sm+ exibe todos — legenda/tooltip intactos) */}
       <div className="mt-2 flex justify-between gap-[3px]">
-        {data.map((d) => {
-          const MiniIcon = d.marker ? MARKER_ICON[d.marker] : null;
-          return (
-            <span
-              key={d.date}
-              className="flex flex-1 flex-col items-center gap-0.5 text-center text-[9px] font-semibold text-slate-400"
-            >
-              {MiniIcon && (
-                <MiniIcon
-                  size={11}
-                  className={`shrink-0 ${MARKER_TONE[d.marker!]}`}
-                  aria-hidden
-                />
-              )}
-              {d.label}
-            </span>
-          );
-        })}
+        {(() => {
+          const kept = mobileAxisKeptIndexes(data.length);
+          return data.map((d, i) => {
+            const MiniIcon = d.marker ? MARKER_ICON[d.marker] : null;
+            const showOnMobile = kept.has(i);
+            return (
+              <span
+                key={d.date}
+                className="flex flex-1 flex-col items-center gap-0.5 text-center text-[9px] font-semibold text-slate-400"
+              >
+                {MiniIcon && (
+                  <MiniIcon
+                    size={11}
+                    className={`shrink-0 ${MARKER_TONE[d.marker!]}${showOnMobile ? "" : " hidden sm:block"}`}
+                    aria-hidden
+                  />
+                )}
+                <span className={showOnMobile ? "" : "hidden sm:block"}>{d.label}</span>
+              </span>
+            );
+          });
+        })()}
       </div>
 
       {/* Legenda */}

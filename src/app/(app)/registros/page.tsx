@@ -62,6 +62,8 @@ import { SpecialExcessPlanResolveModal } from "@/components/special-excess-plan-
 import { DaySituationChips, DaySituationFilter } from "@/components/day-situation-filter";
 import { Button, Card, EmptyState, Skeleton } from "@/components/ui";
 import { useToast } from "@/components/toast";
+import { PeriodNavigator } from "@/components/period-navigator";
+import { consolidationLockCoveringRange } from "@/lib/period-consolidation";
 
 interface RangeSummary {
   cycle: string;
@@ -103,7 +105,7 @@ function RegistrosBody() {
   const storeReady = useIsStoreReady();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { user, entries, compensations, absences, companyCalendars, faltas, excessReasons, specialExcessUses, specialExcessPlans } = useAppData();
+  const { user, entries, compensations, absences, companyCalendars, faltas, excessReasons, specialExcessUses, specialExcessPlans, periodConsolidations } = useAppData();
   const todayStr = todayString();
 
   const settings: WorkSettings = settingsOf(user);
@@ -137,6 +139,10 @@ function RegistrosBody() {
    *  ?data=YYYY-MM-DD   → foco com exatamente 1 item: card expandido. */
   const atencaoPlano = searchParams.get("atencao") === "plano-10";
   const wantCycleScope = searchParams.get("escopo") === "ciclo";
+  // 4G — o intervalo exibido está integralmente dentro de um período consolidado?
+  // (no escopo ciclo/consulta a faixa é ampla demais para o banner; o lock real é por motor.)
+  const lockBound =
+    !query && !wantCycleScope ? consolidationLockCoveringRange(periodConsolidations, period.from, period.to) : null;
   const focusDateRaw = searchParams.get("data");
   const focusDate = focusDateRaw && /^\d{4}-\d{2}-\d{2}$/.test(focusDateRaw) ? focusDateRaw : null;
 
@@ -659,30 +665,22 @@ function RegistrosBody() {
 
   return (
     <div className="space-y-6">
-      {/* Navegação por período oficial + consulta personalizada */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      {/* Navegação por período oficial + consulta personalizada (4G: controle
+          único compacto — [‹][rótulo][›] numa linha no mobile) */}
+      <div className="space-y-2">
         <div className="flex flex-wrap items-center gap-2">
-          <Button variant="secondary" size="sm" onClick={() => { setQuery(null); setPeriod(getPreviousPointPeriod(period)); }} aria-label="Período anterior">
-            <ChevronLeft size={16} />
-          </Button>
-          <div className="rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-sm font-extrabold text-slate-800">
-            {query ? (
-              <span>
-                Consulta: {formatDateShortBR(query.from)} → {formatDateShortBR(query.to)}
-              </span>
-            ) : wantCycleScope ? (
-              <span>
-                Ciclo {getAnnualPointCycle(todayStr)} — {formatDateShortBR(cycleRange.from)} → {formatDateShortBR(cycleRange.to)}
-              </span>
-            ) : (
-              <span>
-                Período do ponto: {periodLabel(period)}
-              </span>
-            )}
-          </div>
-          <Button variant="secondary" size="sm" onClick={() => { setQuery(null); setPeriod(getNextPointPeriod(period)); }} aria-label="Próximo período">
-            <ChevronRight size={16} />
-          </Button>
+          <PeriodNavigator
+            fullLabel={query
+              ? `Consulta: ${formatDateShortBR(query.from)} → ${formatDateShortBR(query.to)}`
+              : wantCycleScope
+                ? `Ciclo ${getAnnualPointCycle(todayStr)} — ${formatDateShortBR(cycleRange.from)} → ${formatDateShortBR(cycleRange.to)}`
+                : `Período do ponto: ${periodLabel(period)}`}
+            shortLabel={query
+              ? `${query.from.slice(8)}/${query.from.slice(5, 7)} → ${query.to.slice(8)}/${query.to.slice(5, 7)}`
+              : `${period.from.slice(8)}/${period.from.slice(5, 7)} → ${period.to.slice(8)}/${period.to.slice(5, 7)}`}
+            onPrev={() => { setQuery(null); setPeriod(getPreviousPointPeriod(period)); }}
+            onNext={() => { setQuery(null); setPeriod(getNextPointPeriod(period)); }}
+          />
           {(query || periodLabel(period) !== periodLabel(getPointPeriod(todayStr))) && (
             <Button
               variant="ghost"
@@ -700,10 +698,28 @@ function RegistrosBody() {
               <X size={13} /> Limpar consulta
             </Button>
           )}
-          <Button size="sm" onClick={() => setManualOpen(true)}>
+        </div>
+
+        {/* 4G — Lançamento manual / Registrar falta em linha separada no mobile
+            (desktop permanece lado a lado); desabilitados sob período consolidado. */}
+        <div className="flex w-full flex-wrap gap-2 sm:w-auto">
+          <Button
+            size="sm"
+            disabled={!!lockBound}
+            title={lockBound ? "Período consolidado — reabra o período no Resumo para editar." : undefined}
+            className="flex-1 sm:flex-none"
+            onClick={() => setManualOpen(true)}
+          >
             Lançamento manual
           </Button>
-          <Button variant="secondary" size="sm" onClick={() => { setFaltaInitialDate(null); setFaltaOpen(true); }}>
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled={!!lockBound}
+            title={lockBound ? "Período consolidado — reabra o período no Resumo para editar." : undefined}
+            className="flex-1 sm:flex-none"
+            onClick={() => { setFaltaInitialDate(null); setFaltaOpen(true); }}
+          >
             <Ban size={14} /> Registrar falta
           </Button>
         </div>
@@ -740,6 +756,18 @@ function RegistrosBody() {
           </p>
         </div>
       </div>
+      {/* 4G — aviso de período consolidado (dados e DayCards continuam visíveis;
+          apenas mutações são bloqueadas — a segurança real está no motor). */}
+      {lockBound && (
+        <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-violet-300 bg-violet-50/60 px-4 py-2.5">
+          <p className="min-w-0 flex-1 text-sm font-bold text-violet-900">
+            Período consolidado — registros protegidos. Reabra o período no Resumo para editar.
+          </p>
+          <Link href="/resumo">
+            <Button size="sm" variant="secondary">Abrir Resumo</Button>
+          </Link>
+        </div>
+      )}
       {(() => {
         const saldo = summaries.reduce((s, x) => s + x.balanceMinutes, 0);
         const tracked = summaries.reduce((s, x) => s + x.workedDays, 0);

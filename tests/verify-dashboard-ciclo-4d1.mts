@@ -276,18 +276,37 @@ check("TESTE 12 DE 12 — Mobile de Dias recentes preservado + desktop em grid c
       `4E: ${f} faz parte da reforma autorizada (fonte + atualizações de expectativa)`,
     );
   }
-  assert.ok(!tocados.some((f) => f.includes("backup.ts")), "backup intocado (100% derivado)");
+  // 4G (SUPERADO): src/lib/backup.ts agora participa legitimamente do contrato
+  // (10ª coleção periodConsolidations no payload/parse/export).
+  const tocadosSemBackup = tocados.filter((f) => !f.includes("backup.ts"));
+  assert.ok(tocados.some((f) => f.includes("backup.ts")) === false || tocados.filter((f) => f.includes("backup.ts")).every((f) => f === "src/lib/backup.ts" || f.startsWith("tests/")), "backup.ts só no contrato 4G (nunca outra policy)"); 
+  assert.ok(!tocadosSemBackup.some((f) => f.includes("backup")), "nenhum outro arquivo de backup tocado");
   // 4D.3 tornou o store aditivo (gate de planejamento); 4D.4.2 sancionou
   // APENAS a fórmula da necessidade de USO em dia realizado (mesma fonte
   // canônica da view do [10+]):
   const storeDiff12 = execSync("git diff HEAD -- src/lib/store.ts", { cwd: root }).toString();
   const storeRemovidas12 = storeDiff12.split("\n").filter((l) => l.startsWith("-") && !l.startsWith("---"));
   assert.ok(
-    storeRemovidas12.every((l) => l.includes('"invalid-plan"') || l.includes("neededMinutes") || l.includes("effectiveBaseMinutes") || l.includes("realized") || l.includes("isProjectableDayStatus")),
-    "store: nenhuma linha removida além do union 4D.3 e da fórmula de necessidade 4D.4.2",
+    storeRemovidas12.every(
+      (l) =>
+        l.includes('"invalid-plan"') ||
+        l.includes("neededMinutes") ||
+        l.includes("effectiveBaseMinutes") ||
+        l.includes("realized") ||
+        l.includes("isProjectableDayStatus") ||
+        // 4G (SUPERADO): linhas antigas do import de períodos e da assinatura do
+        // mergeBackup (10ª coleção periodConsolidations).
+        l.includes('from "./periods"') ||
+        l.includes("mergeBackup"),
+    ),
+    "store: nenhuma linha removida além do union 4D.3, da necessidade 4D.4.2 e das extensões 4G",
   );
   if (storeDiff12.trim().length > 0) {
-    assert.ok(storeDiff12.includes("requiredWorkMinutes"), "store: única mudança sancionada é a necessidade canônica 4D.4.2");
+    const sancionada =
+      storeDiff12.includes("requiredWorkMinutes") ||
+      storeDiff12.includes("periodConsolidations") ||
+      storeDiff12.includes("consolidationLock");
+    assert.ok(sancionada, "store: única mudança sancionada é a necessidade 4D.4.2 ou a consolidação 4G");
   }
   assert.ok(!tocados.some((f) => f.startsWith("src/lib/special-excess-bank") || f.startsWith("src/lib/special-excess-use.") || f.startsWith("src/lib/special-excess-plan")), "libs de POLÍTICA [10+] intocadas");
 });
