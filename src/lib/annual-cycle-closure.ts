@@ -147,3 +147,51 @@ export function dateFallsInClosedCycle(
 export function sortedClosures(closures: AnnualCycleClosure[] | undefined): AnnualCycleClosure[] {
   return (closures ?? []).slice().sort((a, b) => (a.cycleStart < b.cycleStart ? -1 : 1));
 }
+
+/** true quando o ciclo anual que começa em `cycleStart` (01/05/AAAA) já foi
+ *  formalmente encerrado (fechamento registrado com status closed). */
+export function cycleStartIsClosed(
+  closures: AnnualCycleClosure[] | undefined,
+  cycleStart: string,
+): boolean {
+  return (closures ?? []).some(
+    (c) => c.status === "closed" && c.cycleStart === cycleStart,
+  );
+}
+
+/**
+ * Datas de calendário da empresa cujo SIGNIFICADO canônico (tratamento,
+ * horas a compensar, jornada esperada, horas abonadas) mudou entre `before` e
+ * `after` e que caem em um ciclo anual FORMALMENTE ENCERRADO. Espelha
+ * `consolidatedCalendarConflicts` (period-consolidation) para o bloqueio
+ * definitivo do ciclo — usada pelos guards add/replace/remove de calendário.
+ * A comparação é canônica (nunca metadados de importação).
+ */
+export function closedCycleCalendarConflicts(input: {
+  closures: AnnualCycleClosure[] | undefined;
+  before?: { date: string; tratamento: string; horasACompensar: number; jornadaEsperadaHoras: number; horasAbonadas: number }[];
+  after?: { date: string; tratamento: string; horasACompensar: number; jornadaEsperadaHoras: number; horasAbonadas: number }[];
+}): string[] {
+  const closed = (input.closures ?? []).filter((c) => c.status === "closed");
+  if (closed.length === 0) return [];
+  const beforeMap = new Map((input.before ?? []).map((e) => [e.date, calKey(e)]));
+  const afterMap = new Map((input.after ?? []).map((e) => [e.date, calKey(e)]));
+  const conflicts: string[] = [];
+  for (const cl of closed) {
+    for (const [date, key] of beforeMap) {
+      if (date >= cl.cycleStart && date <= cl.cycleEnd && afterMap.get(date) !== key) conflicts.push(date);
+    }
+    for (const [date, key] of afterMap) {
+      if (date >= cl.cycleStart && date <= cl.cycleEnd && beforeMap.get(date) !== key) conflicts.push(date);
+    }
+  }
+  return [...new Set(conflicts)].sort();
+}
+
+const calKey = (e: {
+  tratamento: string;
+  horasACompensar: number;
+  jornadaEsperadaHoras: number;
+  horasAbonadas: number;
+}): string => `${e.tratamento}|${e.horasACompensar}|${e.jornadaEsperadaHoras}|${e.horasAbonadas}`;
+

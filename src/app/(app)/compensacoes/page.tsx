@@ -31,6 +31,7 @@ import {
   Database,
   Hourglass,
   Landmark,
+  Lock,
   Settings,
 } from "lucide-react";
 import { settingsOf, useAppData, useIsClient } from "@/lib/store";
@@ -42,6 +43,9 @@ import { specialExcessPlanMinutes } from "@/lib/special-excess-plan";
 import { specialExcessUseMinutes } from "@/lib/special-excess-use";
 import { excessReasonOnDate } from "@/lib/hour-bank";
 import { centralCalendarEvents, centralCalendarSummary, centralCycles, tratamentoLabel } from "@/lib/central-view";
+import { closureForCycle, carriedSlicesIntoCycle } from "@/lib/annual-cycle-closure";
+import { checkCycleClose, computeClosingExcess } from "@/lib/annual-cycle-close";
+import { CloseCycleButton } from "@/components/close-cycle-modal";
 import { Badge, Button, EmptyState, Skeleton, StatCard } from "@/components/ui";
 
 const modoDaEstrategia = (strategy: string) => (strategy === "fifo" || strategy === "automatic" ? "Seleção automática" : "Seleção manual");
@@ -49,9 +53,15 @@ const modoDaEstrategia = (strategy: string) => (strategy === "fifo" || strategy 
 const STATUS_PLANO: Record<string, string> = { planned: "Reservado", cancelled: "Cancelado", concluded: "Concluído" };
 const STATUS_USO: Record<string, string> = { utilizado: "Utilizado", cancelado: "Cancelado" };
 
+/** Rótulo do ciclo a partir de um 01/05 (ex.: "2026-05-01" → "2026/2027"). */
+const cycleLabelOf = (start: string) => {
+  const y = Number(start.slice(0, 4));
+  return Number.isFinite(y) ? `${y}/${y + 1}` : "";
+};
+
 export default function CompensacoesPage() {
   const mounted = useIsClient();
-  const { user, entries, absences, companyCalendars, faltas, excessReasons, specialExcessUses, specialExcessPlans, compensations, periodConsolidations } = useAppData();
+  const { user, entries, absences, companyCalendars, faltas, excessReasons, specialExcessUses, specialExcessPlans, compensations, periodConsolidations, annualCycleClosures } = useAppData();
   const settings = settingsOf(user);
   const todayStr = todayString();
 
@@ -85,9 +95,72 @@ export default function CompensacoesPage() {
         controlStartDate: user.controlStartDate ?? "",
         uses: specialExcessUses ?? [],
         plans: specialExcessPlans ?? [],
+        // 4H — saldo formalmente TRANSPORTADO para este ciclo (fechamento
+        // anterior); aparece como lotes `carried`/`carriedMinutes` sem somar
+        // em "Gerado neste ciclo".
+        carried: carriedSlicesIntoCycle(annualCycleClosures ?? [], cicloAtivo),
       }),
-    [cicloAtivo, todayStr, entries, absences, companyCalendars, settings, faltas, user.controlStartDate, specialExcessUses, specialExcessPlans],
+    [cicloAtivo, todayStr, entries, absences, companyCalendars, settings, faltas, user.controlStartDate, specialExcessUses, specialExcessPlans, annualCycleClosures],
   );
+
+  /* 4H — SITUAÇÃO DO CICLO SELECIONADO. Fontes puras (a página é somente
+   * leitura — a mutação de encerramento vive no componente CloseCycleButton):
+   *   active        → em andamento (hoje dentro do ciclo);
+   *   awaiting-close→ terminou no calendário mas ainda NÃO foi encerrado;
+   *   closed        → fechamento formal registrado (irreversível);
+   *   future        → ciclo futuro (sem geração/transporte inventados). */
+  const closures = annualCycleClosures ?? [];
+  const closureDoCiclo = closureForCycle(closures, cicloAtivo);
+  const situation: "active" | "awaiting-close" | "closed" | "future" = closureDoCiclo
+    ? "closed"
+    : bounds.from > todayStr
+      ? "future"
+      : todayStr > bounds.to
+        ? "awaiting-close"
+        : "active";
+
+  /* Preview do fechamento (somente para ciclo que aguarda encerrar) — fontes
+   * canônicas `checkCycleClose` (blockers/eligibilidade) e
+   * `computeClosingExcess` (saldo final [10+] a destinar). */
+  const closePreview = useMemo(() => {
+    if (situation !== "awaiting-close") return null;
+    const cl = annualCycleClosures ?? [];
+    const el = checkCycleClose({
+      today: todayStr,
+      label: cicloAtivo,
+      closures: cl,
+      entries,
+      absences,
+      calendars: companyCalendars,
+      settings,
+      faltas,
+      controlStartDate: user.controlStartDate,
+      plans: specialExcessPlans ?? [],
+      consolidations: periodConsolidations,
+    });
+    const comp = computeClosingExcess({
+      label: cicloAtivo,
+      closures: cl,
+      entries,
+      absences,
+      calendars: companyCalendars,
+      settings,
+      faltas,
+      controlStartDate: user.controlStartDate,
+      uses: specialExcessUses ?? [],
+      plans: specialExcessPlans ?? [],
+    });
+    return {
+      cycleLabel: cicloAtivo,
+      eligible: el.ok,
+      blockers: el.blockers,
+      closingMinutes: comp.closingMinutes,
+      consolidados: (periodConsolidations ?? []).filter(
+        (c) => c.status === "active" && c.periodStart >= bounds.from && c.periodEnd <= bounds.to,
+      ).length,
+      pendencias: el.blockingPendencyDates.length,
+    };
+  }, [situation, cicloAtivo, todayStr, bounds.from, bounds.to, annualCycleClosures, entries, absences, companyCalendars, settings, faltas, user.controlStartDate, specialExcessPlans, specialExcessUses, periodConsolidations]);
 
   const noCiclo = (d: string) => d >= bounds.from && d <= bounds.to;
 
@@ -188,6 +261,82 @@ export default function CompensacoesPage() {
 
       {tab === "banco" && (
         <>
+          {/* 4H — SITUAÇÃO DO CICLO + FECHAMENTO ANUAL DEFINITIVO.
+              active   → sem banner (Central normal abaixo).
+              awaiting → terminou; Encerrar ciclo quando elegível.
+              closed   → saldo final + destinação (sem "Disponível" operacional).
+              future   → "Ciclo futuro" (nunca inventa geração/transporte). */}
+          {situation === "awaiting-close" && (
+            <div className="rounded-2xl border border-amber-300 bg-amber-50/70 px-4 py-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <p className="text-sm font-extrabold text-amber-900">
+                  <Hourglass size={15} aria-hidden className="mr-1 inline" /> Ciclo aguardando encerramento
+                  <span className="ml-2 text-xs font-semibold text-amber-700">{formatDateShortBR(bounds.from)} → {formatDateShortBR(bounds.to)}</span>
+                </p>
+                {closePreview && <CloseCycleButton preview={closePreview} />}
+              </div>
+              {closePreview && closePreview.blockers.length > 0 ? (
+                <div className="mt-2">
+                  <p className="text-xs font-bold text-amber-800">Faltam resolver para encerrar:</p>
+                  <ul className="mt-1 space-y-1">
+                    {closePreview.blockers.map((b) => (
+                      <li key={b} className="flex items-start gap-1.5 text-xs font-medium text-amber-700">
+                        <ChevronDown size={13} aria-hidden className="mt-0.5 shrink-0 -rotate-90" />
+                        <span>{b}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : closePreview ? (
+                <p className="mt-1.5 text-xs font-medium text-amber-800">Ciclo terminado e pronto para o encerramento definitivo.</p>
+              ) : null}
+            </div>
+          )}
+
+          {situation === "closed" && closureDoCiclo && (
+            <div className="rounded-2xl border border-violet-300 bg-violet-50/60 px-4 py-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-sm font-extrabold text-violet-900">
+                  <Lock size={14} aria-hidden className="mr-1 inline" /> Ciclo encerrado
+                  <span className="ml-2 text-xs font-semibold text-violet-700">{formatDateShortBR(closureDoCiclo.cycleStart)} → {formatDateShortBR(closureDoCiclo.cycleEnd)}</span>
+                </p>
+                <Badge tone="violet">Definitivo</Badge>
+              </div>
+              <dl className="mt-2 grid gap-2 grid-cols-2 sm:grid-cols-4">
+                <div className="rounded-xl border border-violet-200 bg-white px-3 py-2"><dt className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Gerado no ciclo</dt><dd className="text-base font-extrabold tabular-nums text-slate-900">{formatMinutes(bank.generatedMinutes)}</dd></div>
+                {bank.carriedMinutes > 0 && (
+                  <div className="rounded-xl border border-sky-200 bg-white px-3 py-2"><dt className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Trazido do ciclo anterior</dt><dd className="text-base font-extrabold tabular-nums text-sky-700">{formatMinutes(bank.carriedMinutes)}</dd></div>
+                )}
+                <div className="rounded-xl border border-violet-200 bg-white px-3 py-2"><dt className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Utilizado</dt><dd className="text-base font-extrabold tabular-nums text-emerald-600">{formatMinutes(bank.usedMinutes)}</dd></div>
+                <div className="rounded-xl border border-violet-200 bg-white px-3 py-2"><dt className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Saldo final [10+]</dt><dd className="text-base font-extrabold tabular-nums text-indigo-600">{formatMinutes(closureDoCiclo.closingSpecialExcessMinutes)}</dd></div>
+              </dl>
+              <p className="mt-2 text-xs font-bold text-violet-800">
+                Destinação:{" "}
+                {closureDoCiclo.disposition === "liquidated" && "Liquidado no encerramento"}
+                {closureDoCiclo.disposition === "carried" &&
+                  `Transportado para o ciclo ${closureDoCiclo.destinationCycleStart ? cycleLabelOf(closureDoCiclo.destinationCycleStart) : "seguinte"}`}
+                {closureDoCiclo.disposition === "none" && "Sem saldo [10+] a destinar"}
+              </p>
+              <p className="mt-0.5 text-[11px] font-medium text-slate-500">
+                Este ciclo não pode mais ser alterado: registros protegidos e períodos sem reabertura.
+              </p>
+            </div>
+          )}
+
+          {situation === "future" && (
+            <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+              <p className="text-sm font-extrabold text-slate-700">
+                <CalendarClock size={15} aria-hidden className="mr-1 inline" /> Ciclo futuro
+                <span className="ml-2 text-xs font-semibold text-slate-400">{formatDateShortBR(bounds.from)} → {formatDateShortBR(bounds.to)}</span>
+              </p>
+              <p className="mt-0.5 text-xs font-medium text-slate-500">Este ciclo ainda não começou — sem geração ou saldo transportado até aqui.</p>
+            </div>
+          )}
+
+          {/* Métricas operacionais do banco — somente ciclo em andamento ou
+              aguardando encerramento (ciclo fechado/futuro tratados acima). */}
+          {situation === "active" || situation === "awaiting-close" ? (
+          <>
           {/* Quatro métricas — mesma fonte; DISPONÍVEL com prioridade visual. */}
           {/* 4E.1 — MOBILE: grid 2×2 (linha 1: Disponível | Gerado — indicador
               de decisão + dimensão total; linha 2: Reservado | Utilizado —
@@ -205,6 +354,18 @@ export default function CompensacoesPage() {
             <StatCard compact className="order-2 lg:order-4" label="Gerado" value={formatMinutes(bank.generatedMinutes)} sub={`excedente acima de 10h · ciclo ${cicloAtivo}`} tone="slate" />
           </div>
 
+          {/* 4H — Trazido do ciclo anterior: NUNCA dentro de "Gerado neste
+              ciclo". Disponível reflete a capacidade (gerado + transportado). */}
+          {bank.carriedMinutes > 0 && (
+            <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-2.5">
+              <p className="text-sm font-bold text-sky-900">
+                <ArrowLeftRight size={14} aria-hidden className="mr-1 inline" />
+                Trazido do ciclo anterior: <b className="tabular-nums">{formatMinutes(bank.carriedMinutes)}</b>
+                <span className="ml-2 text-xs font-semibold text-sky-700">operacional neste ciclo · não entra em “Gerado neste ciclo”</span>
+              </p>
+            </div>
+          )}
+
           {/* Origens do [10+] */}
           <section aria-label="Origens do [10+]" className="space-y-2">
             <h3 className="text-sm font-extrabold uppercase tracking-wider text-slate-400">Origens do [10+]</h3>
@@ -220,15 +381,23 @@ export default function CompensacoesPage() {
                         <span className="flex min-w-0 items-center gap-2">
                           <ChevronDown size={15} aria-hidden className="shrink-0 text-slate-400" />
                           <span className="text-sm font-extrabold text-slate-800">{formatDateShortBR(lot.originDate)}</span>
+                          {lot.carried && <Badge tone="sky">Trazido · origem factual {formatDateShortBR(lot.originDate)} ({lot.originCycle ?? "ciclo anterior"})</Badge>}
                           {motivo && <Badge tone="amber">{motivo.reason}</Badge>}
                           {lot.needsReview && <Badge tone="rose">Revisar</Badge>}
                         </span>
-                        <span className="text-xs font-semibold text-slate-500">
-                          Gerado <b className="text-slate-900">{formatMinutes(lot.generatedMinutes)}</b> · Utilizado{" "}
-                          <b className="text-slate-900">{formatMinutes(lot.usedMinutes)}</b> · Reservado{" "}
-                          <b className="text-slate-900">{formatMinutes(lot.reservedMinutes)}</b> · Disponível{" "}
-                          <b className="text-indigo-600">{formatMinutes(lot.availableMinutes)}</b>
-                        </span>
+                        {lot.carried ? (
+                          <span className="text-xs font-semibold text-slate-500">
+                            Trazido do ciclo anterior <b className="text-slate-900">{formatMinutes(lot.carriedInMinutes ?? lot.availableMinutes)}</b> · Disponível{" "}
+                            <b className="text-sky-600">{formatMinutes(lot.availableMinutes)}</b>
+                          </span>
+                        ) : (
+                          <span className="text-xs font-semibold text-slate-500">
+                            Gerado <b className="text-slate-900">{formatMinutes(lot.generatedMinutes)}</b> · Utilizado{" "}
+                            <b className="text-slate-900">{formatMinutes(lot.usedMinutes)}</b> · Reservado{" "}
+                            <b className="text-slate-900">{formatMinutes(lot.reservedMinutes)}</b> · Disponível{" "}
+                            <b className="text-indigo-600">{formatMinutes(lot.availableMinutes)}</b>
+                          </span>
+                        )}
                       </summary>
                       <div className="mt-3 space-y-1.5 border-t border-slate-100 pt-2.5">
                         <p className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400">Destinos das horas desta origem</p>
@@ -377,6 +546,8 @@ export default function CompensacoesPage() {
               </div>
             </details>
           )}
+          </>
+          ) : null}
         </>
       )}
 

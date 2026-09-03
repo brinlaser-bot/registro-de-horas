@@ -3,7 +3,7 @@
 import { Suspense, useMemo, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { BarChart3, CalendarClock, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Clock3, Download, ExternalLink, Hourglass, TriangleAlert, TrendingUp, Wallet } from "lucide-react";
+import { BarChart3, CalendarClock, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Clock3, Download, ExternalLink, Hourglass, Lock, TriangleAlert, TrendingUp, Wallet } from "lucide-react";
 import { actions, settingsOf, useAppData, useIsClient } from "@/lib/store";
 import { formatMinutes, todayString, weekdayShort } from "@/lib/time";
 import {
@@ -37,6 +37,7 @@ import {
   periodConsolidationState,
   type PeriodConsolidation,
 } from "@/lib/period-consolidation";
+import { dateFallsInClosedCycle } from "@/lib/annual-cycle-closure";
 
 /** +30min / -1h30 / 0min — convenção de sinal do Resumo. */
 function fmtSigned(v: number): string {
@@ -80,7 +81,7 @@ export default function ResumoPage() {
 function ResumoBody() {
   const mounted = useIsClient();
   const searchParams = useSearchParams();
-  const { user, entries, compensations, absences, companyCalendars, faltas, specialExcessUses, specialExcessPlans, periodConsolidations } = useAppData();
+  const { user, entries, compensations, absences, companyCalendars, faltas, specialExcessUses, specialExcessPlans, periodConsolidations, annualCycleClosures } = useAppData();
   const settings = settingsOf(user);
   const toast = useToast();
   const todayStr = todayString();
@@ -154,6 +155,9 @@ function ResumoBody() {
     blockedCount: pend.total,
   });
   const consolidacaoAtiva = activeConsolidationForPeriod(periodConsolidations, period.from, period.to);
+  // 4H — período cujo ciclo anual já foi FORMALMENTE encerrado: nada pode ser
+  // reaberto (o domínio/store já bloqueia; a UI também não oferece a ação).
+  const periodoCicloEncerrado = dateFallsInClosedCycle(annualCycleClosures, period.from);
   const revisoesDoPeriodo = (periodConsolidations ?? [])
     .filter((c) => c.periodStart === period.from && c.periodEnd === period.to)
     .sort((a, b) => b.revision - a.revision);
@@ -426,9 +430,15 @@ function ResumoBody() {
               {histOpen ? "Ocultar histórico" : "Ver histórico"}
               {histOpen ? <ChevronUp size={14} aria-hidden /> : <ChevronDown size={14} aria-hidden />}
             </Button>
-            <Button variant="secondary" size="sm" onClick={() => { setReopenNote(""); setReabrirOpen(true); }}>
-              Reabrir período
-            </Button>
+            {periodoCicloEncerrado ? (
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-violet-100 px-2.5 py-1 text-[11px] font-extrabold uppercase tracking-wide text-violet-800">
+                <Lock size={12} aria-hidden /> Ciclo encerrado — sem reabertura
+              </span>
+            ) : (
+              <Button variant="secondary" size="sm" onClick={() => { setReopenNote(""); setReabrirOpen(true); }}>
+                Reabrir período
+              </Button>
+            )}
           </div>
         </div>
       )}

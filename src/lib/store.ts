@@ -62,6 +62,7 @@ import {
 } from "./special-excess-reconciliation";
 import {
   closureIdOf,
+  closedCycleCalendarConflicts,
   dateFallsInClosedCycle,
   carriedSlicesIntoCycle,
   type AnnualCycleClosure,
@@ -1767,6 +1768,12 @@ export const actions = {
   ): ActionResult {
     let result: ActionResult = OK;
     mutate((d) => {
+      // 4H — GUARD: novo afastamento/ausência que toque datas de ciclo anual
+      // encerrado é bloqueado (reescreveria contexto factual protegido).
+      if (closedCycleLockForRange(d, draft.startDate, draft.endDate)) {
+        result = closedCycleLockForRange(d, draft.startDate, draft.endDate)!;
+        return d;
+      }
       // 4G — GUARD: férias/afastamentos que afetem datas de período consolidado.
       if (rangeIntersectsConsolidation(d.periodConsolidations, draft.startDate, draft.endDate)) {
         result = { ok: false, code: "consolidated", error: PERIOD_CONSOLIDATED_MSG };
@@ -1790,6 +1797,15 @@ export const actions = {
       const target = d.absences.find((a) => a.id === id);
       if (!target) {
         result = { ok: false, code: "not-found", error: "Evento não encontrado." };
+        return d;
+      }
+      // 4H — GUARD: alterar afastamento cujo intervalo (antes/depois) toque
+      // datas de ciclo anual encerrado é bloqueado.
+      if (
+        closedCycleLockForRange(d, target.startDate, target.endDate) ||
+        closedCycleLockForRange(d, patch.startDate ?? target.startDate, patch.endDate ?? target.endDate)
+      ) {
+        result = closedCycleLockForRange(d, target.startDate, target.endDate) ?? closedCycleLockForRange(d, patch.startDate ?? target.startDate, patch.endDate ?? target.endDate)!;
         return d;
       }
       // 4G — GUARD: alteração de afastamento em período consolidado (antes/depois).
@@ -1818,6 +1834,12 @@ export const actions = {
       const target = d.absences.find((a) => a.id === id);
       if (!target) {
         result = { ok: false, code: "not-found", error: "Evento não encontrado." };
+        return d;
+      }
+      // 4H — GUARD: excluir afastamento com datas em ciclo anual encerrado é
+      // bloqueado (reescreveria o contexto factual do ciclo).
+      if (closedCycleLockForRange(d, target.startDate, target.endDate)) {
+        result = closedCycleLockForRange(d, target.startDate, target.endDate)!;
         return d;
       }
       // 4G — GUARD: excluir afastamento de período consolidado é bloqueado.
@@ -1859,6 +1881,12 @@ export const actions = {
     mutate((d) => {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(p.date)) {
         result = { ok: false, code: "invalid", error: "Informe a data do Abono." };
+        return d;
+      }
+      // 4H — GUARD: abono define/remove contexto de jornada de uma data; em
+      // ciclo anual encerrado o dia ficou protegido (bloqueio definitivo).
+      if (closedCycleLockForDate(d, p.date)) {
+        result = closedCycleLockForDate(d, p.date)!;
         return d;
       }
       // Ao ALTERAR, o próprio Abono não pode ser contado como conflito da data
@@ -1981,6 +2009,12 @@ export const actions = {
     mutate((d) => {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(p.date)) {
         result = { ok: false, code: "invalid", error: "Data inválida." };
+        return d;
+      }
+      // 4H — GUARD: o motivo do excedente é METADADO da origem [10+] do dia;
+      // num ciclo anual encerrado a origem ficou protegida (definitivo).
+      if (closedCycleLockForDate(d, p.date)) {
+        result = closedCycleLockForDate(d, p.date)!;
         return d;
       }
       // 4G.1 — GUARD: o motivo/justificativa do excedente é METADADO DA ORIGEM
@@ -2805,6 +2839,14 @@ export const actions = {
         return { ok: false, code: "consolidated", error: CALENDAR_CONSOLIDATED_MSG };
       }
     }
+    // 4H — GUARD: calendário que crie contexto canônico em datas de ciclo
+    // anual ENCERRADO é bloqueado (não existe mais reabertura de ciclo).
+    {
+      const conflitos = closedCycleCalendarConflicts({ closures: getAppData().annualCycleClosures, after: calendar.entries });
+      if (conflitos.length > 0) {
+        return { ok: false, code: "cycle-closed", error: CYCLE_CLOSED_MSG };
+      }
+    }
     mutate((d) => ({ ...d, companyCalendars: [...(d.companyCalendars ?? []), calendar].sort((a, b) => a.cycleStart.localeCompare(b.cycleStart)) }));
     return OK;
   },
@@ -2820,6 +2862,16 @@ export const actions = {
       const conflitos = consolidatedCalendarConflicts({ consolidations: d0.periodConsolidations, before: before?.entries, after: calendar.entries });
       if (conflitos.length > 0) {
         return { ok: false, code: "consolidated", error: CALENDAR_CONSOLIDATED_MSG };
+      }
+    }
+    // 4H — GUARD: substituir calendário mudando significado canônico de datas
+    // de um ciclo anual encerrado é bloqueado.
+    {
+      const d0 = getAppData();
+      const before = (d0.companyCalendars ?? []).find((c) => c.cycleStart === calendar.cycleStart);
+      const conflitos = closedCycleCalendarConflicts({ closures: d0.annualCycleClosures, before: before?.entries, after: calendar.entries });
+      if (conflitos.length > 0) {
+        return { ok: false, code: "cycle-closed", error: CYCLE_CLOSED_MSG };
       }
     }
     mutate((d) => {
@@ -2839,6 +2891,16 @@ export const actions = {
       const conflitos = consolidatedCalendarConflicts({ consolidations: d0.periodConsolidations, before: before?.entries });
       if (conflitos.length > 0) {
         return { ok: false, code: "consolidated", error: CALENDAR_CONSOLIDATED_MSG };
+      }
+    }
+    // 4H — GUARD: remover calendário que retire contexto canônico de datas de
+    // um ciclo anual encerrado é bloqueado.
+    {
+      const d0 = getAppData();
+      const before = (d0.companyCalendars ?? []).find((c) => c.cycleStart === cycleStart);
+      const conflitos = closedCycleCalendarConflicts({ closures: d0.annualCycleClosures, before: before?.entries });
+      if (conflitos.length > 0) {
+        return { ok: false, code: "cycle-closed", error: CYCLE_CLOSED_MSG };
       }
     }
     mutate((d) => {
@@ -3339,6 +3401,12 @@ export const actions = {
         result = { ok: false, code: "plan-not-found", error: SPECIAL_PLAN_NOT_FOUND_MSG };
         return d;
       }
+      // 4H — GUARD: cancelar reserva [10+] com destino em ciclo anual encerrado
+      // é bloqueado (o destino ficou protegido).
+      if (closedCycleLockForDate(d, target.destinationDate)) {
+        result = closedCycleLockForDate(d, target.destinationDate)!;
+        return d;
+      }
       // 4G — GUARD: plano com destino em período consolidado não é cancelado.
       if (consolidationLockForDate(d.periodConsolidations, target.destinationDate)) {
         result = { ok: false, code: "consolidated", error: PERIOD_CONSOLIDATED_MSG };
@@ -3394,6 +3462,12 @@ export const actions = {
       const target = (d.specialExcessPlans ?? []).find((pl) => pl.id === p.id);
       if (!target) {
         result = { ok: false, code: "plan-not-found", error: SPECIAL_PLAN_NOT_FOUND_MSG };
+        return d;
+      }
+      // 4H — GUARD: resolver reserva cujo destino caia em ciclo anual encerrado
+      // é bloqueado (o dia ficou protegido).
+      if (closedCycleLockForDate(d, target.destinationDate)) {
+        result = closedCycleLockForDate(d, target.destinationDate)!;
         return d;
       }
       // 4G — GUARD: resolução em destino consolidado é bloqueada.
@@ -3524,6 +3598,12 @@ export const actions = {
       const target = (d.specialExcessPlans ?? []).find((pl) => pl.id === p.id);
       if (!target) {
         result = { ok: false, code: "plan-not-found", error: SPECIAL_PLAN_NOT_FOUND_MSG };
+        return d;
+      }
+      // 4H — GUARD: concluir reserva cujo destino caia em ciclo anual encerrado
+      // é bloqueado (o dia ficou protegido).
+      if (closedCycleLockForDate(d, target.destinationDate)) {
+        result = closedCycleLockForDate(d, target.destinationDate)!;
         return d;
       }
       if (target.status === "cancelled") {
