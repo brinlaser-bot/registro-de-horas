@@ -157,7 +157,12 @@ function validUser(v: unknown): v is User {
     isBool(u.autoDeductLunch) &&
     // birthDate é opcional (backups v1/v2/v3 antigos não o tinham)
     (u.birthDate === undefined || u.birthDate === null || isDate(u.birthDate)) &&
-    (u.controlStartDate === undefined || u.controlStartDate === null || isDate(u.controlStartDate))
+    (u.controlStartDate === undefined || u.controlStartDate === null || isDate(u.controlStartDate)) &&
+    // 4I — limites do Guia do Ponto: opcionais e retrocompatíveis (backups
+    // v3 antigos não os têm; ausência = defaults 08:00 / 17:45). Sem bump
+    // de BACKUP_VERSION (mesmo padrão das coleções opcionais 4H/4G/4A).
+    (u.guideMinEntry === undefined || u.guideMinEntry === null || isTime(u.guideMinEntry)) &&
+    (u.guideMaxExit === undefined || u.guideMaxExit === null || isTime(u.guideMaxExit))
   );
 }
 

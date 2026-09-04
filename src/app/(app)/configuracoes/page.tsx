@@ -53,6 +53,10 @@ export default function ConfiguracoesPage() {
   const [clearOpen, setClearOpen] = useState(false);
   const [controlStartDate, setControlStartDate] = useState("");
   const [busyControlStart, setBusyControlStart] = useState(false);
+  // 4I — limites do Guia do Ponto (apresentação; defaults 08:00 / 17:45).
+  const [guideMinEntry, setGuideMinEntry] = useState("08:00");
+  const [guideMaxExit, setGuideMaxExit] = useState("17:45");
+  const [busyGuide, setBusyGuide] = useState(false);
   const calendarFileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -67,6 +71,9 @@ export default function ConfiguracoesPage() {
       autoDeductLunch: user.autoDeductLunch,
     });
     setControlStartDate(user.controlStartDate ?? "");
+    // 4I — valores salvos; dados antigos sem os campos usam os defaults.
+    setGuideMinEntry(user.guideMinEntry ?? "08:00");
+    setGuideMaxExit(user.guideMaxExit ?? "17:45");
   }, [mounted, user]);
 
   const saveProfile = async () => {
@@ -104,6 +111,20 @@ export default function ConfiguracoesPage() {
     actions.updateUser({ controlStartDate });
     setBusyControlStart(false);
     toast.show("Data de início do controle atualizada.");
+  };
+
+  /** 4I — salva os limites do Guia do Ponto (horários civis locais HH:MM). */
+  const saveGuideLimits = async () => {
+    const timeRe = /^([01]\d|2[0-3]):[0-5]\d$/;
+    if (!timeRe.test(guideMinEntry) || !timeRe.test(guideMaxExit)) {
+      toast.show("Informe horários válidos (HH:MM).", "error");
+      return;
+    }
+    setBusyGuide(true);
+    await new Promise((r) => setTimeout(r, 250));
+    actions.updateUser({ guideMinEntry, guideMaxExit });
+    setBusyGuide(false);
+    toast.show("Limites do Guia do Ponto atualizados.");
   };
 
   const exportJson = () => {
@@ -337,6 +358,36 @@ export default function ConfiguracoesPage() {
             description="Se não houver batida entre o início e o fim do almoço, o intervalo é descontado das horas do dia."
           />
         </div>
+      </Card>
+
+      {/* 4I — Guia do Ponto: limites APENAS de apresentação/sugestão. */}
+      <Card
+        title="Guia do Ponto"
+        subtitle="Horários usados para montar sugestões de lançamento no sistema oficial"
+        actions={
+          <Button size="sm" onClick={saveGuideLimits} loading={busyGuide}>
+            <Save size={14} /> Salvar
+          </Button>
+        }
+      >
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Input
+            label="Entrada mínima sugerida"
+            type="time"
+            value={guideMinEntry}
+            onChange={(e) => setGuideMinEntry(e.target.value)}
+          />
+          <Input
+            label="Saída máxima sugerida"
+            type="time"
+            value={guideMaxExit}
+            onChange={(e) => setGuideMaxExit(e.target.value)}
+          />
+        </div>
+        <p className="mt-3 text-xs text-slate-500">
+          Estes horários são usados apenas para montar sugestões de lançamento quando horas [10+] precisam
+          ser representadas no sistema oficial. Eles não alteram suas batidas reais.
+        </p>
       </Card>
 
       <Card

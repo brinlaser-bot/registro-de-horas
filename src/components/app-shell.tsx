@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import {
   ArrowLeftRight,
   BarChart3,
+  BookOpen,
   CalendarClock,
   Clock3,
   LayoutDashboard,
@@ -20,6 +21,7 @@ const NAV = [
   { href: "/", label: "Visão geral", icon: LayoutDashboard },
   { href: "/registros", label: "Registros", icon: CalendarClock },
   { href: "/compensacoes", label: "Central de Horas", icon: ArrowLeftRight },
+  { href: "/guia-ponto", label: "Guia do Ponto", icon: BookOpen },
   { href: "/ferias", label: "Férias e Afastamentos", icon: Umbrella },
   { href: "/resumo", label: "Resumo do período", icon: BarChart3 },
   { href: "/configuracoes", label: "Configurações", icon: Settings },

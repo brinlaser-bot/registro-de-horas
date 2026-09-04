@@ -63,10 +63,12 @@ check("5. estado ativo do menu permanece", () => {
   assert.ok(shell.includes('item.href === "/" ? pathname === "/" : pathname.startsWith(item.href)'));
   const navBlock = shell.slice(shell.indexOf("const NAV"), shell.indexOf("function titleFor"));
   const labels = [...navBlock.matchAll(/label:\s*"([^"]+)"/g)].map((m) => m[1]);
+  // 4I (nova página Guia do Ponto no menu principal — expectativa atualizada).
   assert.deepEqual(labels, [
     "Visão geral",
     "Registros",
     "Central de Horas",
+    "Guia do Ponto",
     "Férias e Afastamentos",
     "Resumo do período",
     "Configurações",
@@ -76,6 +78,7 @@ check("5. estado ativo do menu permanece", () => {
     "/",
     "/registros",
     "/compensacoes",
+    "/guia-ponto",
     "/ferias",
     "/resumo",
     "/configuracoes",

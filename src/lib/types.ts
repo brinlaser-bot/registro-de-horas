@@ -21,6 +21,15 @@ export interface User {
    * justificativa. Dias anteriores não são Sem registro. Opcional em dados
    * antigos — a hidratação preenche. */
   controlStartDate?: string | null;
+  /**
+   * 4I — GUIA DO PONTO (opcional, retrocompatível): horários usados APENAS
+   * para montar sugestões de lançamento quando horas [10+] precisam ser
+   * representadas no sistema oficial. NUNCA alteram batidas reais, saldo,
+   * projeção ou qualquer motor. HH:MM em America/Sao_Paulo (data civil).
+   * Ausentes em dados antigos → defaults 08:00 / 17:45.
+   */
+  guideMinEntry?: string | null;
+  guideMaxExit?: string | null;
 }
 
 export interface TimeEntry {

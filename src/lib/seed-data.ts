@@ -85,6 +85,9 @@ export const DEFAULT_USER: User = {
   ...REAL_USER_IDENTITY,
   ...DEFAULT_WORK_SETTINGS,
   controlStartDate: SEED_CONTROL_START,
+  // 4I — limites do Guia do Ponto (defaults oficiais desta etapa).
+  guideMinEntry: "08:00",
+  guideMaxExit: "17:45",
 };
 
 /** Instalação nova: perfil real + regras estruturais, sem fatos de demonstração. */
@@ -93,6 +96,9 @@ export const EMPTY_USER: User = {
   ...REAL_USER_IDENTITY,
   ...DEFAULT_WORK_SETTINGS,
   controlStartDate: null,
+  // 4I — limites do Guia do Ponto (defaults oficiais desta etapa).
+  guideMinEntry: "08:00",
+  guideMaxExit: "17:45",
 };
 
 /**
