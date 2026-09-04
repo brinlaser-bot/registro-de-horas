@@ -33,19 +33,26 @@ import {
   Landmark,
   Lock,
   Settings,
+  Timer,
 } from "lucide-react";
 import { settingsOf, useAppData, useIsClient } from "@/lib/store";
 import { consolidationLockForDate } from "@/lib/period-consolidation";
 import { annualCycleBounds, getAnnualPointCycle } from "@/lib/periods";
 import { formatDateShortBR, formatMinutes, todayString } from "@/lib/time";
-import { buildSpecialExcessBank } from "@/lib/special-excess-bank";
+import {
+  buildSpecialExcessBank,
+  type SpecialExcessLotDestination,
+  type SpecialExcessOriginLot,
+} from "@/lib/special-excess-bank";
 import { specialExcessPlanMinutes } from "@/lib/special-excess-plan";
 import { specialExcessUseMinutes } from "@/lib/special-excess-use";
 import { excessReasonOnDate } from "@/lib/hour-bank";
 import { centralCalendarEvents, centralCalendarSummary, centralCycles, tratamentoLabel } from "@/lib/central-view";
 import { closureForCycle, carriedSlicesIntoCycle } from "@/lib/annual-cycle-closure";
 import { checkCycleClose, computeClosingExcess } from "@/lib/annual-cycle-close";
+import { eligibleSpecialExcessDestinationsForOrigin } from "@/lib/special-excess-destinations";
 import { CloseCycleButton } from "@/components/close-cycle-modal";
+import { SpecialExcessDestineModal } from "@/components/special-excess-destine-modal";
 import { Badge, Button, EmptyState, Skeleton, StatCard } from "@/components/ui";
 
 const modoDaEstrategia = (strategy: string) => (strategy === "fifo" || strategy === "automatic" ? "Seleção automática" : "Seleção manual");
@@ -102,6 +109,37 @@ export default function CompensacoesPage() {
       }),
     [cicloAtivo, todayStr, entries, absences, companyCalendars, settings, faltas, user.controlStartDate, specialExcessUses, specialExcessPlans, annualCycleClosures],
   );
+
+  /* 4H.2 — LOTES reorganizados em DOIS blocos (responde "quais horas [10+]
+   * ainda tenho para usar?"). A classificação é 100% DERIVADA do banco
+   * canônico 3C a cada render — NADA persistido: cancelada uma reserva ou
+   * um uso, o lote volta sozinho para "disponíveis". */
+  const lotesDisponiveis = bank.lots.filter((l) => l.availableMinutes > 0);
+  const lotesTotalmenteDestinados = bank.lots.filter((l) => l.availableMinutes === 0);
+  /* 4H.2 — fluxO INVERSO: dias elegíveis a receber [10+] neste ciclo (fonte
+   * única do modal "Destinar horas" — MESMA lista para todas as origens do
+   * ciclo; derivado 4H.2 sobre 3A/3E + guards 4G/4H). */
+  const destinosElegiveis = useMemo(
+    () =>
+      eligibleSpecialExcessDestinationsForOrigin({
+        cycle: cicloAtivo,
+        asOfDate: todayStr,
+        entries,
+        absences,
+        calendars: companyCalendars,
+        settings,
+        faltas,
+        controlStartDate: user.controlStartDate ?? null,
+        uses: specialExcessUses ?? [],
+        plans: specialExcessPlans ?? [],
+        periodConsolidations,
+        annualCycleClosures,
+      }),
+    [cicloAtivo, todayStr, entries, absences, companyCalendars, settings, faltas, user.controlStartDate, specialExcessUses, specialExcessPlans, periodConsolidations, annualCycleClosures],
+  );
+  /* 4H.2 — modal origem→destino com o lote pré-selecionado (o MESMO
+   * componente aberto pelo DayCard de Registros). */
+  const [destineLot, setDestineLot] = useState<SpecialExcessOriginLot | null>(null);
 
   /* 4H — SITUAÇÃO DO CICLO SELECIONADO. Fontes puras (a página é somente
    * leitura — a mutação de encerramento vive no componente CloseCycleButton):
@@ -209,6 +247,27 @@ export default function CompensacoesPage() {
   }
 
   const linkDia = (date: string) => `/registros?escopo=ciclo&data=${date}`;
+
+  /* 4H.2 — linha de destino (uso) de uma origem — MESMA rastreabilidade
+   * canônica nos dois blocos (disponíveis e totalmente destinadas). */
+  const destinoLine = (d: SpecialExcessLotDestination) => (
+    <div key={`${d.useId}-${d.destinationDate}-${d.minutes}`} className="flex flex-wrap items-center justify-between gap-2 text-xs">
+      <span className="font-semibold text-slate-700">
+        <ArrowRight size={12} aria-hidden className="mr-1 inline text-slate-400" />
+        {formatDateShortBR(d.destinationDate)} → <b className="tabular-nums">{formatMinutes(d.minutes)}</b>{" "}
+        {d.status === "utilizado" ? "utilizado" : "cancelado"}
+        <span className="ml-1.5 font-medium text-slate-400">· {modoDaEstrategia(d.allocationStrategy)}</span>
+      </span>
+      <Link href={linkDia(d.destinationDate)} className="font-bold text-indigo-600 underline underline-offset-2 hover:text-indigo-800">
+        Ver dia
+      </Link>
+    </div>
+  );
+  /* Reservas ATIVAS lastreadas numa origem (junção canônica por allocations
+   * — sem nova matemática; o banco rastreia usos, a reserva é exibida pelo
+   * plano). */
+  const reservasDaOrigem = (lot: SpecialExcessOriginLot) =>
+    (specialExcessPlans ?? []).filter((pl) => pl.status === "planned" && pl.allocations.some((a) => a.originDate === lot.originDate));
 
   return (
     <div className="space-y-6">
@@ -366,86 +425,204 @@ export default function CompensacoesPage() {
             </div>
           )}
 
-          {/* Origens do [10+] */}
-          <section aria-label="Origens do [10+]" className="space-y-2">
-            <h3 className="text-sm font-extrabold uppercase tracking-wider text-slate-400">Origens do [10+]</h3>
-            {bank.lots.length === 0 ? (
-              <EmptyState icon={<Database size={26} />} title="Nenhuma hora [10+] gerada neste ciclo." description="Dias com jornada acima de 10h aparecem aqui como origens rastreáveis." />
-            ) : (
-              <div className="space-y-2">
-                {bank.lots.map((lot) => {
-                  const motivo = excessReasonOnDate(excessReasons, lot.originDate);
-                  return (
-                    <details key={lot.originDate} className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
-                      <summary className="flex cursor-pointer flex-wrap items-center justify-between gap-2">
-                        <span className="flex min-w-0 items-center gap-2">
-                          <ChevronDown size={15} aria-hidden className="shrink-0 text-slate-400" />
-                          <span className="text-sm font-extrabold text-slate-800">{formatDateShortBR(lot.originDate)}</span>
-                          {lot.carried && <Badge tone="sky">Trazido · origem factual {formatDateShortBR(lot.originDate)} ({lot.originCycle ?? "ciclo anterior"})</Badge>}
-                          {motivo && <Badge tone="amber">{motivo.reason}</Badge>}
-                          {lot.needsReview && <Badge tone="rose">Revisar</Badge>}
-                        </span>
-                        {lot.carried ? (
-                          <span className="text-xs font-semibold text-slate-500">
-                            Trazido do ciclo anterior <b className="text-slate-900">{formatMinutes(lot.carriedInMinutes ?? lot.availableMinutes)}</b> · Disponível{" "}
-                            <b className="text-sky-600">{formatMinutes(lot.availableMinutes)}</b>
-                          </span>
-                        ) : (
-                          <span className="text-xs font-semibold text-slate-500">
-                            Gerado <b className="text-slate-900">{formatMinutes(lot.generatedMinutes)}</b> · Utilizado{" "}
-                            <b className="text-slate-900">{formatMinutes(lot.usedMinutes)}</b> · Reservado{" "}
-                            <b className="text-slate-900">{formatMinutes(lot.reservedMinutes)}</b> · Disponível{" "}
-                            <b className="text-indigo-600">{formatMinutes(lot.availableMinutes)}</b>
-                          </span>
-                        )}
-                      </summary>
-                      <div className="mt-3 space-y-1.5 border-t border-slate-100 pt-2.5">
-                        <p className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400">Destinos das horas desta origem</p>
-                        {lot.destinations.length === 0 ? (
-                          <p className="text-xs text-slate-500">Nenhum destino ainda — horas inteiramente disponíveis.</p>
-                        ) : (
-                          lot.destinations.map((d) => (
-                            <div key={`${d.useId}-${d.destinationDate}-${d.minutes}`} className="flex flex-wrap items-center justify-between gap-2 text-xs">
-                              <span className="font-semibold text-slate-700">
-                                <ArrowRight size={12} aria-hidden className="mr-1 inline text-slate-400" />
-                                {formatDateShortBR(d.destinationDate)} → <b className="tabular-nums">{formatMinutes(d.minutes)}</b>{" "}
-                                {d.status === "utilizado" ? "utilizado" : "cancelado"}
-                                <span className="ml-1.5 font-medium text-slate-400">· {modoDaEstrategia(d.allocationStrategy)}</span>
-                              </span>
-                              <Link href={linkDia(d.destinationDate)} className="font-bold text-indigo-600 underline underline-offset-2 hover:text-indigo-800">
-                                Ver dia
-                              </Link>
+          {/* 4H.2 — REORGANIZAÇÃO DOS LOTES: responde imediatamente
+              "quais horas [10+] ainda tenho para usar?".
+              A. HORAS [10+] DISPONÍVEIS (available > 0) — o valor em
+                 destaque é o DISPONÍVEL; contexto/estatísticas ficam
+                 secundárias; ação "Destinar horas" (fluxo inverso).
+              B. HORAS [10+] TOTALMENTE DESTINADAS (available = 0) — 100%
+                 comprometido (utilizado e/ou reservado); recolhido por
+                 padrão; NADA é apagado/ocultado — apenas movido.
+              Classificação DERIVADA do banco canônico 3C a cada render —
+              NADA persistido (cancelada a reserva, o lote volta sozinho
+              para "disponíveis"). */}
+          {bank.lots.length === 0 ? (
+            <EmptyState icon={<Database size={26} />} title="Nenhuma hora [10+] gerada neste ciclo." description="Dias com jornada acima de 10h aparecem aqui como origens rastreáveis." />
+          ) : (
+            <>
+              {/* A — Disponíveis */}
+              <section aria-label="Horas [10+] disponíveis" className="space-y-2">
+                <h3 className="text-sm font-extrabold uppercase tracking-wider text-slate-400">Horas [10+] disponíveis</h3>
+                <p className="-mt-1 text-[11px] font-medium text-slate-400">
+                  Origens do [10+] com saldo para usar neste ciclo — o que ainda pode ser destinado.
+                </p>
+                {lotesDisponiveis.length === 0 ? (
+                  <p className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-xs font-medium text-slate-500">
+                    Nenhuma hora [10+] disponível agora — todos os lotes estão totalmente destinados.
+                  </p>
+                ) : (
+                  <div className="space-y-2">
+                    {lotesDisponiveis.map((lot) => {
+                      const motivo = excessReasonOnDate(excessReasons, lot.originDate);
+                      const reservas = reservasDaOrigem(lot);
+                      return (
+                        <article key={lot.originDate} className="rounded-2xl border border-indigo-100 bg-white px-4 py-3">
+                          {/* 1) data/origem + 2) DISPONÍVEL em destaque + 6) ação */}
+                          <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+                            <div className="min-w-0">
+                              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                                <span className="text-sm font-extrabold text-slate-800">{formatDateShortBR(lot.originDate)}</span>
+                                {lot.carried && <Badge tone="sky">Trazido · origem factual {formatDateShortBR(lot.originDate)} ({lot.originCycle ?? "ciclo anterior"})</Badge>}
+                                {motivo && <Badge tone="amber">{motivo.reason}</Badge>}
+                                {lot.needsReview && <Badge tone="rose">Revisar</Badge>}
+                              </div>
+                              <p className="mt-0.5 text-lg font-extrabold tabular-nums text-indigo-600">
+                                {formatMinutes(lot.availableMinutes)}{" "}
+                                <span className="text-xs font-bold text-indigo-400">disponíveis</span>
+                              </p>
                             </div>
-                          ))
-                        )}
-                        {/* Reservas ATIVAS lastreadas nesta origem (junção canônica
-                            por allocations — o banco lot.destinations rastreia usos;
-                            a reserva é exibida pelo plano, sem nova matemática). */}
-                        {(specialExcessPlans ?? [])
-                          .filter((pl) => pl.status === "planned" && pl.allocations.some((a) => a.originDate === lot.originDate))
-                          .map((pl) => (
-                            <div key={`pl-${pl.id}`} className="flex flex-wrap items-center justify-between gap-2 text-xs">
-                              <span className="font-semibold text-slate-700">
-                                <ArrowRight size={12} aria-hidden className="mr-1 inline text-amber-400" />
-                                {pl.allocations.filter((a) => a.originDate === lot.originDate).map((a) => (
-                                  <span key={a.originDate}>
-                                    {formatDateShortBR(pl.destinationDate)} → <b className="tabular-nums">{formatMinutes(a.minutes)}</b> reservado
-                                  </span>
-                                ))}
-                                <span className="ml-1.5 font-medium text-slate-400">· {modoDaEstrategia(pl.selectionMode)}</span>
-                              </span>
-                              <Link href={reservasAbertasHref(pl.destinationDate, pl.destinationDate <= todayStr)} className="font-bold text-indigo-600 underline underline-offset-2 hover:text-indigo-800">
-                                Ver dia
-                              </Link>
+                            {destinosElegiveis.length > 0 ? (
+                              <Button
+                                size="sm"
+                                variant="secondary"
+                                className="w-full !border-violet-300 !text-violet-700 hover:!bg-violet-50 sm:w-auto"
+                                onClick={() => setDestineLot(lot)}
+                              >
+                                <Timer size={13} /> Destinar horas
+                              </Button>
+                            ) : (
+                              <div className="w-full sm:w-auto">
+                                <Button size="sm" variant="secondary" disabled className="w-full sm:w-auto">
+                                  <Timer size={13} /> Destinar horas
+                                </Button>
+                                <p className="text-[11px] font-medium text-slate-400">
+                                  Não há dias abaixo da base disponíveis para receber estas horas.
+                                </p>
+                              </div>
+                            )}
+                          </div>
+                          {/* 3) contexto + 4) Gerado / Utilizado / Reservado (secundário) */}
+                          <p className="mt-1 text-xs font-medium text-slate-500">
+                            {lot.carried ? (
+                              <>
+                                Trazido do ciclo <b className="text-slate-700">{lot.originCycle ?? "anterior"}</b> · Trazido{" "}
+                                <b className="text-slate-700">{formatMinutes(lot.carriedInMinutes ?? lot.availableMinutes)}</b> · Utilizado neste ciclo{" "}
+                                <b className="text-slate-700">{formatMinutes(lot.usedMinutes)}</b> · Reservado{" "}
+                                <b className="text-slate-700">{formatMinutes(lot.reservedMinutes)}</b>
+                              </>
+                            ) : (
+                              <>
+                                Gerado <b className="text-slate-700">{formatMinutes(lot.generatedMinutes)}</b> · Utilizado{" "}
+                                <b className="text-slate-700">{formatMinutes(lot.usedMinutes)}</b> · Reservado{" "}
+                                <b className="text-slate-700">{formatMinutes(lot.reservedMinutes)}</b>
+                              </>
+                            )}
+                          </p>
+                          {/* 5) destinos/rastreabilidade (expansão) */}
+                          <details className="mt-2 border-t border-slate-100 pt-2">
+                            <summary className="cursor-pointer text-[11px] font-extrabold uppercase tracking-wider text-slate-400">
+                              Destinos das horas desta origem ({lot.destinations.length + reservas.length})
+                            </summary>
+                            <div className="mt-1.5 space-y-1.5">
+                              {lot.destinations.length === 0 && reservas.length === 0 ? (
+                                <p className="text-xs text-slate-500">Nenhum destino ainda — horas inteiramente disponíveis.</p>
+                              ) : (
+                                <>
+                                  {lot.destinations.map((d) => destinoLine(d))}
+                                  {reservas.map((pl) => (
+                                    <div key={`pl-${pl.id}`} className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                                      <span className="font-semibold text-slate-700">
+                                        <ArrowRight size={12} aria-hidden className="mr-1 inline text-amber-400" />
+                                        {pl.allocations.filter((a) => a.originDate === lot.originDate).map((a) => (
+                                          <span key={a.originDate}>
+                                            {formatDateShortBR(pl.destinationDate)} → <b className="tabular-nums">{formatMinutes(a.minutes)}</b> reservado
+                                          </span>
+                                        ))}
+                                        <span className="ml-1.5 font-medium text-slate-400">· {modoDaEstrategia(pl.selectionMode)}</span>
+                                      </span>
+                                      <Link href={reservasAbertasHref(pl.destinationDate, pl.destinationDate <= todayStr)} className="font-bold text-indigo-600 underline underline-offset-2 hover:text-indigo-800">
+                                        Ver dia
+                                      </Link>
+                                    </div>
+                                  ))}
+                                </>
+                              )}
                             </div>
-                          ))}
-                      </div>
-                    </details>
-                  );
-                })}
-              </div>
-            )}
-          </section>
+                          </details>
+                        </article>
+                      );
+                    })}
+                  </div>
+                )}
+              </section>
+
+              {/* B — Totalmente destinadas (recolhido por padrão) */}
+              {lotesTotalmenteDestinados.length > 0 && (
+                <details className="rounded-2xl border border-slate-200 bg-white">
+                  <summary className="cursor-pointer px-4 py-3 text-sm font-extrabold uppercase tracking-wider text-slate-400">
+                    Horas [10+] totalmente destinadas ({lotesTotalmenteDestinados.length})
+                    <span className="ml-2 font-medium normal-case text-xs text-slate-400">100% comprometido · histórico preservado</span>
+                  </summary>
+                  <div className="space-y-2 border-t border-slate-100 px-4 pb-4 pt-3">
+                    {lotesTotalmenteDestinados.map((lot) => {
+                      const motivo = excessReasonOnDate(excessReasons, lot.originDate);
+                      const reservas = reservasDaOrigem(lot);
+                      return (
+                        <div key={lot.originDate} className="rounded-xl border border-slate-200 bg-slate-50/60 px-3.5 py-2.5">
+                          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+                            <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                              <span className="text-sm font-extrabold text-slate-700">{formatDateShortBR(lot.originDate)}</span>
+                              {lot.carried && <Badge tone="sky">Trazido ({lot.originCycle ?? "ciclo anterior"})</Badge>}
+                              {motivo && <Badge tone="amber">{motivo.reason}</Badge>}
+                              {lot.needsReview && <Badge tone="rose">Revisar</Badge>}
+                            </span>
+                            <Badge tone="slate">Totalmente destinado</Badge>
+                          </div>
+                          <p className="mt-1 text-xs font-medium text-slate-500">
+                            {lot.carried ? (
+                              <>
+                                Trazido <b className="text-slate-700">{formatMinutes(lot.carriedInMinutes ?? 0)}</b> · Utilizado neste ciclo{" "}
+                                <b className="text-slate-700">{formatMinutes(lot.usedMinutes)}</b> · Reservado{" "}
+                                <b className="text-slate-700">{formatMinutes(lot.reservedMinutes)}</b>
+                              </>
+                            ) : (
+                              <>
+                                Gerado <b className="text-slate-700">{formatMinutes(lot.generatedMinutes)}</b> · Utilizado{" "}
+                                <b className="text-slate-700">{formatMinutes(lot.usedMinutes)}</b> · Reservado{" "}
+                                <b className="text-slate-700">{formatMinutes(lot.reservedMinutes)}</b>
+                              </>
+                            )}{" "}
+                            · Disponível <b className="text-slate-700">{formatMinutes(0)}</b>
+                          </p>
+                          {/* rastreabilidade ao expandir — nada é apagado */}
+                          <details className="mt-1.5">
+                            <summary className="cursor-pointer text-[11px] font-extrabold uppercase tracking-wider text-slate-400">
+                              Destinos e rastreabilidade ({lot.destinations.length + reservas.length})
+                            </summary>
+                            <div className="mt-1.5 space-y-1.5">
+                              {lot.destinations.length === 0 && reservas.length === 0 ? (
+                                <p className="text-xs text-slate-500">Nenhum destino registrado.</p>
+                              ) : (
+                                <>
+                                  {lot.destinations.map((d) => destinoLine(d))}
+                                  {reservas.map((pl) => (
+                                    <div key={`pl-${pl.id}`} className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                                      <span className="font-semibold text-slate-700">
+                                        <ArrowRight size={12} aria-hidden className="mr-1 inline text-amber-400" />
+                                        {pl.allocations.filter((a) => a.originDate === lot.originDate).map((a) => (
+                                          <span key={a.originDate}>
+                                            {formatDateShortBR(pl.destinationDate)} → <b className="tabular-nums">{formatMinutes(a.minutes)}</b> reservado
+                                          </span>
+                                        ))}
+                                        <span className="ml-1.5 font-medium text-slate-400">· {modoDaEstrategia(pl.selectionMode)}</span>
+                                      </span>
+                                      <Link href={reservasAbertasHref(pl.destinationDate, pl.destinationDate <= todayStr)} className="font-bold text-indigo-600 underline underline-offset-2 hover:text-indigo-800">
+                                        Ver dia
+                                      </Link>
+                                    </div>
+                                  ))}
+                                </>
+                              )}
+                            </div>
+                          </details>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </details>
+              )}
+            </>
+          )}
 
           {/* Reservas em aberto */}
           <section aria-label="Reservas em aberto" className="space-y-2">
@@ -686,6 +863,22 @@ export default function CompensacoesPage() {
             ))}
           </div>
         </details>
+      )}
+
+      {/* 4H.2 — FLUXO INVERSO: modal "Destinar horas [10+]" com a origem fixa
+          no lote escolhido (o MESMO componente do DayCard de Registros; o
+          resultado é o MESMO SpecialExcessUse do fluxo destino→origem). */}
+      {destineLot && (
+        <SpecialExcessDestineModal
+          origin={{
+            originDate: destineLot.originDate,
+            cycle: cicloAtivo,
+            ...(destineLot.carried
+              ? { carried: true as const, carriedInMinutes: destineLot.carriedInMinutes, originCycle: destineLot.originCycle }
+              : {}),
+          }}
+          onClose={() => setDestineLot(null)}
+        />
       )}
     </div>
   );

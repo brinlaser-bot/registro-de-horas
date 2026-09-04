@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import {
+  ArrowLeftRight,
   Ban,
   Cake,
   CalendarClock,
@@ -183,6 +184,25 @@ interface Props {
    *  reserva) e NENHUM modal mutável a partir do card. Os guards do motor
    *  continuam sendo a defesa real — a UI é camada de clareza. */
   consolidated?: boolean;
+  /** 4H.2 — este dia é ORIGEM operacional de [10+] (ciclo anual AINDA ABERTO
+   *  e lote com availableMinutes > 0). Presente ⇒ bloco "[10+] gerado /
+   *  disponível" + botão "Destinar horas" (fluxo inverso).
+   *  IMPORTANTE: período CONSOLIDADO não impede — o botão NÃO edita batidas,
+   *  consolidação nem a jornada real da origem; ele apenas usa o saldo rema-
+   *  nescente do banco canônico (guard real: destino consolidado é bloqueado
+   *  no store). A leitura da jornada real no card permanece integral. */
+  specialOrigin?: {
+    generatedMinutes: number;
+    availableMinutes: number;
+    hasEligibleDestinations: boolean;
+  } | null;
+  /** 4H.2 — abre o modal "Destinar horas [10+]" com a ORIGEM pré-selecionada
+   *  (o MESMO componente aberto pela Central de Horas). */
+  onDestineOrigin?: (date: string) => void;
+  /** 4H.2 — ciclo anual ENCERRADO: o saldo [10+] deste dia foi TRANSPORTADO
+   *  (rastreabilidade SOMENTE — administração exclusiva da Central do novo
+   *  ciclo; NUNCA "Destinar horas" aqui). */
+  specialCarriedOut?: { minutes: number; destinationCycleLabel: string } | null;
 }
 
 export function DayCard({
@@ -218,6 +238,9 @@ export function DayCard({
   onResolvePlan,
   initiallyExpanded,
   consolidated = false,
+  specialOrigin = null,
+  onDestineOrigin,
+  specialCarriedOut = null,
 }: Props) {
   const specialActions = useSpecialPunchActions();
   // Regra: todos os dias iniciam RECOLHIDOS — o usuário expande apenas o dia
@@ -687,6 +710,68 @@ export function DayCard({
               Há trabalho registrado em um dia abonado. O tratamento dessas horas depende da regra da empresa e ainda não foi definido.
             </p>
           )}
+
+          {/* 4H.2 — ORIGEM [10+] OPERACIONAL: o dia GEROU horas [10+] com
+              saldo disponível e o CICLO ANUAL ainda está aberto. O botão
+              "Destinar horas" abre o MESMO modal da Central com a origem
+              pré-selecionada (fluxo inverso origem→destino, MESMO motor
+              canônico 3B/3C/3D).
+              Regras:
+                · ciclo anual ENCERRADO ⇒ NUNCA este bloco (o card mostra a
+                  rastreabilidade do transporte em specialCarriedOut);
+                · período CONSOLIDADO NÃO impede (4H.2/§21): o botão não
+                  edita batidas, consolidação nem a jornada real da origem —
+                  apenas usa o saldo remanescente do banco; o DESTINO
+                  consolidado continua bloqueado no store (4G);
+                · sem dia elegível ⇒ lote visível + botão DESABILITADO com
+                  explicação (nunca esconder o saldo). */}
+          {specialOrigin && onDestineOrigin ? (
+            <div className="mt-3 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2.5">
+              <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+                <div className="min-w-0">
+                  <Badge tone="violet" className="shrink-0 py-1">
+                    <Timer size={13} aria-hidden /> [10+]
+                  </Badge>
+                  <p className="mt-1 text-xs font-semibold text-violet-900">
+                    [10+] gerado: <b className="tabular-nums">{formatMinutes(specialOrigin.generatedMinutes)}</b>
+                    {" · "}
+                    [10+] disponível:{" "}
+                    <b className="tabular-nums text-violet-700">{formatMinutes(specialOrigin.availableMinutes)}</b>
+                  </p>
+                </div>
+                {specialOrigin.hasEligibleDestinations ? (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    className="w-full !border-violet-300 !text-violet-700 hover:!bg-violet-50 sm:w-auto"
+                    onClick={() => onDestineOrigin(d.date)}
+                  >
+                    <Timer size={13} /> Destinar horas
+                  </Button>
+                ) : (
+                  <div className="w-full sm:w-auto">
+                    <Button size="sm" variant="secondary" disabled className="w-full sm:w-auto">
+                      <Timer size={13} /> Destinar horas
+                    </Button>
+                    <p className="text-[11px] font-medium text-violet-400">
+                      Não há dias abaixo da base disponíveis para receber estas horas.
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : specialCarriedOut ? (
+            <div className="mt-3 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2.5">
+              <p className="text-xs font-semibold text-sky-800">
+                <ArrowLeftRight size={13} aria-hidden className="mr-1 inline text-sky-500" />
+                {formatMinutes(specialCarriedOut.minutes)} transportadas para o ciclo{" "}
+                {specialCarriedOut.destinationCycleLabel}
+                <span className="font-medium text-sky-600">
+                  {" "}— administradas na Central do novo ciclo (histórico somente leitura).
+                </span>
+              </p>
+            </div>
+          ) : null}
 
           {/* [10+] (3E/3E.2): bloco único de [10+] no card — o uso nunca altera
               trabalhado/saldo/batidas do card; botão, modal e projeção derivam dos

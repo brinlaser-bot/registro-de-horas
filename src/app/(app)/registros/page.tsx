@@ -52,6 +52,10 @@ import {
 import { buildSpecialExcessBank, type SpecialExcessBankSummary } from "@/lib/special-excess-bank";
 import { carriedSlicesIntoCycle, dateFallsInClosedCycle } from "@/lib/annual-cycle-closure";
 import { buildSpecialExcessDayView } from "@/lib/special-excess-day-view";
+import {
+  carriedOutForDate,
+  eligibleSpecialExcessDestinationsForOrigin,
+} from "@/lib/special-excess-destinations";
 import { activeSpecialPlansForDate } from "@/lib/special-excess-plan";
 import { attentionNowSummary } from "@/lib/attention-now";
 import type { WorkSettings } from "@/lib/types";
@@ -60,6 +64,7 @@ import { ManualEntryModal, type ManualPairData } from "@/components/manual-entry
 import { FaltaModal } from "@/components/falta-modal";
 import { FillDayRecordsModal } from "@/components/fill-day-records-modal";
 import { SpecialExcessUseModal } from "@/components/special-excess-use-modal";
+import { SpecialExcessDestineModal } from "@/components/special-excess-destine-modal";
 import { SpecialExcessPlanModal } from "@/components/special-excess-plan-modal";
 import { SpecialExcessPlanResolveModal } from "@/components/special-excess-plan-resolve-modal";
 import { DaySituationChips, DaySituationFilter } from "@/components/day-situation-filter";
@@ -123,6 +128,8 @@ function RegistrosBody() {
   const [faltaInitialDate, setFaltaInitialDate] = useState<string | null>(null);
   const [fillDate, setFillDate] = useState<string | null>(null);
   const [completeDate, setCompleteDate] = useState<string | null>(null);
+  // 4H.2: origem do modal "Destinar horas [10+]" (fluxo inverso).
+  const [destineOrigin, setDestineOrigin] = useState<{ originDate: string; cycle: string } | null>(null);
   // 4B: data FUTURA do modal "Planejar uso de [10+]".
   const [planDate, setPlanDate] = useState<string | null>(null);
   // 4C: id do plano em resolução ("Usar planejamento [10+]").
@@ -220,6 +227,34 @@ function RegistrosBody() {
     return map;
   }, [entries, absences, companyCalendars, settings, faltas, specialExcessUses, specialExcessPlans, annualCycleClosures, user.controlStartDate, todayStr, range]);
 
+  /* 4H.2 — dias elegíveis a receber [10+] POR CICLO (fonte única do botão
+   * "Destinar horas" no card de origem e do modal inverso — MESMO derivado
+   * da Central: elegibilidade 3A/3E + guards 4G/4H; mais antigo → mais
+   * recente). Cálculo único por ciclo, independente da origem. */
+  const specialDestinationsByCycle = useMemo(() => {
+    const map = new Map<string, ReturnType<typeof eligibleSpecialExcessDestinationsForOrigin>>();
+    for (const c of new Set(registrosTimelineDates(range).map(getAnnualPointCycle))) {
+      map.set(
+        c,
+        eligibleSpecialExcessDestinationsForOrigin({
+          cycle: c,
+          asOfDate: todayStr,
+          entries,
+          absences,
+          calendars: companyCalendars,
+          settings,
+          faltas,
+          controlStartDate: user.controlStartDate ?? null,
+          uses: specialExcessUses ?? [],
+          plans: specialExcessPlans ?? [],
+          periodConsolidations,
+          annualCycleClosures,
+        }),
+      );
+    }
+    return map;
+  }, [entries, absences, companyCalendars, settings, faltas, specialExcessUses, specialExcessPlans, periodConsolidations, annualCycleClosures, user.controlStartDate, todayStr, range]);
+
   // Linha do tempo completa: UM card por data do intervalo, mesmo sem batidas.
   // 4E.1 — ORDEM CRONOLÓGICA CRESCENTE na RENDERIZAÇÃO (21/08 → 20/09; ciclo
   // 01/05 → 30/04; filtros herdam a ordem). Somente apresentação: os motores
@@ -249,6 +284,27 @@ function RegistrosBody() {
           uses: specialExcessUses ?? [],
           bank: specialBankByCycle.get(getAnnualPointCycle(date)),
         });
+        /* 4H.2 — ORIGEM [10+] OPERACIONAL no card (fluxo inverso):
+           · ciclo anual AINDA ABERTO (dateFallsInClosedCycle) e
+             availableMinutes > 0 no banco canônico do ciclo ⇒ botão
+             "Destinar horas" (período CONSOLIDADO NÃO impede: o botão só
+             usa saldo do banco — destino consolidado segue bloqueado no
+             store 4G);
+           · ciclo ENCERRADO ⇒ SEM botão; se o saldo foi TRANSPORTADO,
+             mostra apenas a rastreabilidade do transporte. */
+        const cicloDoDia = getAnnualPointCycle(date);
+        const cicloEncerrado = dateFallsInClosedCycle(annualCycleClosures, date);
+        const loteOrigem = specialBankByCycle.get(cicloDoDia)?.lots.find((l) => l.originDate === date);
+        const destinosDoCiclo = specialDestinationsByCycle.get(cicloDoDia) ?? [];
+        const specialOrigin =
+          !cicloEncerrado && loteOrigem && loteOrigem.availableMinutes > 0
+            ? {
+                generatedMinutes: loteOrigem.generatedMinutes,
+                availableMinutes: loteOrigem.availableMinutes,
+                hasEligibleDestinations: destinosDoCiclo.length > 0,
+              }
+            : null;
+        const specialCarriedOut = cicloEncerrado ? carriedOutForDate(annualCycleClosures, date) : null;
         const situations = situationsFromView({
           date,
           today: todayStr,
@@ -332,6 +388,10 @@ function RegistrosBody() {
           compact,
           creditView,
           specialExcess,
+          // 4H.2: origem operacional [10+] (ciclo aberto + saldo disponível).
+          specialOrigin,
+          // 4H.2: ciclo encerrado → rastreabilidade do saldo transportado.
+          specialCarriedOut,
           // 4B: planos/reservas ATIVAS do dia (badge + detalhe + cancelamento).
           specialPlans: activeSpecialPlansForDate(specialExcessPlans ?? [], date),
           // 4D.5: reserva [10+] deste dia JÁ CHEGOU e segue aguardando
@@ -341,7 +401,7 @@ function RegistrosBody() {
           situations,
         };
       });
-  }, [entries, compensations, absences, companyCalendars, faltas, excessReasons, settings, range, todayStr, nowMinutes, user.controlStartDate, specialExcessUses, specialExcessPlans, specialBankByCycle]);
+  }, [entries, compensations, absences, companyCalendars, faltas, excessReasons, settings, range, todayStr, nowMinutes, user.controlStartDate, specialExcessUses, specialExcessPlans, specialBankByCycle, specialDestinationsByCycle, annualCycleClosures]);
 
   // Resumo do intervalo, AGRUPADO POR CICLO ANUAL (nunca mistura pendências)
   const summaries = useMemo(() => {
@@ -1011,7 +1071,7 @@ function RegistrosBody() {
               a única faixa de planejamento é a violeta compartilhada da 4D.5
               (fonte única attention-now), exibida no modo normal; com o filtro
               plano-10 ativo resta apenas o contexto violeta do filtro. */}          <div className={missingOnly || pendingOnly || planoOnly ? "space-y-4" : "space-y-2"}>
-          {listedDays.map(({ date, balanceView, displayDay, absence, calendarLabel, falta, workedInAbonoMinutes, abonoParcial, missingExpected, historicalEmpty, compact, specialExcess, specialPlans, planningCapacityMinutes, calendarSemantics }) => (
+          {listedDays.map(({ date, balanceView, displayDay, absence, calendarLabel, falta, workedInAbonoMinutes, abonoParcial, missingExpected, historicalEmpty, compact, specialExcess, specialPlans, planningCapacityMinutes, calendarSemantics, specialOrigin, specialCarriedOut }) => (
             <div key={date} id={`dia-card-${date}`}>
             <DayCard
               /* 4D.5.2 — a identidade muda quando o FOCO transiciona: navegando
@@ -1058,6 +1118,16 @@ function RegistrosBody() {
               abonoParcial={abonoParcial}
               specialExcess={specialExcess.eligible || specialExcess.activeUses.length > 0 ? specialExcess : null}
               onCompleteJornada={(d) => setCompleteDate(d)}
+              // 4H.2 — fluxo inverso "Destinar horas" no card da ORIGEM:
+              // MESMO modal da Central com a origem pré-selecionada. O botão
+              // aparece mesmo em dia CONSOLIDADO (não edita a jornada/
+              // consolidação da origem — só usa saldo do banco); ciclo
+              // ENCERRADO ⇒ NUNCA (mostra o transporte, se houver).
+              specialOrigin={specialOrigin}
+              onDestineOrigin={
+                specialOrigin ? (dd) => setDestineOrigin({ originDate: dd, cycle: getAnnualPointCycle(dd) }) : undefined
+              }
+              specialCarriedOut={specialCarriedOut}
               specialPlans={specialPlans}
               // 4B: a ação de planejar só é oferecida para dia FUTURO
               // (destinationDate > hoje); 4D.3 exige base efetiva positiva e
@@ -1125,6 +1195,15 @@ function RegistrosBody() {
       {/* NOVO [10+] (Etapa 3E): modal "Completar jornada com [10+]". */}
       {completeDate && (
         <SpecialExcessUseModal date={completeDate} onClose={() => setCompleteDate(null)} />
+      )}
+      {/* 4H.2 — modal "Destinar horas [10+]" (fluxo inverso, origem fixa):
+          o MESMO componente da Central; cria o MESMO SpecialExcessUse do
+          fluxo destino→origem (motor canônico 3D). */}
+      {destineOrigin && (
+        <SpecialExcessDestineModal
+          origin={{ originDate: destineOrigin.originDate, cycle: destineOrigin.cycle }}
+          onClose={() => setDestineOrigin(null)}
+        />
       )}
       {/* NOVO [10+] (Etapa 4B): modal "Planejar uso de [10+]" (reserva futura). */}
       {planDate && (
