@@ -87,7 +87,7 @@ export function manualMaxForOrigin(
  *   ainda não existe fonte persistida de fechamento (limitação documentada).
  */
 export function SpecialExcessUseModal({ date, onClose }: Props) {
-  const { user, entries, absences, companyCalendars, faltas, specialExcessUses, specialExcessPlans } = useAppData();
+  const { user, entries, absences, companyCalendars, faltas, specialExcessUses, specialExcessPlans, annualCycleClosures } = useAppData();
   const toast = useToast();
   const todayStr = todayString();
   const settings = settingsOf(user);
@@ -107,8 +107,12 @@ export function SpecialExcessUseModal({ date, onClose }: Props) {
         // 4A: minuto reservado por plano ativo NÃO está disponível para um
         // novo uso — o banco canônico líquida reservas (GERADO−USO−RESERVA).
         plans: specialExcessPlans ?? [],
+        // 4H.1: capacidade do ciclo inclui saldo TRANSPORTADO formalmente
+        // (mesma fonte canônica do store). Sem isto o preview/lotes/máximo
+        // ignorariam o trazido e divergiriam do que o store de fato aloca.
+        closures: annualCycleClosures,
       }),
-    [date, todayStr, entries, absences, companyCalendars, settings, faltas, user.controlStartDate, specialExcessUses, specialExcessPlans],
+    [date, todayStr, entries, absences, companyCalendars, settings, faltas, user.controlStartDate, specialExcessUses, specialExcessPlans, annualCycleClosures],
   );
 
   const [mode, setMode] = useState<"auto" | "manual">("auto");
@@ -357,8 +361,13 @@ export function SpecialExcessUseModal({ date, onClose }: Props) {
                 <p className="text-[11px] font-bold uppercase tracking-wide text-violet-700">Origem das horas</p>
                 <ul className="mt-1.5 space-y-1 text-xs font-medium text-violet-900">
                   {autoPreview.allocations.map((a) => (
-                    <li key={a.originDate} className="flex items-center justify-between gap-3">
-                      <span>{formatDateShortBR(a.originDate)}</span>
+                    <li key={`${a.originDate}-${a.carried ? "c" : "f"}`} className="flex items-center justify-between gap-3">
+                      <span>
+                        {formatDateShortBR(a.originDate)}
+                        {a.carried && (
+                          <span className="ml-1.5 font-semibold text-sky-600">· trazido do ciclo anterior</span>
+                        )}
+                      </span>
                       <span className="font-bold tabular-nums">{formatMinutes(a.minutes)}</span>
                     </li>
                   ))}
@@ -412,10 +421,23 @@ export function SpecialExcessUseModal({ date, onClose }: Props) {
                           }}
                           className="h-4 w-4 accent-violet-600 disabled:cursor-not-allowed"
                         />
-                        <span className="text-xs font-bold text-slate-900">{formatDateShortBR(lot.originDate)}</span>
+                        <span className="text-xs font-bold text-slate-900">
+                          {formatDateShortBR(lot.originDate)}
+                          {lot.carried && (
+                            <Badge tone="sky" className="ml-1.5">trazido · {lot.originCycle ?? "ciclo anterior"}</Badge>
+                          )}
+                        </span>
                       </label>
                       <span className="min-w-0 flex-1 text-[11px] font-medium text-slate-500 sm:pl-6">
-                        Gerado: <b className="text-slate-700">{formatMinutes(lot.generatedMinutes)}</b>
+                        {lot.carried ? (
+                          <>
+                            Trazido do ciclo anterior: <b className="text-slate-700">{formatMinutes(lot.carriedInMinutes ?? lot.availableMinutes)}</b>
+                          </>
+                        ) : (
+                          <>
+                            Gerado: <b className="text-slate-700">{formatMinutes(lot.generatedMinutes)}</b>
+                          </>
+                        )}
                         {lot.usedMinutes > 0 && (
                           <>
                             {" "}

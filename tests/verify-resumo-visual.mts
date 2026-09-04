@@ -50,7 +50,9 @@ check("2. 4F: bloco [10+] do período mostra o gerado factual — sem Realocado/
   // 4F (SUPERADO — expectativa atualizada com justificativa):
   const page = srcOf("src/app/(app)/resumo/page.tsx");
   assert.ok(page.includes("Gerado no período"));
-  assert.ok(page.includes("origens dentro de 21→20"));
+  // 4H.1 (SUPERADO — subtexto dinâmico): range canônico, sem literal "21→20".
+  assert.ok(page.includes("origens dentro de {periodLabel(period)}"));
+  assert.ok(!page.includes("origens dentro de 21→20"), "sem hardcode '21→20' como range");
   assert.ok(page.includes("text-violet-700"), "tom violeta preservado");
   assert.ok(!page.includes("Realocado"), "sem 'Realocado'");
   assert.ok(!page.includes("A realocar"), "sem 'A realocar'");

@@ -40,6 +40,7 @@ import { buildCalendarForecast } from "@/lib/calendar-forecast";
 import { buildCycleSituation } from "@/lib/cycle-dashboard";
 import { buildResumoPeriodView } from "@/lib/resumo-period-view";
 import { buildSpecialExcessBank } from "@/lib/special-excess-bank";
+import { carriedSlicesIntoCycle } from "@/lib/annual-cycle-closure";
 import { buildSpecialExcessDayView } from "@/lib/special-excess-day-view";
 import { ExcessReasonModal } from "@/components/excess-reason-modal";
 import { SpecialExcessUseModal } from "@/components/special-excess-use-modal";
@@ -113,7 +114,7 @@ function fmtSigned(v: number): string {
 export default function DashboardPage() {
   const toast = useToast();
   const mounted = useIsClient();
-  const { user, entries, compensations, absences, companyCalendars, faltas, excessReasons, specialExcessUses, specialExcessPlans } = useAppData();
+  const { user, entries, compensations, absences, companyCalendars, faltas, excessReasons, specialExcessUses, specialExcessPlans, annualCycleClosures } = useAppData();
   const settings = settingsOf(user);
   const todayStr = todayString();
   const period = getPointPeriod(todayStr);
@@ -207,8 +208,11 @@ export default function DashboardPage() {
         controlStartDate: user.controlStartDate ?? "",
         uses: specialExcessUses ?? [],
         plans: specialExcessPlans ?? [],
+        // 4H.1: "Disponível [10+]" do ciclo inclui o saldo TRANSPORTADO
+        // formalmente do ciclo anterior (capacidade canônica).
+        carried: carriedSlicesIntoCycle(annualCycleClosures, getAnnualPointCycle(todayStr)),
       }),
-    [todayStr, entries, absences, companyCalendars, settings, faltas, user, specialExcessUses, specialExcessPlans],
+    [todayStr, entries, absences, companyCalendars, settings, faltas, user, specialExcessUses, specialExcessPlans, annualCycleClosures],
   );
 
   /* 4C.1B — visão canônica do dia de HOJE (buildSpecialExcessDayView, a
@@ -228,8 +232,11 @@ export default function DashboardPage() {
         controlStartDate: user.controlStartDate ?? null,
         uses: specialExcessUses ?? [],
         plans: specialExcessPlans ?? [],
+        // 4H.1: capacidade do ciclo inclui o saldo TRANSPORTADO formalmente —
+        // o gating "Completar jornada" não pode ignorar o trazido.
+        closures: annualCycleClosures,
       }),
-    [todayStr, entries, absences, companyCalendars, settings, faltas, user, specialExcessUses, specialExcessPlans],
+    [todayStr, entries, absences, companyCalendars, settings, faltas, user, specialExcessUses, specialExcessPlans, annualCycleClosures],
   );
 
   /* 4D (PARTES B/C) — SITUAÇÃO DO CICLO: fonte canônica PURA

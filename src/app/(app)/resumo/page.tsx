@@ -484,7 +484,7 @@ function ResumoBody() {
       )}
 
       {/* ── BLOCO 2 — COMO O PERÍODO SE FORMOU ── */}
-      <Card title="Como o período se formou" subtitle="Apuração derivada dos dias financeiramente VÁLIDOS do período (21→20)">
+      <Card title="Como o período se formou" subtitle={`Apuração derivada dos dias financeiramente VÁLIDOS de ${periodLabel(period)}`}>
         <div className="grid gap-3 sm:grid-cols-3">
           <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
             <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Horas positivas regulares</p>
@@ -537,12 +537,12 @@ function ResumoBody() {
             <div className="rounded-xl border border-violet-200 bg-violet-50/40 px-4 py-3">
               <p className="text-[11px] font-bold uppercase tracking-wider text-violet-700">Gerado no período</p>
               <p className="mt-1 text-xl font-extrabold tabular-nums text-violet-700">{formatMinutes(movement.generatedMinutes)}</p>
-              <p className="mt-0.5 text-xs text-slate-500">origens dentro de 21→20</p>
+              <p className="mt-0.5 text-xs text-slate-500">origens dentro de {periodLabel(period)}</p>
             </div>
             <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
               <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Utilizado no período</p>
               <p className="mt-1 text-xl font-extrabold tabular-nums text-slate-800">{formatMinutes(movement.usedMinutes)}</p>
-              <p className="mt-0.5 text-xs text-slate-500">destinos dentro de 21→20 ({movement.usesWithDestination} uso{movement.usesWithDestination === 1 ? "" : "s"})</p>
+              <p className="mt-0.5 text-xs text-slate-500">destinos dentro de {periodLabel(period)} ({movement.usesWithDestination} uso{movement.usesWithDestination === 1 ? "" : "s"})</p>
             </div>
             <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
               <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Reservado para o período</p>
@@ -564,7 +564,7 @@ function ResumoBody() {
       </Card>
 
       {/* ── BLOCO 4 — CALENDÁRIO DA EMPRESA NO PERÍODO ── */}
-      <Card title="Calendário da empresa no período" subtitle={`Eventos do calendário em 21→20${calendario.label ? ` · ciclo ${calendario.label}` : ""}`}>
+      <Card title="Calendário da empresa no período" subtitle={`Eventos do calendário em ${periodLabel(period)}${calendario.label ? ` · ciclo ${calendario.label}` : ""}`}>
         {!calendario.hasCalendar ? (
           <p className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-xs font-medium text-slate-500">
             Não há calendário da empresa disponível para este ciclo.

@@ -437,8 +437,17 @@ check("TESTE 20 DE 20 — Dashboard preservado; Central reformada SOMENTE pela 4
   // passa a proteger apenas os arquivos do dashboard da 4D:
   const status = execSync("git status --porcelain", { cwd: root }).toString().split("\n");
   const tocados = status.filter((l) => l.trim().length > 0).map((l) => l.slice(3).trim());
-  assert.ok(!tocados.some((f) => f.includes("page.tsx") && f.includes("(app)/page")), "Visão Geral intacta");
+  // 4H.1 (SUPERADO): a 4D proibia tocar page.tsx (dashboard); a 4H.1 toca-o
+  // LEGITIMAMENTE para injetar a capacidade com saldo TRANSPORTADO no banco e
+  // no day-view do ciclo (a MESMA fonte canônica que o store já usa). A
+  // extensão é pontual e identificável por marcador — sem reforma arbitrária.
   assert.ok(!tocados.some((f) => f.includes("cycle-dashboard")), "motor do dashboard intacto");
+  const pageSrcNow = src("src/app/(app)/page.tsx");
+  assert.ok(
+    pageSrcNow.includes("carriedSlicesIntoCycle(annualCycleClosures, getAnnualPointCycle(todayStr))"),
+    "page: capacidade do ciclo inclui saldo transportado (4H.1)",
+  );
+  assert.ok(pageSrcNow.includes("closures: annualCycleClosures"), "page: day-view recebe closures (4H.1)");
   assert.ok(exists("src/app/(app)/compensacoes/page.tsx"), "Central continua presente");
   // A fonte proibida não alimenta o novo dashboard:
   for (const f of ["src/app/(app)/page.tsx", "src/lib/cycle-dashboard.ts", "src/lib/calendar-forecast.ts"]) {

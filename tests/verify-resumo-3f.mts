@@ -309,7 +309,10 @@ check("S. gráfico em modo factual: sem 'Horas compensadas' como camada principa
 check("T. 4F: bloco [10+] usa linguagem 'Gerado no período' (sem 'Excedente do período')", () => {
   // 4F (SUPERADO — expectativa atualizada com justificativa):
   assert.ok(page.includes("Gerado no período"), "rótulo do bloco");
-  assert.ok(page.includes("origens dentro de 21→20"), "subtexto factual");
+  // 4H.1 (SUPERADO — subtexto dinâmico): o range usa o período canônico
+  // (ex.: "21/04 → 30/04"), nunca o literal fixo "21→20".
+  assert.ok(page.includes("origens dentro de {periodLabel(period)}"), "subtexto factual dinâmico (4H.1)");
+  assert.ok(!page.includes("origens dentro de 21→20"), "sem hardcode '21→20' como range");
   assert.ok(!page.includes("Excedente do período [10+]"), "rótulo legado fora");
 });
 

@@ -127,7 +127,9 @@ check("D. card [10+] do período mostra o gerado (3C) — sem Realocado/A realoc
   const view = srcOf("src/lib/resumo-period-view.ts");
   // 4F (SUPERADO — expectativa atualizada com justificativa):
   assert.ok(page.includes("Gerado no período"));
-  assert.ok(page.includes("origens dentro de 21→20"));
+  // 4H.1 (SUPERADO — subtexto dinâmico): range canônico, sem literal "21→20".
+  assert.ok(page.includes("origens dentro de {periodLabel(period)}"));
+  assert.ok(!page.includes("origens dentro de 21→20"), "sem hardcode '21→20' como range");
   assert.ok(view.includes("buildSpecialExcessBank"), "fonte 3C na derivação");
   assert.ok(!page.includes("Realocado"), "sem 'Realocado' no Resumo");
   assert.ok(!page.includes("A realocar"), "sem 'A realocar' no Resumo");

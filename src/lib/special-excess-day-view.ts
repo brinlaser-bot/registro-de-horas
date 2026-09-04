@@ -21,6 +21,7 @@ import {
   type SpecialExcessBankSummary,
   type SpecialExcessOriginLot,
 } from "./special-excess-bank";
+import { carriedSlicesIntoCycle, type AnnualCycleClosure } from "./annual-cycle-closure";
 import { specialExcessUseMinutes, type SpecialExcessUse } from "./special-excess-use";
 import type { SpecialExcessPlan } from "./special-excess-plan";
 import type { WorkSettings } from "./time";
@@ -85,10 +86,19 @@ export interface SpecialExcessDayViewInput {
   plans?: SpecialExcessPlan[];
   /** Banco já computado (a página calcula uma vez por ciclo). */
   bank?: SpecialExcessBankSummary;
+  /**
+   * 4H.1 — Fechamentos anuais. A CAPACIDADE de um ciclo inclui o saldo [10+]
+   * FORMALMENTE TRANSPORTADO do ciclo anterior (disposition "carried"). Sem
+   * isto, `buildSpecialExcessBank` só computaria a geração FACTUAL deste
+   * ciclo, e o modal/selector perderia o saldo transportado — enquanto o
+   * store (specialBankOf) o consumiria. Todas as fontes de UI passam a usar a
+   * MESMA capacidade canônica (gerado + transportado).
+   */
+  closures?: AnnualCycleClosure[];
 }
 
 export function buildSpecialExcessDayView(args: SpecialExcessDayViewInput): SpecialExcessDayView {
-  const { date, asOfDate, entries, absences, calendars, settings, faltas, controlStartDate, uses } = args;
+  const { date, asOfDate, entries, absences, calendars, settings, faltas, controlStartDate, uses, closures } = args;
   const row = buildResumoDayRow({
     date, today: asOfDate, entries, absences, calendars, settings, faltas, controlStartDate,
   });
@@ -105,6 +115,9 @@ export function buildSpecialExcessDayView(args: SpecialExcessDayViewInput): Spec
   const activeUses = uses.filter((u) => u.status === "utilizado" && u.destinationDate === date);
   const usedActiveMinutes = activeUses.reduce((s, u) => s + specialExcessUseMinutes(u), 0);
   const remainingMinutes = Math.max(neededMinutes - usedActiveMinutes, 0);
+  // 4H.1 — a capacidade do ciclo = geração factual + saldo formalmente
+  // TRANSPORTADO do ciclo anterior (mesma fonte canônica do store).
+  const carried = carriedSlicesIntoCycle(closures, getAnnualPointCycle(date));
   const bank =
     args.bank ??
     buildSpecialExcessBank({
@@ -118,6 +131,7 @@ export function buildSpecialExcessDayView(args: SpecialExcessDayViewInput): Spec
       controlStartDate: controlStartDate ?? "",
       uses,
       plans: args.plans ?? [],
+      carried,
     });
   const bankAvailableMinutes = bank.availableMinutes;
   const projection =

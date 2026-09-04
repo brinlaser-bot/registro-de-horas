@@ -463,7 +463,13 @@ check("TESTE 16 DE 18 — 'Registrar falta' com cor amarelo/laranja (warning) e 
   assert.ok(lancEl.includes('onClick={() => setManualOpen(true)}') && !lancEl.includes("variant="), "Lançamento manual sem override (primary/verde)");
   // consolidado: continua claramente desabilitado (preserva hover/focus/disabled do Button):
   assert.equal(bloco.split('disabled={!!lockBound}').length - 1, 2, "ambos desabilitam sob lock");
-  assert.ok(bloco.split("Período consolidado — reabra o período no Resumo para editar.").length - 1 >= 2, "title de lock nos dois");
+  // 4H.1 (SUPERADO): o title de lock foi centralizado em `tituloAcaoBloqueada`
+  // (um único texto, usado pelos DOIS botões), que diferencia ciclo aberto
+  // ("reabra no Resumo") de ciclo encerrado ("não pode mais ser alterado").
+  assert.equal(bloco.split("title={lockBound ? tituloAcaoBloqueada : undefined}").length - 1, 2, "title de lock nos dois");
+  assert.ok(r.includes("const tituloAcaoBloqueada = cicloEncerradoAqui"), "variável única do título de lock");
+  assert.ok(r.includes('"Período consolidado — reabra o período no Resumo para editar."'), "texto do ciclo ABERTO preservado");
+  assert.ok(r.includes('"Ciclo encerrado — este período não pode mais ser alterado."'), "texto do ciclo ENCERRADO presente");
   assert.ok(src("src/components/ui.tsx").includes("disabled:opacity-50 disabled:pointer-events-none"),
     "estados disabled/hover/focus preservados pelo Button base");
 });

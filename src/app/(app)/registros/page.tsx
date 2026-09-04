@@ -50,6 +50,7 @@ import {
 } from "@/lib/day-situation";
 
 import { buildSpecialExcessBank, type SpecialExcessBankSummary } from "@/lib/special-excess-bank";
+import { carriedSlicesIntoCycle, dateFallsInClosedCycle } from "@/lib/annual-cycle-closure";
 import { buildSpecialExcessDayView } from "@/lib/special-excess-day-view";
 import { activeSpecialPlansForDate } from "@/lib/special-excess-plan";
 import { attentionNowSummary } from "@/lib/attention-now";
@@ -107,7 +108,7 @@ function RegistrosBody() {
   const storeReady = useIsStoreReady();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { user, entries, compensations, absences, companyCalendars, faltas, excessReasons, specialExcessUses, specialExcessPlans, periodConsolidations } = useAppData();
+  const { user, entries, compensations, absences, companyCalendars, faltas, excessReasons, specialExcessUses, specialExcessPlans, periodConsolidations, annualCycleClosures } = useAppData();
   const todayStr = todayString();
 
   const settings: WorkSettings = settingsOf(user);
@@ -145,6 +146,14 @@ function RegistrosBody() {
   // (no escopo ciclo/consulta a faixa é ampla demais para o banner; o lock real é por motor.)
   const lockBound =
     !query && !wantCycleScope ? consolidationLockCoveringRange(periodConsolidations, period.from, period.to) : null;
+  // 4H.1 — o período exibido pertence a um ciclo anual FORMALMENTE encerrado?
+  // Quando sim, NÃO existe reabertura: o texto não pode mandar "reabrir no
+  // Resumo" (o próprio Resumo já oculta a ação e o store bloqueia).
+  const cicloEncerradoAqui = lockBound ? dateFallsInClosedCycle(annualCycleClosures, period.from) : false;
+  /** Tooltip das ações bloqueadas do período (difere quando o ciclo já encerrou). */
+  const tituloAcaoBloqueada = cicloEncerradoAqui
+    ? "Ciclo encerrado — este período não pode mais ser alterado."
+    : "Período consolidado — reabra o período no Resumo para editar.";
   // 4G.1 — CONTEXTO do período exibido (informação; derivação única em periods.ts)
   // e MODO HISTÓRICO (período do ponto ≠ período atual): as faixas globais de
   // Atenção pertencem ao CICLO ATUAL — exibi-las numa consulta histórica
@@ -201,11 +210,15 @@ function RegistrosBody() {
           // 4A: disponibilidade/lotes consideram reservas ativas — minuto
           // reservado não pode parecer livre para um novo uso.
           plans: specialExcessPlans ?? [],
+          // 4H.1: capacidade do ciclo inclui saldo TRANSPORTADO formalmente
+          // (mesma fonte canônica do store) — os cards do dia refletem o banco
+          // real (gerado + trazido) e o gating canComplete nunca subestima.
+          carried: carriedSlicesIntoCycle(annualCycleClosures, c),
         }),
       );
     }
     return map;
-  }, [entries, absences, companyCalendars, settings, faltas, specialExcessUses, specialExcessPlans, user.controlStartDate, todayStr, range]);
+  }, [entries, absences, companyCalendars, settings, faltas, specialExcessUses, specialExcessPlans, annualCycleClosures, user.controlStartDate, todayStr, range]);
 
   // Linha do tempo completa: UM card por data do intervalo, mesmo sem batidas.
   // 4E.1 — ORDEM CRONOLÓGICA CRESCENTE na RENDERIZAÇÃO (21/08 → 20/09; ciclo
@@ -749,7 +762,9 @@ function RegistrosBody() {
       {lockBound && (
         <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-violet-300 bg-violet-50/60 px-4 py-2.5">
           <p className="min-w-0 flex-1 text-sm font-bold text-violet-900">
-            Período consolidado — registros protegidos. Reabra o período no Resumo para editar.
+            {cicloEncerradoAqui
+              ? "Ciclo encerrado — registros protegidos. Este período não pode mais ser reaberto ou alterado."
+              : "Período consolidado — registros protegidos. Reabra o período no Resumo para editar."}
           </p>
           <Link href={`/resumo?data=${period.from}`}>
             <Button size="sm" variant="secondary">Abrir Resumo</Button>
@@ -794,7 +809,7 @@ function RegistrosBody() {
         <Button
           size="sm"
           disabled={!!lockBound}
-          title={lockBound ? "Período consolidado — reabra o período no Resumo para editar." : undefined}
+          title={lockBound ? tituloAcaoBloqueada : undefined}
           className="flex-1 sm:flex-none"
           onClick={() => setManualOpen(true)}
         >
@@ -804,7 +819,7 @@ function RegistrosBody() {
           variant="warning"
           size="sm"
           disabled={!!lockBound}
-          title={lockBound ? "Período consolidado — reabra o período no Resumo para editar." : undefined}
+          title={lockBound ? tituloAcaoBloqueada : undefined}
           className="flex-1 sm:flex-none"
           onClick={() => { setFaltaInitialDate(null); setFaltaOpen(true); }}
         >
