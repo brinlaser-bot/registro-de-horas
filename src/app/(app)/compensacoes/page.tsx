@@ -659,13 +659,18 @@ export default function CompensacoesPage() {
             )}
           </section>
 
-          {/* Usos realizados */}
-          <section aria-label="Usos realizados" className="space-y-2">
-            <h3 className="text-sm font-extrabold uppercase tracking-wider text-slate-400">Usos realizados</h3>
-            {usos.length === 0 ? (
-              <p className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-xs font-medium text-slate-500">Não há usos realizados.</p>
-            ) : (
-              <div className="space-y-2">
+          {/* Histórico de usos [10+] (4H.2.1 — visão global de consulta, recolhida por padrão;
+              os cards são os mesmos de antes, só que secundários — a visão principal por
+              origem continua em "Destinos das horas desta origem".) */}
+          {usos.length === 0 ? (
+            <p className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-xs font-medium text-slate-500">Não há usos realizados.</p>
+          ) : (
+            <details className="rounded-2xl border border-slate-200 bg-white">
+              <summary className="cursor-pointer px-4 py-3 text-sm font-extrabold uppercase tracking-wider text-slate-400">
+                Histórico de usos [10+] ({usos.length})
+                <span className="ml-2 font-medium normal-case text-xs text-slate-400">Consulte todas as utilizações realizadas.</span>
+              </summary>
+              <div className="space-y-2 border-t border-slate-100 px-4 pb-4 pt-3">
                 {usos.map((u) => (
                   <div key={u.id} className="flex flex-col gap-2 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
                     <div className="min-w-0">
@@ -691,8 +696,8 @@ export default function CompensacoesPage() {
                   </div>
                 ))}
               </div>
-            )}
-          </section>
+            </details>
+          )}
 
           {/* Histórico cancelado (recolhível, somente se houver) */}
           {(canceladosPlanos.length > 0 || canceladosUsos.length > 0) && (
