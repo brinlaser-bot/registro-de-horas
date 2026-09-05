@@ -10,6 +10,13 @@
  * calendário ficam fora daqui (links para Registros/Central/Resumo).
  *
  * Nenhum estado visual do Guia é persistido (filtros são locais).
+ *
+ * 4I.2 — estabilização (apresentação):
+ *   · card “Requer orientação manual” ([10+] sem batidas reais) diz o motivo
+ *     UMA vez: sem banner “Precisa de atenção” duplicado e com sugestão
+ *     compacta (saldo projetado / no ponto / ainda a representar em 2 linhas);
+ *   · período 100% anterior ao controlStartDate: estado principal
+ *     “Fora do controle” (nunca “Pronto para consolidar”), resumo neutro.
  */
 import { useMemo, useState } from "react";
 import Link from "next/link";
@@ -38,6 +45,8 @@ import {
 } from "@/lib/periods";
 import {
   buildPointGuideView,
+  GUIDE_MANUAL_NO_ANCHOR_MESSAGE,
+  GUIDE_PERIOD_OUT_OF_CONTROL_LABEL,
   guideLimitsOf,
   type PointGuideDayRow,
 } from "@/lib/point-guide";
@@ -85,7 +94,8 @@ function DayGuideCard({ day }: { day: PointGuideDayRow }) {
     day.past &&
     (day.suggestion.kind === "compensar-realized" ||
       (day.specialUsedMinutes > 0 && day.suggestion.kind === "manual"));
-  const showsSaldoProjetado = showsSaldoFactual && day.specialUsedMinutes > 0;
+  // 4I.2 — no caso manual sem âncora o saldo projetado vive no bloco compacto.
+  const showsSaldoProjetado = showsSaldoFactual && day.specialUsedMinutes > 0 && !day.manualNoAnchor;
 
   return (
     <article className="rounded-2xl border border-slate-200 bg-white px-4 pt-4 pb-2.5 shadow-sm">
@@ -109,8 +119,10 @@ function DayGuideCard({ day }: { day: PointGuideDayRow }) {
         </div>
       </div>
 
-      {/* PRECISA DE ATENÇÃO */}
-      {day.attention && (
+      {/* PRECISA DE ATENÇÃO — 4I.2: suprimido SOMENTE quando o motivo já está
+          no badge “Requer orientação manual” + caixa de sugestão
+          (day.manualNoAnchor). Toda pendência real continua com o banner. */}
+      {day.showsAttentionBanner && (
         <div className="mt-2 flex items-start gap-2 rounded-xl border border-rose-300 bg-rose-50 px-3 py-1.5">
           <TriangleAlert size={15} className="mt-0.5 shrink-0 text-rose-600" aria-hidden />
           <div className="min-w-0">
@@ -173,35 +185,59 @@ function DayGuideCard({ day }: { day: PointGuideDayRow }) {
               <PunchChips times={day.suggestion.punches} tone="suggested" />
             ) : (
               <p className="break-words text-sm font-semibold text-emerald-900">
-                {day.suggestion.message ?? "Sem orientação automática."}
+                {day.manualNoAnchor
+                  ? GUIDE_MANUAL_NO_ANCHOR_MESSAGE
+                  : day.suggestion.message ?? "Sem orientação automática."}
               </p>
             )}
           </div>
-          {day.suggestion.representableMinutes > 0 && (
-            <p className="mt-1 break-words text-[11px] font-semibold text-emerald-800">
-              {day.suggestion.kind === "origin-reduction" ? (
-                // 4I.1 — dia >10h: o excedente é RETIRADO da sugestão para
-                // respeitar o teto de 10h (nunca “representado nas batidas”).
-                <>Excedente [10+] fora da sugestão: {formatMinutes(day.suggestion.representableMinutes)}</>
-              ) : (
-                // [10+] UTILIZADO para aumentar a projeção: representado nas pontas.
-                <>Representado nas batidas sugeridas: {formatMinutes(day.suggestion.representableMinutes)}</>
+          {day.manualNoAnchor ? (
+            // 4I.2 — leitura compacta (2 linhas): nada removido, só menos altura.
+            <div className="mt-1 space-y-0.5 text-[11px] font-semibold text-emerald-800">
+              <p className="break-words">
+                Saldo projetado: <span className="tabular-nums">{formatMinutes(day.saldoProjetadoMinutes)}</span>
+              </p>
+              <p className="break-words">
+                <span className="font-bold text-emerald-900">
+                  No ponto: <span className="tabular-nums">{formatMinutes(day.totalNoPontoMinutes)}</span>
+                </span>
+                {day.suggestion.remainingMinutes > 0 && (
+                  <span className="text-amber-800">
+                    {" "}· Ainda a representar:{" "}
+                    <span className="tabular-nums">{formatMinutes(day.suggestion.remainingMinutes)}</span>
+                  </span>
+                )}
+              </p>
+            </div>
+          ) : (
+            <>
+              {day.suggestion.representableMinutes > 0 && (
+                <p className="mt-1 break-words text-[11px] font-semibold text-emerald-800">
+                  {day.suggestion.kind === "origin-reduction" ? (
+                    // 4I.1 — dia >10h: o excedente é RETIRADO da sugestão para
+                    // respeitar o teto de 10h (nunca “representado nas batidas”).
+                    <>Excedente [10+] fora da sugestão: {formatMinutes(day.suggestion.representableMinutes)}</>
+                  ) : (
+                    // [10+] UTILIZADO para aumentar a projeção: representado nas pontas.
+                    <>Representado nas batidas sugeridas: {formatMinutes(day.suggestion.representableMinutes)}</>
+                  )}
+                </p>
               )}
-            </p>
-          )}
-          {showsSaldoProjetado && (
-            <p className="mt-1 break-words text-[11px] font-semibold text-emerald-800">
-              Saldo projetado: {formatMinutes(day.saldoProjetadoMinutes)}
-            </p>
-          )}
-          <p className="mt-1 break-words text-xs font-bold text-emerald-900">
-            Total considerado no ponto:{" "}
-            <span className="tabular-nums">{formatMinutes(day.totalNoPontoMinutes)}</span>
-          </p>
-          {day.suggestion.remainingMinutes > 0 && (
-            <p className="mt-0.5 break-words text-[11px] font-semibold text-amber-800">
-              Ainda a representar: {formatMinutes(day.suggestion.remainingMinutes)}
-            </p>
+              {showsSaldoProjetado && (
+                <p className="mt-1 break-words text-[11px] font-semibold text-emerald-800">
+                  Saldo projetado: {formatMinutes(day.saldoProjetadoMinutes)}
+                </p>
+              )}
+              <p className="mt-1 break-words text-xs font-bold text-emerald-900">
+                Total considerado no ponto:{" "}
+                <span className="tabular-nums">{formatMinutes(day.totalNoPontoMinutes)}</span>
+              </p>
+              {day.suggestion.remainingMinutes > 0 && (
+                <p className="mt-0.5 break-words text-[11px] font-semibold text-amber-800">
+                  Ainda a representar: {formatMinutes(day.suggestion.remainingMinutes)}
+                </p>
+              )}
+            </>
           )}
         </div>
       </div>
@@ -348,7 +384,13 @@ function GuiaPontoBody() {
           {/* 4I.1 — período futuro mostra SOMENTE o contexto “Período futuro”
               (navegador): o badge de estado 4G (“Em andamento”) seria um
               segundo estado contraditório. Motor de consolidação intocado. */}
-          {!view.periodFuture && (
+          {/* 4I.2 — período 100% anterior ao controlStartDate: estado principal
+              “Fora do controle” (nunca “Pronto para consolidar” / “Em andamento”).
+              Motor 4G intocado — só a apresentação do Guia. */}
+          {view.periodOutOfControl && (
+            <Badge tone="slate">{GUIDE_PERIOD_OUT_OF_CONTROL_LABEL}</Badge>
+          )}
+          {!view.periodFuture && !view.periodOutOfControl && (
             <Badge
               tone={
                 view.state === "consolidado"
@@ -386,33 +428,44 @@ function GuiaPontoBody() {
         )}
       </div>
 
-      {/* Resumo compacto */}
-      <div className="grid grid-cols-3 gap-3">
-        <div className="rounded-2xl border border-emerald-200 bg-emerald-50/60 p-3">
-          <p className="text-[10px] font-extrabold uppercase tracking-wider text-emerald-600">
-            Dias prontos
-          </p>
-          <p className="mt-0.5 text-xl font-extrabold tabular-nums text-emerald-900">
-            {view.summary.readyDays}
-          </p>
-        </div>
-        <div className="rounded-2xl border border-rose-200 bg-rose-50/60 p-3">
-          <p className="text-[10px] font-extrabold uppercase tracking-wider text-rose-600">
-            Atenção
-          </p>
-          <p className="mt-0.5 text-xl font-extrabold tabular-nums text-rose-900">
-            {view.summary.attentionDays}
+      {/* 4I.2 — resumo NEUTRO do período fora do controle: sem contadores
+          Prontos/Atenção (nenhuma ação pendente; fatos históricos seguem nos cards). */}
+      {view.periodOutOfControl ? (
+        <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50/70 px-4 py-2.5">
+          <CalendarDays size={14} className="shrink-0 text-slate-400" aria-hidden />
+          <p className="min-w-0 flex-1 break-words text-xs font-bold text-slate-600">
+            Período fora do controle — anterior ao início do controle. Nenhuma consolidação
+            necessária; registros históricos existentes continuam visíveis abaixo.
           </p>
         </div>
-        <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3">
-          <p className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
-            Futuros
-          </p>
-          <p className="mt-0.5 text-xl font-extrabold tabular-nums text-slate-700">
-            {view.summary.futureDays}
-          </p>
+      ) : (
+        <div className="grid grid-cols-3 gap-3">
+          <div className="rounded-2xl border border-emerald-200 bg-emerald-50/60 p-3">
+            <p className="text-[10px] font-extrabold uppercase tracking-wider text-emerald-600">
+              Dias prontos
+            </p>
+            <p className="mt-0.5 text-xl font-extrabold tabular-nums text-emerald-900">
+              {view.summary.readyDays}
+            </p>
+          </div>
+          <div className="rounded-2xl border border-rose-200 bg-rose-50/60 p-3">
+            <p className="text-[10px] font-extrabold uppercase tracking-wider text-rose-600">
+              Atenção
+            </p>
+            <p className="mt-0.5 text-xl font-extrabold tabular-nums text-rose-900">
+              {view.summary.attentionDays}
+            </p>
+          </div>
+          <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3">
+            <p className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
+              Futuros
+            </p>
+            <p className="mt-0.5 text-xl font-extrabold tabular-nums text-slate-700">
+              {view.summary.futureDays}
+            </p>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Filtros (somente locais) */}
       <div className="flex flex-wrap items-center gap-2">

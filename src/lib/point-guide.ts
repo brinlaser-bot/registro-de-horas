@@ -1,5 +1,17 @@
 // ─────────────────────────────────────────────────────────────
-// GUIA DO PONTO (ETAPA 4I / 4I.1) — CAMADA DERIVADA / APRESENTAÇÃO.
+// GUIA DO PONTO (ETAPA 4I / 4I.1 / 4I.2) — CAMADA DERIVADA / APRESENTAÇÃO.
+//
+// 4I.2 (estabilização — somente apresentação; NENHUM motor tocado):
+//   · [10+] utilizado SEM batidas reais (“Requer orientação manual”): o
+//     motivo é dito UMA vez — o card não repete o banner “Precisa de
+//     atenção” (manualNoAnchor / showsAttentionBanner) e a caixa de
+//     sugestão usa o texto compacto GUIDE_MANUAL_NO_ANCHOR_MESSAGE. A
+//     mensagem canônica de suggestion.message permanece intacta;
+//   · PERÍODO 100% ANTERIOR ao controlStartDate (period.to <
+//     controlStartDate): o Guia apresenta “Fora do controle” — nunca
+//     “Pronto para consolidar” (periodOutOfControl). O motor 4G
+//     (periodConsolidationState) continua intocado: `state` segue o id
+//     canônico; apenas o rótulo/estado visual do Guia muda.
 //
 // 4I.1 (somente view model — NENHUM motor financeiro tocado):
 //   · COMPENSAR PASSADO sem trabalho deixa de dizer “Aguardando registro
@@ -123,6 +135,22 @@ export interface GuideLimits {
   minEntry: string;
   /** "HH:MM" — limite superior p/ estender a última saída. */
   maxExit: string;
+}
+
+/** 4I.2 — texto COMPACTO da caixa “Sugestão para o ponto” quando há [10+]
+ *  aplicado sem batidas reais (o badge “Requer orientação manual” já
+ *  comunica a atenção; “Há horas [10+] aplicadas…” não é repetido). */
+export const GUIDE_MANUAL_NO_ANCHOR_MESSAGE =
+  "Sem batidas reais para ancorar uma sugestão automática.";
+
+/** 4I.2 — rótulo do período 100% anterior ao início do controle. */
+export const GUIDE_PERIOD_OUT_OF_CONTROL_LABEL = "Fora do controle";
+
+/** 4I.2 — período INTEIRO termina antes do controlStartDate (apresentação
+ *  do Guia; motor 4G intocado). Sem controlStartDate válido → false. */
+export function isPeriodOutOfControl(period: PointPeriod, controlStartDate: string | null | undefined): boolean {
+  if (!controlStartDate || !/^\d{4}-\d{2}-\d{2}$/.test(controlStartDate)) return false;
+  return period.to < controlStartDate;
 }
 
 /** Resolve os limites do Guia a partir do usuário; ausentes/inválidos → defaults. */
@@ -493,6 +521,14 @@ export interface PointGuideDayRow {
   attentionCategories: AttentionCategory[];
   /** true quando não há orientação segura (§16). */
   attention: boolean;
+  /** 4I.2 — [10+] aplicado SEM batidas reais para ancorar (estado
+   *  “Requer orientação manual”). O motivo já está no badge e na caixa
+   *  de sugestão: o banner “Precisa de atenção” não é repetido. */
+  manualNoAnchor: boolean;
+  /** 4I.2 — banner destacado “Precisa de atenção” do card. Continua true
+   *  para TODA pendência real (sem registro, incompleto, inconsistente,
+   *  manual por limites, etc.); false SOMENTE em manualNoAnchor. */
+  showsAttentionBanner: boolean;
   /** true quando o dia está pronto para lançar (§20). */
   ready: boolean;
   /** [10+] ATIVAMENTE utilizado com destino neste dia. */
@@ -535,6 +571,13 @@ export interface PointGuideView {
    *  intocado; esta é SOMENTE a apresentação do Guia: período futuro nunca
    *  exibe “Em andamento” junto de “Período futuro” (estados contraditórios). */
   periodFuture: boolean;
+  /** 4I.2 — período INTEIRO termina antes do controlStartDate
+   *  (period.to < controlStartDate). O motor 4G é intocado; o Guia apenas
+   *  não apresenta esse período como workflow de consolidação
+   *  (nunca “Pronto para consolidar” / “Em andamento”). */
+  periodOutOfControl: boolean;
+  /** Rótulo visual do período: “Período futuro” / “Fora do controle” /
+   *  rótulo canônico 4G — sempre UM estado principal inequívoco. */
   stateLabel: string;
   /** Consolidação ATIVA do período (snapshot 4G). */
   consolidation: PeriodConsolidation | null;
@@ -644,6 +687,10 @@ export function buildPointGuideView(input: PointGuideViewInput): PointGuideView 
   // recebe “Em andamento”. O motor 4G (periodConsolidationState) permanece
   // intocado — state continua o id canônico; apenas o rótulo exibido muda.
   const periodFuture = period.from > today;
+  // 4I.2 — APRESENTAÇÃO do Guia: período INTEIRO anterior ao início do
+  // controle não é workflow de consolidação do usuário (“Fora do controle”).
+  // O motor 4G segue intocado (state permanece o id canônico).
+  const periodOutOfControl = !periodFuture && isPeriodOutOfControl(period, controlStartDate);
 
   // 3) [10+] utilizado (3B/3D) e reservado (4A) — insumos do motor 3A.
   const usedByDate = usedSpecialMinutesByDestination(uses);
@@ -736,10 +783,13 @@ export function buildPointGuideView(input: PointGuideViewInput): PointGuideView 
     // §13 — [10+] aplicado sem batidas reais para ancorar: o STATUS primário
     // do Guia é “Requer orientação manual” (o contexto de calendário segue
     // exibido no bloco de calendário; nada é inventado).
-    const situacaoFinal =
-      suggestion.kind === "manual" && suggestion.representableMinutes === 0 && row.entryCount === 0 && used > 0
-        ? "Requer orientação manual"
-        : situacao;
+    const manualNoAnchor =
+      suggestion.kind === "manual" && suggestion.representableMinutes === 0 && row.entryCount === 0 && used > 0;
+    const situacaoFinal = manualNoAnchor ? "Requer orientação manual" : situacao;
+    // 4I.2 — o banner destacado é suprimido SOMENTE quando o motivo já está
+    // inequívoco no badge “Requer orientação manual” + caixa de sugestão.
+    // Toda outra pendência real continua com o banner (não é global).
+    const showsAttentionBanner = attention && !manualNoAnchor;
 
     const calendarioParcial =
       !!cctx.calendarEntry &&
@@ -775,6 +825,8 @@ export function buildPointGuideView(input: PointGuideViewInput): PointGuideView 
       situacao: situacaoFinal,
       attentionCategories,
       attention,
+      manualNoAnchor,
+      showsAttentionBanner,
       ready,
       specialUsedMinutes: used,
       specialAppliedMinutes: projection.appliedSpecialMinutes,
@@ -808,7 +860,12 @@ export function buildPointGuideView(input: PointGuideViewInput): PointGuideView 
     days,
     state,
     periodFuture,
-    stateLabel: periodFuture ? "Período futuro" : PERIOD_CONSOLIDATION_LABEL[state],
+    periodOutOfControl,
+    stateLabel: periodFuture
+      ? "Período futuro"
+      : periodOutOfControl
+        ? GUIDE_PERIOD_OUT_OF_CONTROL_LABEL
+        : PERIOD_CONSOLIDATION_LABEL[state],
     consolidation,
     summary: {
       totalDays: days.length,
