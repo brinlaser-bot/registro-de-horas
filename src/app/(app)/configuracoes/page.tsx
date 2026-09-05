@@ -25,6 +25,7 @@ import {
 } from "@/lib/company-calendar";
 import { expectedMinutesOf, formatMinutes, todayString } from "@/lib/time";
 import { Button, Card, ConfirmDialog, Input, Select, Skeleton, Toggle } from "@/components/ui";
+import { SignOutButton } from "@/components/sign-out-button";
 import { ImportBackupModal } from "@/components/import-backup-modal";
 import { useToast } from "@/components/toast";
 
@@ -307,6 +308,19 @@ export default function ConfiguracoesPage() {
               </>
             )}
           </Button>
+        </div>
+      </Card>
+
+      {/* ETAPA 4J — Conta (apenas login/logout; o perfil local continua separado). */}
+      <Card
+        title="Conta"
+        subtitle="Acesso ao app neste navegador"
+      >
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm font-medium text-slate-500">
+            Sair encerra a sessão neste navegador. Seus registros locais são mantidos.
+          </p>
+          <SignOutButton className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-extrabold text-slate-700 hover:bg-slate-50" />
         </div>
       </Card>
 

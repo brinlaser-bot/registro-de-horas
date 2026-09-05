@@ -16,6 +16,7 @@ import {
   X,
 } from "lucide-react";
 import { useAppData, useIsClient } from "@/lib/store";
+import { SignOutButton } from "@/components/sign-out-button";
 
 const NAV = [
   { href: "/", label: "Visão geral", icon: LayoutDashboard },
@@ -119,6 +120,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-bold text-emerald-300 ring-1 ring-inset ring-emerald-500/30">
             Você
           </span>
+        </div>
+        {/* ETAPA 4J — logout discreto da conta (não apaga dados locais). */}
+        <div className="mt-3 flex justify-end">
+          <SignOutButton className="rounded-lg px-2 py-1 text-[11px] font-bold text-slate-400 hover:bg-white/5 hover:text-slate-200" />
         </div>
       </div>
     </div>
