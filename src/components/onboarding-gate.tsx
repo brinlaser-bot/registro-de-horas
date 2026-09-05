@@ -50,6 +50,7 @@ export function OnboardingGate({ children }: { children: ReactNode }) {
     lunchEnd: edited.lunchEnd ?? data.user.lunchEnd ?? "13:00",
     controlStartDate:
       edited.controlStartDate ?? data.user.controlStartDate ?? (mounted ? todayString() : ""),
+    birthDate: edited.birthDate ?? data.user.birthDate ?? "",
   };
   const setDraft = (patch: Partial<OnboardingDraft>) => setEdited({ ...edited, ...patch });
 
@@ -129,9 +130,13 @@ export function OnboardingGate({ children }: { children: ReactNode }) {
             hint="A partir desta data o app acompanha os dias de jornada."
             onChange={(e) => setDraft({ controlStartDate: e.target.value })}
           />
-          <p className="text-[11px] leading-relaxed text-slate-400">
-            Sua data de nascimento é opcional e pode ser preenchida depois, em Configurações.
-          </p>
+          <Input
+            label="Data de nascimento (opcional)"
+            type="date"
+            value={draft.birthDate}
+            hint="Pode ficar em branco e ser preenchida depois, em Configurações."
+            onChange={(e) => setDraft({ birthDate: e.target.value })}
+          />
         </div>
 
         {error && (

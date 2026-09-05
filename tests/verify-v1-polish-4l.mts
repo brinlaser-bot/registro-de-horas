@@ -275,6 +275,24 @@ await check("T05 — Nenhum Realtime, polling ou service worker", () => {
   }
   assert.ok(!exists("public/sw.js"), "nenhum service worker publicado");
   assert.ok(!exists("public/manifest.json"), "nenhum manifesto PWA");
+  // Nenhum segredo/serviço privilegiado no frontend (Grupo D).
+  for (const t of ["service_role", "serviceRole", "SUPABASE_SERVICE_ROLE", "sb_secret_"]) {
+    assert.ok(!hay.includes(t), `frontend não pode conter ${t}`);
+  }
+  // Invariantes 4K vivas no motor (Grupo A/D).
+  const en = srcOf(ENGINE);
+  for (const inv of [
+    "pendingBaseRevision",
+    "pendingPayload",
+    "activeUserId",
+    "stashAccountSlot",
+    "readAccountStash",
+    'addEventListener("focus"',
+    "visibilitychange",
+    '"online"',
+  ]) {
+    assert.ok(en.includes(inv), `invariante 4K preservada: ${inv}`);
+  }
 });
 
 /* ═══════════════ T06 — sem perfil fictício em conta nova ═══════════════ */
@@ -333,6 +351,39 @@ await check("T08 — Jornada genérica existe como configuração inicial editá
   for (const label of ["Início da jornada", "Fim da jornada", "Início do almoço", "Fim do almoço"]) {
     assert.ok(ui.includes(label), `onboarding permite editar: ${label}`);
   }
+  assert.ok(ui.includes("Data de início do controle"), "início do controle é campo do onboarding");
+  // Nascimento: campo OPCIONAL, jamais preenchido automaticamente.
+  assert.ok(ui.includes("Data de nascimento (opcional)"), "nascimento é opcional no onboarding");
+  const draft = {
+    name: "Vinicius",
+    email: "vinicius@exemplo.com",
+    workStart: "08:00",
+    workEnd: "17:00",
+    lunchStart: "12:00",
+    lunchEnd: "13:00",
+    controlStartDate: "2026-09-01",
+    birthDate: "",
+  };
+  assert.equal(onboarding.validateOnboardingDraft(draft), null, "nascimento vazio é válido");
+  assert.equal(onboarding.onboardingUserPatch(draft).birthDate, null, "vazio nunca vira data falsa");
+  assert.equal(
+    onboarding.onboardingUserPatch({ ...draft, birthDate: "1990-02-03" }).birthDate,
+    "1990-02-03",
+    "quando informado, o nascimento é respeitado",
+  );
+  assert.equal(
+    onboarding.validateOnboardingDraft({ ...draft, name: "V" }),
+    "Informe seu nome.",
+    "nome é obrigatório",
+  );
+  // O onboarding só aparece em conta realmente nova e vazia.
+  const empty = seed.createEmptyState(TODAY);
+  assert.equal(onboarding.shouldShowOnboarding(empty), true);
+  assert.equal(
+    onboarding.shouldShowOnboarding({ ...empty, entries: [entryOn(1, "2026-09-04", "08:00")] }),
+    false,
+    "com dados operacionais o app NUNCA interrompe o uso",
+  );
 });
 
 /* ═══════════════ T09 — conta nova + local vazio ativa sozinha ═══════════════ */

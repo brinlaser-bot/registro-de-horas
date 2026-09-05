@@ -24,6 +24,8 @@ export interface OnboardingDraft {
   lunchStart: string;
   lunchEnd: string;
   controlStartDate: string;
+  /** OPCIONAL — vazio significa "não informado"; nunca é inventada. */
+  birthDate: string;
 }
 
 /**
@@ -75,12 +77,15 @@ export function validateOnboardingDraft(draft: OnboardingDraft): string | null {
     if (!TIME_RE.test(value)) return "Informe horários válidos (HH:MM).";
   }
   if (!DATE_RE.test(draft.controlStartDate)) return "Informe a data de início do controle.";
+  // Nascimento é OPCIONAL: só é validado quando o usuário preencheu algo.
+  if (draft.birthDate && !DATE_RE.test(draft.birthDate)) return "Informe uma data de nascimento válida.";
   return null;
 }
 
 /**
- * Converte o rascunho no patch do perfil canônico. Data de nascimento NÃO é
- * inventada aqui — continua opcional e definida depois em Configurações.
+ * Converte o rascunho no patch do perfil canônico. Data de nascimento é
+ * OPCIONAL: em branco vira `null` (nunca inventada) e pode ser definida
+ * depois em Configurações.
  */
 export function onboardingUserPatch(draft: OnboardingDraft): Partial<User> {
   return {
@@ -91,5 +96,6 @@ export function onboardingUserPatch(draft: OnboardingDraft): Partial<User> {
     lunchStart: draft.lunchStart,
     lunchEnd: draft.lunchEnd,
     controlStartDate: draft.controlStartDate,
+    birthDate: draft.birthDate ? draft.birthDate : null,
   };
 }
