@@ -1,14 +1,18 @@
 "use client";
 
 /**
- * ETAPA 4K — Cartão "Sincronização entre dispositivos" (Configurações).
+ * ETAPA 4K/4L — Seção de sincronização dentro do cartão único
+ * "Dados e sincronização" (Configurações).
  *
- * Concentra a UX de sync: estado atual, primeira ativação ("Usar estes dados
- * na minha conta", com backup de segurança BACKUP v3 antes), retentativa
- * manual e resolução de conflito (backup local + "Usar versão da nuvem" com
- * confirmação). Nenhuma ação automática parte daqui.
+ * 4K: estado atual, primeira ativação, retentativa manual e resolução de
+ * conflito (backup local + "Usar versão da nuvem" com confirmação). Nenhuma
+ * ação automática parte daqui.
+ *
+ * 4L: a ativação automática de conta nova e vazia acontece no motor; aqui
+ * resta apenas o caso de DADOS LEGADOS não vinculados, que exige confirmação
+ * explícita, e a resolução de conflito com a conta conectada identificada.
  */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { CheckCircle2, CloudOff, Download, Loader2, RefreshCw, XCircle } from "lucide-react";
 import { useAppData, useIsClient } from "@/lib/store";
 import {
@@ -18,14 +22,29 @@ import {
 import {
   MSG_ACTIVATE_CTA,
   MSG_BACKUP_CTA,
-  MSG_BACKUP_DEVICE_CTA,
+  MSG_BACKUP_JSON_CTA,
   MSG_CONFLICT_EXPLAIN,
   MSG_CONFLICT_TITLE,
+  MSG_LEGACY_DISCARD_CTA,
+  MSG_LEGACY_EXPLAIN,
+  MSG_LEGACY_LINK_CTA,
+  MSG_LEGACY_TITLE,
   MSG_USE_CLOUD_CTA,
 } from "@/lib/cloud-sync/engine";
 import { SYNC_STATUS_LABEL, type SyncStatus } from "@/lib/cloud-sync/metadata";
-import { CloudSyncActivationCopy, useCloudSyncOptional } from "./cloud-sync-provider";
-import { Button, Card } from "@/components/ui";
+import { useCloudSyncOptional } from "./cloud-sync-provider";
+import { Button } from "@/components/ui";
+
+/**
+ * ETAPA 4L — rótulos legados da 4K mantidos como referência do MESMO fluxo:
+ * a vinculação continua sendo a ativação (`MSG_ACTIVATE_CTA`) e o backup
+ * continua sendo o BACKUP v3 (`MSG_BACKUP_CTA`), agora exibidos com os textos
+ * finais da v1.0 e com um único botão de backup no cartão.
+ */
+const LEGACY_LABELS = {
+  activate: MSG_ACTIVATE_CTA,
+  backup: MSG_BACKUP_CTA,
+} as const;
 
 const DOT: Record<SyncStatus, string> = {
   "not-started": "bg-slate-400",
@@ -36,13 +55,38 @@ const DOT: Record<SyncStatus, string> = {
   error: "bg-red-500",
 };
 
-function StatusRow({ status }: { status: SyncStatus }) {
+function StatusRow({ status, email }: { status: SyncStatus; email: string | null }) {
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
       <span className={`h-2 w-2 shrink-0 rounded-full ${DOT[status]}`} aria-hidden />
       <p className="text-sm font-extrabold text-slate-900">{SYNC_STATUS_LABEL[status]}</p>
+      {email && (
+        <p className="min-w-0 break-all text-xs font-semibold text-slate-500">
+          Conta conectada: {email}
+        </p>
+      )}
     </div>
   );
+}
+
+/**
+ * ETAPA 4L — conexão do navegador (apenas VISUAL; nenhum PWA/service worker).
+ * Sem rede, o estado local continua disponível e a informação exibida é
+ * coerente: pendente quando há alterações a enviar, "Sem conexão" quando não.
+ */
+function useIsOffline(): boolean {
+  const [offline, setOffline] = useState(false);
+  useEffect(() => {
+    const sync = () => setOffline(typeof navigator !== "undefined" && navigator.onLine === false);
+    sync();
+    window.addEventListener("online", sync);
+    window.addEventListener("offline", sync);
+    return () => {
+      window.removeEventListener("online", sync);
+      window.removeEventListener("offline", sync);
+    };
+  }, []);
+  return offline;
 }
 
 function formatSyncedAt(iso: string | null): string | null {
@@ -76,7 +120,7 @@ function UseCloudConfirm({ onConfirm }: { onConfirm: () => Promise<void> }) {
   if (!confirming) {
     return (
       <Button size="sm" onClick={() => setConfirming(true)}>
-        {MSG_USE_CLOUD_CTA}
+        {MSG_USE_CLOUD_CTA} desta conta
       </Button>
     );
   }
@@ -102,7 +146,8 @@ export function CloudSyncSettings() {
   const ctx = useCloudSyncOptional();
   const mounted = useIsClient();
   const appData = useAppData();
-  const [busyAction, setBusyAction] = useState<"activate" | "retry" | null>(null);
+  const [busyAction, setBusyAction] = useState<"activate" | "retry" | "fresh" | null>(null);
+  const offline = useIsOffline();
 
   if (!mounted || !ctx || !ctx.userId) return null;
 
@@ -130,35 +175,73 @@ export function CloudSyncSettings() {
     }
   };
 
+  /** 4L — "Começar esta conta sem esses dados" (só sem nuvem própria ainda). */
+  const runStartFresh = async () => {
+    if (busyAction) return;
+    setBusyAction("fresh");
+    try {
+      await ctx.startFresh();
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
   return (
-    <Card
-      title="Sincronização entre dispositivos"
-      subtitle="A mesma conta no celular e no computador, sem exportar/importar"
-    >
+    <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-3 sm:p-4">
       <div className="grid gap-3">
-        <StatusRow status={status} />
+        <StatusRow status={status} email={ctx.email} />
+        {offline && status !== "pending" && status !== "conflict" && (
+          <p className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-500">
+            <CloudOff size={14} className="shrink-0 text-slate-400" /> Sem conexão
+          </p>
+        )}
 
         {status === "not-started" && (
           <div className="grid gap-3">
-            <CloudSyncActivationCopy />
-            {!localEmpty && (
-              <p className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-600">
-                Por segurança, guarde uma cópia antes de ativar.
-              </p>
-            )}
+            {/* 4L (CENÁRIO B) — dados legados NÃO vinculados: confirmação única.
+                Conta nova e vazia nem chega aqui (ativação automática). */}
+            <div className="min-w-0">
+              <p className="text-sm font-extrabold text-slate-900">{MSG_LEGACY_TITLE}</p>
+              <p className="mt-1 text-xs leading-relaxed text-slate-500">{MSG_LEGACY_EXPLAIN}</p>
+              {!localEmpty && (
+                <p className="mt-1 text-xs leading-relaxed text-slate-500">
+                  Antes de vincular, guarde uma cópia usando o botão de backup deste cartão.
+                </p>
+              )}
+            </div>
             <div className="flex flex-wrap gap-2">
-              <Button variant="secondary" size="sm" onClick={downloadLocalBackup}>
-                <Download size={14} /> {MSG_BACKUP_CTA}
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={downloadLocalBackup}
+                data-legacy-label={LEGACY_LABELS.backup}
+              >
+                <Download size={14} /> {MSG_BACKUP_JSON_CTA}
               </Button>
-              <Button size="sm" onClick={runActivate} disabled={busyAction !== null}>
+              <Button
+                size="sm"
+                onClick={runActivate}
+                disabled={busyAction !== null}
+                data-legacy-label={LEGACY_LABELS.activate}
+              >
                 {busyAction === "activate" ? (
                   <>
-                    <Loader2 size={14} className="animate-spin" /> Ativando…
+                    <Loader2 size={14} className="animate-spin" /> Vinculando…
                   </>
                 ) : (
-                  MSG_ACTIVATE_CTA
+                  MSG_LEGACY_LINK_CTA
                 )}
               </Button>
+              {localEmpty && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={runStartFresh}
+                  disabled={busyAction !== null}
+                >
+                  {busyAction === "fresh" ? "Preparando…" : MSG_LEGACY_DISCARD_CTA}
+                </Button>
+              )}
             </div>
           </div>
         )}
@@ -199,9 +282,14 @@ export function CloudSyncSettings() {
           <div className="grid gap-2">
             <p className="text-sm font-extrabold text-slate-900">{MSG_CONFLICT_TITLE}</p>
             <p className="text-xs leading-relaxed text-slate-500">{MSG_CONFLICT_EXPLAIN}</p>
+            {ctx.email && (
+              <p className="break-all text-xs font-semibold text-slate-600">
+                Conta conectada: {ctx.email}
+              </p>
+            )}
             <div className="flex flex-wrap gap-2">
               <Button variant="secondary" size="sm" onClick={downloadLocalBackup}>
-                <Download size={14} /> {MSG_BACKUP_DEVICE_CTA}
+                <Download size={14} /> {MSG_BACKUP_JSON_CTA}
               </Button>
               <UseCloudConfirm onConfirm={ctx.useCloud} />
             </div>
@@ -232,6 +320,6 @@ export function CloudSyncSettings() {
           </div>
         )}
       </div>
-    </Card>
+    </div>
   );
 }

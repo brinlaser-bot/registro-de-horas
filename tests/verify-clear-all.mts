@@ -271,8 +271,9 @@ check("27. Sem registro continua derivado sem criar dívida", () => {
 
 check("28. UI atualiza imediatamente e confirmação é explícita", () => {
   assert.ok(cfgSrc.includes("ConfirmDialog"));
-  assert.ok(cfgSrc.includes('title="Apagar todos os dados?"'));
-  assert.ok(cfgSrc.includes('confirmLabel="Apagar todos os dados"'));
+  // ETAPA 4L — rótulo final da v1.0 ("Apagar dados do controle").
+  assert.ok(cfgSrc.includes('title="Apagar dados do controle?"'));
+  assert.ok(cfgSrc.includes('confirmLabel="Apagar dados do controle"'));
   assert.ok(cfgSrc.includes("As configurações gerais serão mantidas."));
   assert.ok(cfgSrc.includes("Dados do controle apagados."));
   assert.ok(cfgSrc.includes("danger"));

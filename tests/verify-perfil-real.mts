@@ -38,16 +38,17 @@ const check = (id: string, fn: () => void) => {
 const TODAY = "2026-08-29";
 const CYCLE = annualCycleBounds(getAnnualPointCycle(TODAY));
 
-check("1. perfil real: Maria Helena / meu@horario.com / 1989-08-23", () => {
+check("1. perfil da bancada de exemplo (4L: instalação nova fica SEM identidade)", () => {
   assert.equal(REAL_USER_IDENTITY.name, "Maria Helena");
   assert.equal(REAL_USER_IDENTITY.email, "meu@horario.com");
   assert.equal(REAL_USER_IDENTITY.birthDate, "1989-08-23");
   assert.equal(DEFAULT_USER.name, "Maria Helena");
   assert.equal(DEFAULT_USER.email, "meu@horario.com");
   assert.equal(DEFAULT_USER.birthDate, "1989-08-23");
-  assert.equal(EMPTY_USER.name, "Maria Helena");
-  assert.equal(EMPTY_USER.email, "meu@horario.com");
-  assert.equal(EMPTY_USER.birthDate, "1989-08-23");
+  // ETAPA 4L — conta nova NUNCA recebe dado pessoal fictício.
+  assert.equal(EMPTY_USER.name, "");
+  assert.equal(EMPTY_USER.email, "");
+  assert.equal(EMPTY_USER.birthDate, null);
   assert.equal(buildSeedData().user.name, "Maria Helena");
   assert.equal(buildSeedData().user.email, "meu@horario.com");
   assert.equal(buildSeedData().user.birthDate, "1989-08-23");
@@ -77,9 +78,11 @@ check("3. nascimento continua na regra de aniversário (sem alterar a lógica)",
   assert.ok(srcOf("src/app/(app)/page.tsx").includes("isBirthdayToday(user.birthDate, todayStr)"));
 });
 
-check("4. F5/reload preserva o perfil", () => {
-  const empty = createEmptyState(TODAY);
-  assert.equal(empty.user.name, "Maria Helena");
+check("4. F5/reload preserva o perfil informado pelo usuário", () => {
+  const base = createEmptyState(TODAY);
+  // ETAPA 4L — o estado novo nasce sem identidade; o perfil vem do onboarding.
+  assert.equal(base.user.name, "");
+  const empty = { ...base, user: { ...base.user, ...REAL_USER_IDENTITY } };
   const again = hydrateAppData(JSON.stringify(empty), TODAY);
   assert.equal(again.user.name, "Maria Helena");
   assert.equal(again.user.email, "meu@horario.com");
@@ -136,7 +139,8 @@ check("6. Restaurar dados de exemplo preserva perfil customizado", () => {
 });
 
 check("7. seed continua restaurando os dados operacionais de teste", () => {
-  actions.replaceAll(createEmptyState(TODAY));
+  const base = createEmptyState(TODAY);
+  actions.replaceAll({ ...base, user: { ...base.user, ...REAL_USER_IDENTITY } });
   actions.reseed();
   const d = getAppData();
   const seed = buildSeedData();
@@ -206,7 +210,9 @@ check("10. cálculos financeiros do seed permanecem iguais", () => {
 check("11. UI de restaurar declara que o perfil é mantido", () => {
   const cfg = srcOf("src/app/(app)/configuracoes/page.tsx");
   assert.ok(cfg.includes("Nome, e-mail e data de nascimento serão mantidos."));
+  // ETAPA 4L — o seed de exemplo continua no código, oculto em produção.
   assert.ok(cfg.includes("Restaurar dados de exemplo"));
+  assert.ok(cfg.includes("SHOW_DEMO_SEED"));
   const store = srcOf("src/lib/store.ts");
   assert.ok(store.includes("withPreservedIdentity(seed.user, d.user)"));
   assert.ok(!store.includes("mutate(() => buildSeedData())"));

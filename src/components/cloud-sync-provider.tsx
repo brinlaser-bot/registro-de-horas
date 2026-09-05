@@ -25,7 +25,7 @@ import {
 import Link from "next/link";
 import { AlertTriangle, CloudOff, Download, RefreshCw } from "lucide-react";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
-import { getAuthenticatedUserId, getSyncClient } from "@/lib/cloud-sync/client";
+import { getAuthenticatedUserEmail, getAuthenticatedUserId, getSyncClient } from "@/lib/cloud-sync/client";
 import {
   activateCloudSync,
   bootstrapCloudSync,
@@ -42,6 +42,7 @@ import {
   resolveUseCloudVersion,
   retryPendingSync,
   startCloudSyncWatch,
+  startFreshForAccount,
   type BootstrapPhase,
 } from "@/lib/cloud-sync/engine";
 import {
@@ -57,11 +58,15 @@ import { SignOutButton } from "@/components/sign-out-button";
 interface CloudSyncContextValue {
   phase: BootstrapPhase;
   userId: string | null;
+  /** ETAPA 4L — e-mail da conta autenticada (nunca o user_id). */
+  email: string | null;
   meta: CloudSyncMetadata;
   status: SyncStatus;
   retry: () => Promise<void>;
   activate: () => Promise<void>;
   useCloud: () => Promise<void>;
+  /** ETAPA 4L — descarta dados legados não vinculados e inicia a conta. */
+  startFresh: () => Promise<void>;
 }
 
 const CloudSyncContext = createContext<CloudSyncContextValue | null>(null);
@@ -73,6 +78,7 @@ export function useCloudSyncOptional(): CloudSyncContextValue | null {
 
 async function initializeCloudSync(
   setUserId: (id: string | null) => void,
+  setEmail: (email: string | null) => void,
   setPhase: (phase: BootstrapPhase) => void,
 ): Promise<(() => void) | null> {
   if (!isSupabaseConfigured()) {
@@ -93,6 +99,7 @@ async function initializeCloudSync(
     return null;
   }
   setUserId(userId);
+  setEmail(await getAuthenticatedUserEmail(db));
   const result = await bootstrapCloudSync(db, userId);
   setPhase(result.phase);
   return startCloudSyncWatch();
@@ -101,6 +108,7 @@ async function initializeCloudSync(
 export function CloudSyncProvider({ children }: { children: ReactNode }) {
   const [phase, setPhase] = useState<BootstrapPhase>("loading");
   const [userId, setUserId] = useState<string | null>(null);
+  const [email, setEmail] = useState<string | null>(null);
   const meta = useSyncMetadata();
 
   useEffect(() => {
@@ -112,7 +120,10 @@ export function CloudSyncProvider({ children }: { children: ReactNode }) {
     const guardedSetUserId = (id: string | null) => {
       if (active) setUserId(id);
     };
-    void initializeCloudSync(guardedSetUserId, guardedSetPhase).then((stopWatch) => {
+    const guardedSetEmail = (value: string | null) => {
+      if (active) setEmail(value);
+    };
+    void initializeCloudSync(guardedSetUserId, guardedSetEmail, guardedSetPhase).then((stopWatch) => {
       stop = stopWatch;
       if (!active && stop) stop();
     });
@@ -137,9 +148,24 @@ export function CloudSyncProvider({ children }: { children: ReactNode }) {
     setPhase(result.phase);
   }, []);
 
+  const startFresh = useCallback(async () => {
+    const result = await startFreshForAccount();
+    setPhase(result.phase);
+  }, []);
+
   const value = useMemo<CloudSyncContextValue>(
-    () => ({ phase, userId, meta, status: displaySyncStatus(meta), retry, activate, useCloud }),
-    [phase, userId, meta, retry, activate, useCloud],
+    () => ({
+      phase,
+      userId,
+      email,
+      meta,
+      status: displaySyncStatus(meta),
+      retry,
+      activate,
+      useCloud,
+      startFresh,
+    }),
+    [phase, userId, email, meta, retry, activate, useCloud, startFresh],
   );
 
   return <CloudSyncContext.Provider value={value}>{children}</CloudSyncContext.Provider>;
@@ -189,7 +215,13 @@ function BlockedGate() {
   );
 }
 
-function CollisionGate({ onUseCloud }: { onUseCloud: () => Promise<void> }) {
+function CollisionGate({
+  onUseCloud,
+  email,
+}: {
+  onUseCloud: () => Promise<void>;
+  email: string | null;
+}) {
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -213,6 +245,11 @@ function CollisionGate({ onUseCloud }: { onUseCloud: () => Promise<void> }) {
           </span>
           <div className="min-w-0">
             <p className="text-sm font-extrabold text-slate-900">{MSG_COLLISION_TITLE}</p>
+            {email && (
+              <p className="mt-1 truncate text-xs font-semibold text-slate-600">
+                Conta conectada: {email}
+              </p>
+            )}
             <p className="mt-1 text-xs leading-relaxed text-slate-500">
               Para evitar perda de informações, o Meu Horário não substituiu nenhuma das versões
               automaticamente. Guarde uma cópia deste dispositivo antes de decidir.
@@ -248,7 +285,7 @@ function CollisionGate({ onUseCloud }: { onUseCloud: () => Promise<void> }) {
   );
 }
 
-function ConflictBanner() {
+function ConflictBanner({ email }: { email: string | null }) {
   return (
     <div className="border-b border-amber-200 bg-amber-50 px-4 py-2">
       <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center gap-x-3 gap-y-1 text-xs">
@@ -257,6 +294,11 @@ function ConflictBanner() {
           <span className="truncate">{MSG_CONFLICT_TITLE}</span>
         </span>
         <span className="hidden text-amber-700 sm:inline">{MSG_CONFLICT_EXPLAIN}</span>
+        {email && (
+          <span className="hidden min-w-0 truncate text-amber-700 md:inline">
+            Conta conectada: {email}
+          </span>
+        )}
         <Link
           href="/configuracoes"
           className="ml-auto inline-flex shrink-0 items-center gap-1 rounded-lg bg-amber-900/90 px-2.5 py-1 font-bold text-white hover:bg-amber-900"
@@ -273,10 +315,10 @@ export function CloudSyncGate({ children }: { children: ReactNode }) {
   if (!ctx) return <>{children}</>;
   if (ctx.phase === "loading") return <LoadingGate />;
   if (ctx.phase === "blocked-other-account") return <BlockedGate />;
-  if (ctx.phase === "collision") return <CollisionGate onUseCloud={ctx.useCloud} />;
+  if (ctx.phase === "collision") return <CollisionGate onUseCloud={ctx.useCloud} email={ctx.email} />;
   return (
     <>
-      {ctx.status === "conflict" && <ConflictBanner />}
+      {ctx.status === "conflict" && <ConflictBanner email={ctx.email} />}
       {children}
     </>
   );

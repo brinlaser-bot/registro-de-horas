@@ -118,9 +118,10 @@ check("8. configurações estruturais continuam disponíveis", () => {
   assert.equal(empty.user.lunchEnd, DEFAULT_WORK_SETTINGS.lunchEnd);
   assert.equal(empty.user.maxDailyMinutes, 600);
   assert.equal(empty.user.autoDeductLunch, true);
-  assert.equal(empty.user.name, "Maria Helena");
-  assert.equal(empty.user.email, "meu@horario.com");
-  assert.equal(empty.user.birthDate, "1989-08-23");
+  // ETAPA 4L — primeiro uso: jornada genérica SEM nenhum dado pessoal fictício.
+  assert.equal(empty.user.name, "");
+  assert.equal(empty.user.email, "");
+  assert.equal(empty.user.birthDate, null);
   assert.match(empty.user.controlStartDate ?? "", /^\d{4}-\d{2}-\d{2}$/);
   assert.equal(PERIOD.from.slice(8, 10), "21");
   assert.equal(PERIOD.to.slice(8, 10), "20");
@@ -211,9 +212,10 @@ check("12. backup continua funcionando", () => {
   assert.equal(getAppData().user.name, "Maria Real");
   assert.equal(getAppData().entries.length, 2);
   const cfg = srcOf("src/app/(app)/configuracoes/page.tsx");
-  assert.ok(cfg.includes("Exportar backup (JSON)"));
+  // ETAPA 4L — botão único de backup no cartão "Dados e sincronização".
+  assert.ok(cfg.includes("Baixar backup (JSON)"));
   assert.ok(cfg.includes("Importar backup (JSON)"));
-  assert.ok(cfg.includes("dados locais deste aplicativo neste navegador"));
+  assert.ok(cfg.includes("O backup JSON reúne perfil, jornada, registros"));
 });
 
 check("13. calendário não cria trabalho fictício em feriado", () => {

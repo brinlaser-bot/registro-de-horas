@@ -4,6 +4,9 @@ import "./globals.css";
 import { ToastProvider } from "@/components/toast";
 import { SpecialReleaseProvider } from "@/components/special-release-confirm";
 
+// ETAPA 4L — o favicon do Meu Horário usa a convenção nativa do App Router:
+// `src/app/icon.svg` (quadrado verde + relógio branco, a mesma identidade do
+// ícone dentro do app). O Next injeta o <link rel="icon"> automaticamente.
 export const metadata: Metadata = {
   title: {
     default: "Meu Horário — Controle de ponto",

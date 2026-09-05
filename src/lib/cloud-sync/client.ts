@@ -32,7 +32,7 @@ export interface CloudDataClient {
     [key: string]: unknown;
   };
   auth: {
-    getUser(): Promise<{ data: { user: { id: string } | null } }>;
+    getUser(): Promise<{ data: { user: { id: string; email?: string | null } | null } }>;
   };
 }
 
@@ -221,6 +221,21 @@ export async function getAuthenticatedUserId(db: CloudDataClient): Promise<strin
   try {
     const { data } = await db.auth.getUser();
     return data?.user?.id ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * ETAPA 4L — e-mail da conta autenticada (fonte: a sessão Supabase). Usado
+ * apenas para EXIBIR a conta conectada e derivar o e-mail do perfil em conta
+ * nova. Nunca expõe o `user_id` na interface.
+ */
+export async function getAuthenticatedUserEmail(db: CloudDataClient): Promise<string | null> {
+  try {
+    const { data } = await db.auth.getUser();
+    const email = data?.user?.email ?? null;
+    return typeof email === "string" && email ? email : null;
   } catch {
     return null;
   }

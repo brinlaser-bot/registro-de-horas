@@ -27,11 +27,17 @@ import { expectedMinutesOf, formatMinutes, todayString } from "@/lib/time";
 import { Button, Card, ConfirmDialog, Input, Select, Skeleton, Toggle } from "@/components/ui";
 import { SignOutButton } from "@/components/sign-out-button";
 import { CloudSyncSettings } from "@/components/cloud-sync-settings";
+import { useCloudSyncOptional } from "@/components/cloud-sync-provider";
+import { syncExplainText } from "@/lib/cloud-sync/metadata";
 import { ImportBackupModal } from "@/components/import-backup-modal";
 import { useToast } from "@/components/toast";
 
+/** ETAPA 4L — o seed de exemplo é ferramenta de desenvolvimento, não de produção. */
+const SHOW_DEMO_SEED = process.env.NODE_ENV !== "production";
+
 export default function ConfiguracoesPage() {
   const toast = useToast();
+  const cloud = useCloudSyncOptional();
   const mounted = useIsClient();
   const { user, entries, compensations, absences, companyCalendars } = useAppData();
 
@@ -256,7 +262,7 @@ export default function ConfiguracoesPage() {
       {/* Perfil */}
       <Card
         title="Perfil"
-        subtitle="Seus dados (app de uso pessoal — sem login)"
+        subtitle="Dados do seu perfil"
         actions={
           <Button size="sm" onClick={saveProfile} loading={busyProfile}>
             <Save size={14} /> Salvar perfil
@@ -318,9 +324,18 @@ export default function ConfiguracoesPage() {
         subtitle="Acesso ao app neste navegador"
       >
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className="text-sm font-medium text-slate-500">
-            Sair encerra a sessão neste navegador. Seus registros locais são mantidos.
-          </p>
+          <div className="min-w-0">
+            {/* ETAPA 4L — conta autenticada visível (nunca o identificador interno). */}
+            {cloud?.email && (
+              <p className="min-w-0 break-all text-sm font-extrabold text-slate-900">
+                Conta conectada
+                <span className="ml-1 font-semibold text-slate-600">{cloud.email}</span>
+              </p>
+            )}
+            <p className="mt-0.5 text-sm font-medium text-slate-500">
+              Sair encerra a sessão apenas neste navegador. Seus registros são mantidos.
+            </p>
+          </div>
           <SignOutButton className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-extrabold text-slate-700 hover:bg-slate-50" />
         </div>
       </Card>
@@ -429,7 +444,7 @@ export default function ConfiguracoesPage() {
       {/* Calendários da empresa — um por ciclo anual (01/05 → 30/04) */}
       <Card
         title="Calendários da empresa"
-        subtitle="Um calendário por ciclo anual: importar um novo ciclo NUNCA apaga os anteriores (100% localStorage)"
+        subtitle="Um calendário por ciclo anual: importar um novo ciclo NUNCA apaga os anteriores"
         actions={
           <div className="flex flex-wrap gap-2">
             <Button variant="secondary" size="sm" onClick={() => downloadText("modelo-calendario-meu-horario.csv", CALENDAR_HEADER + "\n")}>Baixar modelo vazio</Button>
@@ -584,10 +599,11 @@ export default function ConfiguracoesPage() {
         )}
       </Card>
 
-      {/* Dados */}
+      {/* ETAPA 4L — CARTÃO ÚNICO: dados + sincronização (sem cartões duplicados
+          e sem dois botões diferentes para o mesmo backup BACKUP v3). */}
       <Card
-        title="Dados"
-        subtitle="Tudo fica salvo apenas no seu navegador (localStorage) — nada vai para servidores"
+        title="Dados e sincronização"
+        subtitle={syncExplainText(cloud?.meta)}
       >
         <div className="grid gap-4 sm:grid-cols-3">
           <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
@@ -607,60 +623,64 @@ export default function ConfiguracoesPage() {
           </div>
         </div>
 
+        {/* ETAPA 4K/4L — estado e ações da sincronização, no MESMO cartão. */}
+        <div className="mt-4">
+          <CloudSyncSettings />
+        </div>
+
         <div className="mt-4 flex flex-wrap gap-2">
           <Button variant="secondary" size="sm" onClick={exportJson}>
-            <Download size={14} /> Exportar backup (JSON)
+            <Download size={14} /> Baixar backup (JSON)
           </Button>
           <Button variant="secondary" size="sm" onClick={() => setImportOpen(true)}>
             <Upload size={14} /> Importar backup (JSON)
           </Button>
-          <Button variant="secondary" size="sm" onClick={reseed}>
-            <Database size={14} /> Restaurar dados de exemplo
-          </Button>
+          {SHOW_DEMO_SEED && (
+            <Button variant="secondary" size="sm" onClick={reseed}>
+              <Database size={14} /> Restaurar dados de exemplo
+            </Button>
+          )}
           <Button variant="danger" size="sm" onClick={() => setClearOpen(true)}>
-            <Trash2 size={14} /> Apagar todos os dados
+            <Trash2 size={14} /> Apagar dados do controle
           </Button>
         </div>
-        <p className="mt-3 text-[11px] text-slate-400">
-          O backup JSON contém os dados locais deste aplicativo neste navegador: perfil, jornada,
-          registros, compensações, calendários, faltas e motivos. Ao limpar o cache/cookies do
-          navegador, os registros são apagados — use o backup JSON ou o CSV do Resumo para manter
-          uma cópia.
+        <p className="mt-3 text-[11px] leading-relaxed text-slate-400">
+          O backup JSON reúne perfil, jornada, registros, compensações, calendários, faltas e
+          motivos. Guarde uma cópia antes de trocar de dispositivo ou limpar o navegador.
         </p>
       </Card>
 
-      {/* ETAPA 4K — sincronização multi-dispositivo (nuvem como referência da conta). */}
-      <CloudSyncSettings />
-
-      {/* Regras */}
-      <Card title="Como o cálculo funciona" subtitle="Resumo das regras da empresa aplicadas no app">
+      {/* Regras — ETAPA 4L: textos alinhados às regras canônicas atuais. */}
+      <Card title="Como o cálculo funciona" subtitle="Resumo das regras aplicadas no app">
         <div className="grid gap-3 text-sm text-slate-600 sm:grid-cols-2">
           <div className="flex items-start gap-3 rounded-xl bg-emerald-50/70 p-3">
             <Clock3 size={16} className="mt-0.5 shrink-0 text-emerald-600" />
             <p>
-              <b className="text-emerald-700">Base diária de 8h.</b> Horas trabalhadas acima da base
-              geram <b>saldo positivo</b> (crédito); abaixo, <b>saldo negativo</b> (débito).
+              <b className="text-emerald-700">Base diária de 8h.</b> Acima da base gera{" "}
+              <b>saldo positivo</b>; abaixo, <b>saldo negativo</b>. Até 10h no dia entram no
+              cálculo regular.
             </p>
           </div>
           <div className="flex items-start gap-3 rounded-xl bg-rose-50/70 p-3">
             <Info size={16} className="mt-0.5 shrink-0 text-rose-600" />
             <p>
-              <b className="text-rose-700">Limite de 10h/dia.</b> O que ultrapassar o limite não pode
-              ser registrado no ponto e vira <b>excedente</b> para compensar em outro dia.
+              <b className="text-rose-700">Acima de 10h no dia: [10+].</b> O que ultrapassa 10h
+              fica <b>separado</b> como [10+] e <b>não abate automaticamente</b> saldo negativo.
             </p>
           </div>
           <div className="flex items-start gap-3 rounded-xl bg-indigo-50/70 p-3">
             <UserRound size={16} className="mt-0.5 shrink-0 text-indigo-600" />
             <p>
-              <b className="text-indigo-700">Compensação.</b> Registre o excedente em um dia mais
-              leve (saindo mais cedo ou entrando mais tarde) e marque a compensação como concluída.
+              <b className="text-indigo-700">Uso do [10+].</b> Você decide quando aplicar as horas
+              [10+] em um dia específico. Nada é reorganizado sozinho pelo app.
             </p>
           </div>
           <div className="flex items-start gap-3 rounded-xl bg-amber-50/70 p-3">
             <Info size={16} className="mt-0.5 shrink-0 text-amber-600" />
             <p>
-              <b className="text-amber-700">Almoço.</b> Bata o ponto ao sair (12:00) e voltar (13:00).
-              Se esquecer, o app desconta 1h automaticamente (se ativado).
+              <b className="text-amber-700">Intervalo.</b> O intervalo realmente registrado é
+              respeitado pelo tempo exato. A 1h automática só é usada quando <b>não existe</b>{" "}
+              intervalo intermediário registrado no dia (se a opção estiver ativada).
             </p>
           </div>
         </div>
@@ -673,9 +693,11 @@ export default function ConfiguracoesPage() {
         <ConfirmDialog
           open
           danger
-          title="Apagar todos os dados?"
-          confirmLabel="Apagar todos os dados"
-          message="Isso excluirá definitivamente todos os registros, faltas, férias, afastamentos, compensações, excedentes, acordos e eventos de calendário salvos neste navegador. As configurações gerais serão mantidas."
+          title="Apagar dados do controle?"
+          confirmLabel="Apagar dados do controle"
+          message={`Isso excluirá definitivamente todos os registros, faltas, férias, afastamentos, compensações, excedentes, acordos e eventos de calendário. As configurações gerais serão mantidas.${
+            cloud?.meta.mode === "cloud" ? " Esta alteração também será sincronizada com sua conta." : ""
+          }`}
           onClose={() => setClearOpen(false)}
           onConfirm={confirmClearAll}
         />

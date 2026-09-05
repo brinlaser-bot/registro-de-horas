@@ -41,6 +41,7 @@ import {
   type CloudRow,
 } from "./client";
 import { actions, getAppData, parseStoredAppData, readRawAppCache, subscribeToAppData } from "../store";
+import { createEmptyState } from "../seed-data";
 import type { ParsedBackup } from "../backup";
 
 /* ─────────────────────────────────────────────────────────────
@@ -61,6 +62,15 @@ export const MSG_ACTIVATE_EXPLAIN =
   "Eles serão enviados para sua conta e poderão ser acessados nos outros dispositivos.";
 export const MSG_ACTIVATE_CTA = "Usar estes dados na minha conta";
 export const MSG_BACKUP_CTA = "Baixar backup de segurança";
+
+/* ── ETAPA 4L — dados legados encontrados no dispositivo (cenário B) ── */
+
+export const MSG_LEGACY_TITLE = "Encontramos dados neste dispositivo.";
+export const MSG_LEGACY_EXPLAIN =
+  "Você pode vinculá-los à sua conta para acessar em outros dispositivos.";
+export const MSG_LEGACY_LINK_CTA = "Vincular estes dados à minha conta";
+export const MSG_LEGACY_DISCARD_CTA = "Começar esta conta sem esses dados";
+export const MSG_BACKUP_JSON_CTA = "Baixar backup (JSON)";
 export const MSG_BACKUP_DEVICE_CTA = "Baixar backup deste dispositivo";
 export const MSG_USE_CLOUD_CTA = "Usar versão da nuvem";
 export const MSG_BLOCKED_TITLE = "Este navegador possui dados de outra conta";
@@ -100,6 +110,22 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
+/**
+ * Cópia textual do cache operacional para o compartimento da conta. Usa o
+ * texto persistido quando existe; fora do navegador (SSR/testes) serializa o
+ * estado em memória — o slot NUNCA pode ficar vazio, sob pena de a conta que
+ * volta reencontrar o ambiente da outra.
+ */
+function currentCacheSnapshot(): string | null {
+  const raw = readRawAppCache();
+  if (raw) return raw;
+  try {
+    return JSON.stringify(getAppData());
+  } catch {
+    return null;
+  }
+}
+
 /* ─────────────────────────────────────────────────────────────
    Fases do portão de inicialização (decididas antes de renderizar).
    ───────────────────────────────────────────────────────────── */
@@ -133,12 +159,13 @@ export async function bootstrapCloudSync(
 
   // ── Troca de conta: este navegador tem vínculo com OUTRA conta ──
   if (meta.activeUserId && meta.activeUserId !== userId) {
-    stashAccountSlot(meta.activeUserId, meta, readRawAppCache());
+    stashAccountSlot(meta.activeUserId, meta, currentCacheSnapshot());
     const incoming = readAccountStash(userId);
     if (incoming) {
       restoreAccountStash(userId, incoming);
       meta = getSyncMetadata();
     } else {
+      const previousMode = meta.mode;
       resetSyncMetadata();
       const remote = await fetchCloudState(db, userId);
       if (remote.status === "valid") {
@@ -149,11 +176,23 @@ export async function bootstrapCloudSync(
       }
       if (remote.status === "invalid") {
         updateSyncMetadata({ status: "error", lastError: MSG_CLOUD_INVALID });
-      } else if (remote.status === "error") {
-        updateSyncMetadata({ status: "error", lastError: MSG_FETCH_FAILED });
-      } else {
-        updateSyncMetadata({ status: "not-started", lastError: null });
+        return { phase: "blocked-other-account" };
       }
+      if (remote.status === "error") {
+        updateSyncMetadata({ status: "error", lastError: MSG_FETCH_FAILED });
+        return { phase: "blocked-other-account" };
+      }
+      // ETAPA 4L (CENÁRIO D) — a conta anterior tinha os dados VINCULADOS à
+      // nuvem dela (slot guardado e recuperável): a conta que chega começa em
+      // um ambiente vazio e isolado, jamais herdando o conteúdo alheio.
+      // Quando os dados da conta anterior NUNCA foram enviados, a propriedade
+      // é ambígua e a tela segura continua valendo.
+      if (previousMode === "cloud") {
+        applyEmptyIsolatedState();
+        updateSyncMetadata({ status: "not-started", lastError: null });
+        return activateCloudSync();
+      }
+      updateSyncMetadata({ status: "not-started", lastError: null });
       return { phase: "blocked-other-account" };
     }
   }
@@ -182,6 +221,15 @@ export async function bootstrapCloudSync(
       updateSyncMetadata({ activeUserId: userId });
     }
     updateSyncMetadata({ status: "not-started", lastError: null });
+    // ETAPA 4L (CENÁRIO A) — conta autenticada SEM estado na nuvem e
+    // dispositivo comprovadamente vazio, sem vínculo anterior: nada de
+    // usuário a arriscar, o estado inicial é criado automaticamente
+    // (revision 1) pelo MESMO caminho de ativação — sem botão.
+    if (isEmptyOperationalState(local) && !meta.activeUserId) {
+      return activateCloudSync();
+    }
+    // ETAPA 4L (CENÁRIO B) — há dados locais relevantes ainda não vinculados:
+    // NUNCA enviar sozinho; a decisão fica com o usuário em Configurações.
     return { phase: "ready" };
   }
 
@@ -302,6 +350,35 @@ function restoreAccountStash(userId: string, stash: AccountStash): void {
   }
   setSyncMetadata({ ...stash.meta, activeUserId: userId });
   clearAccountStash(userId);
+}
+
+/**
+ * ETAPA 4L — zera o cache operacional deste navegador para um ambiente NOVO e
+ * isolado (nenhum dado de outra conta permanece visível). Não é mutação do
+ * usuário: o motor marca a aplicação como remota.
+ */
+function applyEmptyIsolatedState(): void {
+  applyingRemote = true;
+  try {
+    actions.replaceAll(createEmptyState());
+  } finally {
+    applyingRemote = false;
+  }
+}
+
+/**
+ * ETAPA 4L (CENÁRIO B — ação explícita) — "Começar esta conta sem esses
+ * dados": descarta o conteúdo legado NÃO VINCULADO deste dispositivo e cria o
+ * estado inicial da conta. Só é oferecido quando a conta ainda não tem nuvem.
+ */
+export function startFreshForAccount(): Promise<BootstrapResult> {
+  const current = session;
+  if (!current) return Promise.resolve({ phase: "ready" });
+  const meta = getSyncMetadata();
+  if (meta.mode === "cloud") return Promise.resolve({ phase: "ready" });
+  applyEmptyIsolatedState();
+  updateSyncMetadata({ activeUserId: null, status: "not-started", lastError: null });
+  return activateCloudSync();
 }
 
 /* ─────────────────────────────────────────────────────────────

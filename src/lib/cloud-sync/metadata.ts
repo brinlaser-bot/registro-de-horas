@@ -35,6 +35,32 @@ export type SyncStatus =
   | "conflict"
   | "error";
 
+/**
+ * ETAPA 4L — rótulos CURTOS (sidebar/indicadores estreitos): sem truncamento
+ * ruim em telas pequenas. O rótulo longo continua nos cartões amplos.
+ */
+export const SYNC_STATUS_SHORT_LABEL: Record<SyncStatus, string> = {
+  "not-started": "Não iniciada",
+  syncing: "Sincronizando",
+  synced: "Sincronizado",
+  pending: "Pendente",
+  conflict: "Conflito",
+  error: "Erro",
+};
+
+/**
+ * ETAPA 4L — explicação em linguagem simples do estado atual dos dados.
+ * Sem termos técnicos (armazenamento do navegador, revisões, servidor).
+ */
+export const SYNC_EXPLAIN: Record<SyncStatus, string> = {
+  "not-started": "Seus dados estão somente neste dispositivo.",
+  syncing: "Seus dados ficam neste dispositivo e sincronizados com sua conta.",
+  synced: "Seus dados ficam neste dispositivo e sincronizados com sua conta.",
+  pending: "Há alterações neste dispositivo aguardando sincronização.",
+  conflict: "Há alterações neste dispositivo e em outro dispositivo.",
+  error: "Seus dados estão salvos neste dispositivo.",
+};
+
 export const SYNC_STATUS_LABEL: Record<SyncStatus, string> = {
   "not-started": "Sincronização não iniciada",
   syncing: "Sincronizando…",
@@ -228,6 +254,20 @@ export function displaySyncStatus(meta: CloudSyncMetadata): SyncStatus {
 /** Rótulo em português do status efetivo. */
 export function syncStatusLabel(meta: CloudSyncMetadata): string {
   return SYNC_STATUS_LABEL[displaySyncStatus(meta)];
+}
+
+/** ETAPA 4L — rótulo curto do status efetivo (sidebar). */
+export function syncStatusShortLabel(meta: CloudSyncMetadata): string {
+  return SYNC_STATUS_SHORT_LABEL[displaySyncStatus(meta)];
+}
+
+/**
+ * ETAPA 4L — texto dinâmico do cartão "Dados e sincronização".
+ * Em modo local (sem nuvem ativa) a frase é sempre a do dispositivo isolado.
+ */
+export function syncExplainText(meta: CloudSyncMetadata | null | undefined): string {
+  if (!meta || meta.mode !== "cloud") return SYNC_EXPLAIN["not-started"];
+  return SYNC_EXPLAIN[displaySyncStatus(meta)];
 }
 
 /* ─────────────────────────────────────────────────────────────

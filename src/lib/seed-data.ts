@@ -37,11 +37,26 @@ export const DEFAULT_WORK_SETTINGS = {
   autoDeductLunch: true,
 } as const;
 
-/** Identidade real do aplicativo — nunca substituída por seed/demo. */
+/**
+ * Identidade do cenário de demonstração (bancada de teste manual).
+ * ETAPA 4L: NUNCA é usada em conta nova/primeiro uso — só existe dentro do
+ * seed de exemplo (disponível apenas em desenvolvimento).
+ */
 export const REAL_USER_IDENTITY = {
   name: "Maria Helena",
   email: "meu@horario.com",
   birthDate: "1989-08-23",
+} as const;
+
+/**
+ * ETAPA 4L — Identidade de instalação nova: NENHUM dado pessoal fictício.
+ * Nome/e-mail vazios e sem data de nascimento; o onboarding preenche o nome e
+ * o e-mail vem da conta autenticada.
+ */
+export const NEW_ACCOUNT_IDENTITY = {
+  name: "",
+  email: "",
+  birthDate: null,
 } as const;
 
 /** Identidade antiga de demonstração — migrada na hidratação para o perfil real. */
@@ -55,11 +70,19 @@ export function isDemoUserIdentity(user: Pick<User, "name" | "email">): boolean 
   return user.name === DEMO_USER_IDENTITY.name && user.email === DEMO_USER_IDENTITY.email;
 }
 
-/** Copia nome, e-mail e nascimento da origem — jornada e controlStartDate ficam no destino. */
+/**
+ * Copia nome, e-mail e nascimento da origem — jornada e controlStartDate ficam
+ * no destino.
+ *
+ * ETAPA 4L: instalação nova não tem identidade (nome vazio). Nesse caso a
+ * identidade do destino é mantida como está — nada a "preservar" e nenhum
+ * perfil em branco é imposto sobre a bancada de exemplo.
+ */
 export function withPreservedIdentity<T extends Pick<User, "name" | "email" | "birthDate">>(
   target: T,
   source: Pick<User, "name" | "email" | "birthDate">,
 ): T {
+  if (!(source.name ?? "").trim()) return target;
   return {
     ...target,
     name: source.name,
@@ -90,10 +113,13 @@ export const DEFAULT_USER: User = {
   guideMaxExit: "17:45",
 };
 
-/** Instalação nova: perfil real + regras estruturais, sem fatos de demonstração. */
+/**
+ * Instalação nova (ETAPA 4L): jornada genérica editável, SEM dado pessoal.
+ * Nome/e-mail vêm do onboarding e da conta autenticada; nascimento é opcional.
+ */
 export const EMPTY_USER: User = {
   id: 1,
-  ...REAL_USER_IDENTITY,
+  ...NEW_ACCOUNT_IDENTITY,
   ...DEFAULT_WORK_SETTINGS,
   controlStartDate: null,
   // 4I — limites do Guia do Ponto (defaults oficiais desta etapa).

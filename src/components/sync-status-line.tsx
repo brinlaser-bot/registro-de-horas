@@ -9,7 +9,11 @@
  */
 import Link from "next/link";
 import { useIsClient } from "@/lib/store";
-import { SYNC_STATUS_LABEL, type SyncStatus } from "@/lib/cloud-sync/metadata";
+import {
+  SYNC_STATUS_LABEL,
+  SYNC_STATUS_SHORT_LABEL,
+  type SyncStatus,
+} from "@/lib/cloud-sync/metadata";
 import { useCloudSyncOptional } from "./cloud-sync-provider";
 
 const DOT: Record<SyncStatus, string> = {
@@ -32,7 +36,8 @@ export function SyncStatusLine() {
       aria-label={`Sincronização: ${SYNC_STATUS_LABEL[ctx.status]}`}
     >
       <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${DOT[ctx.status]}`} aria-hidden />
-      <span className="truncate">{SYNC_STATUS_LABEL[ctx.status]}</span>
+      {/* ETAPA 4L — rótulo CURTO: cabe inteiro na sidebar, sem “…” cortando. */}
+      <span>{SYNC_STATUS_SHORT_LABEL[ctx.status]}</span>
     </Link>
   );
 }

@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { AppShell } from "@/components/app-shell";
 import { CloudSyncGate, CloudSyncProvider } from "@/components/cloud-sync-provider";
+import { OnboardingGate } from "@/components/onboarding-gate";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 
 // ETAPA 4J — proteção server-side das rotas operacionais: sem sessão,
@@ -28,7 +29,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   return (
     <CloudSyncProvider>
       <CloudSyncGate>
-        <AppShell>{children}</AppShell>
+        {/* ETAPA 4L — configuração inicial de conta nova e vazia, antes do app. */}
+        <OnboardingGate>
+          <AppShell>{children}</AppShell>
+        </OnboardingGate>
       </CloudSyncGate>
     </CloudSyncProvider>
   );
