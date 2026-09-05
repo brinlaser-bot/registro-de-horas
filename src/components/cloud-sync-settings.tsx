@@ -31,7 +31,11 @@ import {
   MSG_LEGACY_TITLE,
   MSG_USE_CLOUD_CTA,
 } from "@/lib/cloud-sync/engine";
-import { SYNC_STATUS_LABEL, type SyncStatus } from "@/lib/cloud-sync/metadata";
+import {
+  shouldOfferStartFresh,
+  SYNC_STATUS_LABEL,
+  type SyncStatus,
+} from "@/lib/cloud-sync/metadata";
 import { useCloudSyncOptional } from "./cloud-sync-provider";
 import { Button } from "@/components/ui";
 
@@ -232,7 +236,11 @@ export function CloudSyncSettings() {
                   MSG_LEGACY_LINK_CTA
                 )}
               </Button>
-              {localEmpty && (
+              {/* 4L — a terceira via só faz sentido QUANDO HÁ dados legados a
+                  descartar: com o dispositivo vazio o cenário A já ativou a
+                  nuvem sozinho e esta tela sequer aparece. A ação é sempre
+                  explícita (clique), nunca automática no bootstrap/login. */}
+              {shouldOfferStartFresh({ localEmpty, mode: meta.mode }) && (
                 <Button
                   variant="secondary"
                   size="sm"

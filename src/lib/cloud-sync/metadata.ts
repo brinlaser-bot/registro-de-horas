@@ -262,6 +262,19 @@ export function syncStatusShortLabel(meta: CloudSyncMetadata): string {
 }
 
 /**
+ * ETAPA 4L — a terceira via do cenário de dados legados ("Começar esta conta
+ * sem esses dados") só pode ser oferecida quando REALMENTE há dados legados a
+ * descartar e a conta ainda não tem nuvem própria. Com o dispositivo vazio o
+ * cenário A já ativa a nuvem sozinho e a tela nem aparece; com nuvem ativa,
+ * descartar seria destruir dados já vinculados.
+ *
+ * Predicado puro (e por isso testável) para não repetir a condição na UI.
+ */
+export function shouldOfferStartFresh(opts: { localEmpty: boolean; mode: SyncMode }): boolean {
+  return !opts.localEmpty && opts.mode !== "cloud";
+}
+
+/**
  * ETAPA 4L — texto dinâmico do cartão "Dados e sincronização".
  * Em modo local (sem nuvem ativa) a frase é sempre a do dispositivo isolado.
  */

@@ -436,7 +436,7 @@ await check("T11 — Conta nova com dados legados relevantes não faz upload aut
 });
 
 /* ═══════════════ T12 — confirmação explícita dos dados legados ═══════════════ */
-await check("T12 — Dados legados oferecem confirmação explícita", () => {
+await check("T12 — Dados legados oferecem confirmação explícita (três vias corretas)", async () => {
   const en = srcOf(ENGINE);
   assert.equal(engine.MSG_LEGACY_TITLE, "Encontramos dados neste dispositivo.");
   assert.equal(
@@ -451,6 +451,51 @@ await check("T12 — Dados legados oferecem confirmação explícita", () => {
   assert.ok(st.includes("MSG_LEGACY_LINK_CTA"), "cartão exibe a vinculação explícita");
   assert.ok(st.includes("onClick={runActivate}"), "vinculação parte de clique explícito");
   assert.ok(st.includes("await ctx.activate()"), "clique chama a ativação (CAS/INSERT da 4K)");
+
+  // ── A condição da terceira via é COMPORTAMENTO, não texto no fonte ──
+  // Com dados legados (localEmpty === false) e sem nuvem, a opção DEVE existir.
+  assert.equal(
+    metadata.shouldOfferStartFresh({ localEmpty: false, mode: "local" }),
+    true,
+    "com dados legados, “Começar esta conta sem esses dados” fica disponível",
+  );
+  // Com o dispositivo vazio o cenário A já ativou sozinho: não precisa aparecer.
+  assert.equal(
+    metadata.shouldOfferStartFresh({ localEmpty: true, mode: "local" }),
+    false,
+    "dispositivo vazio não oferece descarte (autoativação do cenário A)",
+  );
+  // Nunca oferecer descarte sobre dados JÁ vinculados à nuvem da conta.
+  assert.equal(metadata.shouldOfferStartFresh({ localEmpty: false, mode: "cloud" }), false);
+  assert.equal(metadata.shouldOfferStartFresh({ localEmpty: true, mode: "cloud" }), false);
+  // A UI precisa consumir o predicado (impede reintroduzir a condição invertida).
+  assert.ok(
+    st.includes("shouldOfferStartFresh({ localEmpty, mode: meta.mode })"),
+    "a UI decide pelo predicado auditado, não por uma condição solta",
+  );
+  assert.ok(
+    !/\{\s*localEmpty\s*&&\s*\(\s*<Button/.test(st),
+    "a ação de descarte NUNCA pode ficar sob `localEmpty &&` (condição invertida)",
+  );
+
+  // ── E o descarte é sempre EXPLÍCITO: jamais roda no bootstrap/login ──
+  resetWorld();
+  setLocal(relevantLocal());
+  const before = clone(store.getAppData());
+  const fake = new FakeSupabase();
+  await engine.bootstrapCloudSync(fake.asClient(), "user-A");
+  assert.deepEqual(clone(store.getAppData()), before, "bootstrap não descarta nada sozinho");
+  assert.equal(fake.rows.size, 0, "bootstrap não envia nada sozinho");
+  // Só a ação do usuário efetiva o recomeço.
+  engine.configureCloudSync(fake.asClient(), "user-A");
+  await engine.startFreshForAccount();
+  assert.equal(canonical.isEmptyOperationalState(store.getAppData()), true, "ambiente novo e limpo");
+  assert.equal(fake.rows.get("user-A")?.revision, 1, "conta inicia com estado próprio revision 1");
+  // Proteção: com nuvem já ativa, o recomeço é recusado (não destrói vinculado).
+  const linked = clone(store.getAppData());
+  await engine.startFreshForAccount();
+  assert.deepEqual(clone(store.getAppData()), linked, "com nuvem ativa nada é destruído");
+  assert.equal(fake.rows.get("user-A")?.revision, 1, "nenhuma escrita extra");
 });
 
 /* ═══════════════ T13 — backup antes de vincular ═══════════════ */
