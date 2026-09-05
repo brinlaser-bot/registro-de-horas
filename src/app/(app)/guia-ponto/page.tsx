@@ -77,9 +77,18 @@ function DayGuideCard({ day }: { day: PointGuideDayRow }) {
     (day.calendarEntry
       ? `${day.calendarEntry.tratamento} — ${day.calendarEntry.descricao}`
       : null);
+  // 4I.1 — situação em que o FATO canônico do dia já existe sem batidas
+  // (COMPENSAR passado realizado, ou [10+] aplicado sem âncora real): o card
+  // apresenta o saldo dos motores canônicos — nunca um valor recalculado.
+  const showsSaldoFactual =
+    !hasFacts &&
+    day.past &&
+    (day.suggestion.kind === "compensar-realized" ||
+      (day.specialUsedMinutes > 0 && day.suggestion.kind === "manual"));
+  const showsSaldoProjetado = showsSaldoFactual && day.specialUsedMinutes > 0;
 
   return (
-    <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+    <article className="rounded-2xl border border-slate-200 bg-white px-4 pt-4 pb-2.5 shadow-sm">
       {/* Cabeçalho do dia */}
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
@@ -102,7 +111,7 @@ function DayGuideCard({ day }: { day: PointGuideDayRow }) {
 
       {/* PRECISA DE ATENÇÃO */}
       {day.attention && (
-        <div className="mt-3 flex items-start gap-2 rounded-xl border border-rose-300 bg-rose-50 px-3 py-2">
+        <div className="mt-2 flex items-start gap-2 rounded-xl border border-rose-300 bg-rose-50 px-3 py-1.5">
           <TriangleAlert size={15} className="mt-0.5 shrink-0 text-rose-600" aria-hidden />
           <div className="min-w-0">
             <p className="text-[11px] font-extrabold uppercase tracking-wider text-rose-700">
@@ -118,18 +127,18 @@ function DayGuideCard({ day }: { day: PointGuideDayRow }) {
       )}
 
       {/* Batidas reais × Sugestão */}
-      <div className="mt-3 grid gap-3 md:grid-cols-2">
+      <div className="mt-2 grid gap-2.5 md:grid-cols-2">
         <div className="min-w-0">
           <p className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
             Batidas reais
           </p>
-          <div className="mt-1.5">
+          <div className="mt-1">
             <PunchChips times={day.realPunches} tone="real" />
           </div>
-          <div className="mt-2 space-y-1 text-xs text-slate-600">
+          <div className="mt-1.5 space-y-0.5 text-xs text-slate-600">
             <p className="break-words">
               <b className="text-slate-800">Jornada real:</b>{" "}
-              {hasFacts ? formatMinutes(day.jornadaRealMinutes) : "—"}
+              {hasFacts || day.factRealized ? formatMinutes(day.jornadaRealMinutes) : "—"}
             </p>
             {hasFacts && !day.attentionCategories.includes("incompleto") && (
               <p className="break-words">
@@ -139,17 +148,27 @@ function DayGuideCard({ day }: { day: PointGuideDayRow }) {
                 </span>
               </p>
             )}
+            {/* 4I.1 — fato canônico de dia realizado SEM batidas (COMPENSAR
+                passado / [10+] aplicado sem âncora): saldo factual do motor. */}
+            {showsSaldoFactual && (
+              <p className="break-words">
+                <b className="text-slate-800">Saldo factual:</b>{" "}
+                <span className={day.saldoRegularMinutes < 0 ? "font-bold text-rose-600" : "font-bold text-slate-800"}>
+                  {formatMinutes(day.saldoRegularMinutes)}
+                </span>
+              </p>
+            )}
             {day.missingExpected && (
               <p className="break-words font-semibold text-amber-700">Sem registro no dia</p>
             )}
           </div>
         </div>
 
-        <div className="min-w-0 rounded-xl border border-emerald-200 bg-emerald-50/60 p-3">
+        <div className="min-w-0 rounded-xl border border-emerald-200 bg-emerald-50/60 px-3 py-2">
           <p className="text-[10px] font-extrabold uppercase tracking-wider text-emerald-700">
             Sugestão para o ponto
           </p>
-          <div className="mt-1.5">
+          <div className="mt-1">
             {day.suggestion.punches.length > 0 ? (
               <PunchChips times={day.suggestion.punches} tone="suggested" />
             ) : (
@@ -159,16 +178,28 @@ function DayGuideCard({ day }: { day: PointGuideDayRow }) {
             )}
           </div>
           {day.suggestion.representableMinutes > 0 && (
-            <p className="mt-1.5 break-words text-[11px] font-semibold text-emerald-800">
-              Representado nas batidas sugeridas: {formatMinutes(day.suggestion.representableMinutes)}
+            <p className="mt-1 break-words text-[11px] font-semibold text-emerald-800">
+              {day.suggestion.kind === "origin-reduction" ? (
+                // 4I.1 — dia >10h: o excedente é RETIRADO da sugestão para
+                // respeitar o teto de 10h (nunca “representado nas batidas”).
+                <>Excedente [10+] fora da sugestão: {formatMinutes(day.suggestion.representableMinutes)}</>
+              ) : (
+                // [10+] UTILIZADO para aumentar a projeção: representado nas pontas.
+                <>Representado nas batidas sugeridas: {formatMinutes(day.suggestion.representableMinutes)}</>
+              )}
             </p>
           )}
-          <p className="mt-1.5 break-words text-xs font-bold text-emerald-900">
+          {showsSaldoProjetado && (
+            <p className="mt-1 break-words text-[11px] font-semibold text-emerald-800">
+              Saldo projetado: {formatMinutes(day.saldoProjetadoMinutes)}
+            </p>
+          )}
+          <p className="mt-1 break-words text-xs font-bold text-emerald-900">
             Total considerado no ponto:{" "}
             <span className="tabular-nums">{formatMinutes(day.totalNoPontoMinutes)}</span>
           </p>
           {day.suggestion.remainingMinutes > 0 && (
-            <p className="mt-1 break-words text-[11px] font-semibold text-amber-800">
+            <p className="mt-0.5 break-words text-[11px] font-semibold text-amber-800">
               Ainda a representar: {formatMinutes(day.suggestion.remainingMinutes)}
             </p>
           )}
@@ -177,7 +208,7 @@ function DayGuideCard({ day }: { day: PointGuideDayRow }) {
 
       {/* [10+] — utilização / geração / reserva */}
       {hasSpecial && (
-        <div className="mt-3 flex flex-wrap gap-1.5">
+        <div className="mt-2 flex flex-wrap gap-1.5">
           {day.specialUsedMinutes > 0 && (
             <Badge tone="amber">[10+] utilizado: {formatMinutes(day.specialUsedMinutes)}</Badge>
           )}
@@ -192,9 +223,9 @@ function DayGuideCard({ day }: { day: PointGuideDayRow }) {
         </div>
       )}
 
-      {/* Calendário/ausência (contexto canônico) */}
+      {/* Calendário/ausência (contexto canônico) — faixa compacta 4I.1 */}
       {(calendarInfo || day.calendarCreditMinutes > 0 || day.calendarRequiredWorkMinutes > 0) && (
-        <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-600">
+        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-0.5 rounded-xl bg-slate-50 px-3 py-1.5 text-xs text-slate-600">
           <span className="inline-flex items-center gap-1.5 font-bold text-slate-700">
             <CalendarDays size={13} aria-hidden /> {calendarInfo ?? "Calendário da empresa"}
           </span>
@@ -207,13 +238,13 @@ function DayGuideCard({ day }: { day: PointGuideDayRow }) {
         </div>
       )}
       {day.absenceLabel && !calendarInfo && (
-        <p className="mt-2 break-words text-xs font-semibold text-slate-500">
+        <p className="mt-1.5 break-words text-xs font-semibold text-slate-500">
           {day.absenceLabel} — tratamento próprio no sistema oficial.
         </p>
       )}
 
       {/* Links de leitura (nunca ações) */}
-      <div className="mt-3 flex flex-wrap gap-2 border-t border-slate-100 pt-3">
+      <div className="mt-2 flex flex-wrap gap-2 border-t border-slate-100 pt-2">
         <Link
           href={`/registros?data=${day.date}&escopo=ciclo`}
           className="inline-flex items-center gap-1.5 rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-bold text-slate-700 transition-colors hover:bg-slate-200"
@@ -314,21 +345,26 @@ function GuiaPontoBody() {
             contextLabel={PERIOD_CONTEXT_LABEL[contextoPeriodo]}
             onBackToCurrent={viewingCurrentPeriod ? undefined : () => setPeriod(currentPeriod)}
           />
-          <Badge
-            tone={
-              view.state === "consolidado"
-                ? "violet"
-                : view.state === "reaberto-para-ajustes"
-                  ? "amber"
-                  : view.state === "encerrado-com-pendencias"
-                    ? "rose"
-                    : view.state === "pronto-para-consolidar"
-                      ? "indigo"
-                      : "emerald"
-            }
-          >
-            {PERIOD_CONSOLIDATION_LABEL[view.state]}
-          </Badge>
+          {/* 4I.1 — período futuro mostra SOMENTE o contexto “Período futuro”
+              (navegador): o badge de estado 4G (“Em andamento”) seria um
+              segundo estado contraditório. Motor de consolidação intocado. */}
+          {!view.periodFuture && (
+            <Badge
+              tone={
+                view.state === "consolidado"
+                  ? "violet"
+                  : view.state === "reaberto-para-ajustes"
+                    ? "amber"
+                    : view.state === "encerrado-com-pendencias"
+                      ? "rose"
+                      : view.state === "pronto-para-consolidar"
+                        ? "indigo"
+                        : "emerald"
+              }
+            >
+              {PERIOD_CONSOLIDATION_LABEL[view.state]}
+            </Badge>
+          )}
         </div>
         <p className="break-words text-xs font-bold text-slate-500">
           Período: {periodLabel(period)}

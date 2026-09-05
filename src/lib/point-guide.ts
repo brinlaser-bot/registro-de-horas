@@ -1,5 +1,18 @@
 // ─────────────────────────────────────────────────────────────
-// GUIA DO PONTO (ETAPA 4I) — CAMADA DERIVADA / APRESENTAÇÃO.
+// GUIA DO PONTO (ETAPA 4I / 4I.1) — CAMADA DERIVADA / APRESENTAÇÃO.
+//
+// 4I.1 (somente view model — NENHUM motor financeiro tocado):
+//   · COMPENSAR PASSADO sem trabalho deixa de dizer “Aguardando registro
+//     real” — o fato canônico já existe (0min + saldo factual negativo do
+//     buildResumoDayRow); futuro e HOJE em andamento preservam a semântica
+//     temporal existente (nunca déficit prematuro);
+//   · FORA DO CONTROLE + sem registro ganha orientação neutra (nada a
+//     aguardar; sem pendência/débito/batida inventados);
+//   · PERÍODO FUTURO não exibe “Em andamento” (apresentação do Guia; o
+//     motor 4G permanece intocado);
+//   · saldo factual/projetado em card [10+] sem batidas reais vêm do
+//     espelho canônico (row.balanceMinutes / projection.projectedBalance-
+//     Minutes — nada é recalculado aqui).
 //
 // REGRA-MÃE: o Meu Horário NÃO é o ponto oficial. O Guia é uma visão
 // READ-ONLY de leitura para alimentar o sistema oficial; ele NUNCA
@@ -53,6 +66,7 @@ import {
   type AttentionCategory,
 } from "./attention-now";
 import { resumoPeriodPendencies } from "./resumo-period-view";
+import { isHistoricalEmptyDate } from "./missing-records";
 import { buildSpecialExcessBank } from "./special-excess-bank";
 import {
   activeSpecialPlansForDate,
@@ -136,6 +150,11 @@ export type PointGuideSuggestionKind =
   | "manual"
   /** Sem orientação automática (futuro, calendário, sem fato). */
   | "none"
+  /** 4I.1-D — COMPENSAR realizado (passado) sem trabalho: fato canônico já
+   *  existe (0min + saldo factual negativo); NÃO é "aguardando registro". */
+  | "compensar-realized"
+  /** 4I.1-E — Fora do controle + sem registro: neutro, nada a aguardar. */
+  | "out-of-control"
   /** Dia futuro — nunca criar batidas sugeridas futuras. */
   | "future"
   /** Calendário trata o dia (ABONADO/folga/ausência) — sem batidas inventadas. */
@@ -229,8 +248,9 @@ export function suggestPunchesForDay(args: {
   cctx: CalendarDayView;
   projection: RealizedDayOfficialProjection;
   limits: GuideLimits;
+  controlStartDate: string | null;
 }): PointGuideSuggestion {
-  const { date, today, entries, row, cctx, projection, limits } = args;
+  const { date, today, entries, row, cctx, projection, limits, controlStartDate } = args;
   const dayEntries = entries.filter((e) => e.date === date);
   const analysis = analyzePunches(dayEntries);
   const sorted = analysis.sorted;
@@ -285,20 +305,62 @@ export function suggestPunchesForDay(args: {
       cctx.marker === "folga" ||
       row.absence !== undefined ||
       row.status === "falta";
+    if (noLaunch) {
+      return {
+        kind: "calendar",
+        punches: [],
+        representableMinutes: 0,
+        remainingMinutes: 0,
+        usedTotalMinutes,
+        totalMinutes,
+        message:
+          cctx.isWeekend || cctx.marker === "folga"
+            ? "Nenhum lançamento de batida necessário."
+            : "Dia sem batidas reais — nenhuma sugestão automática.",
+      };
+    }
+    // 4I.1-D — COMPENSAR JÁ REALIZADO (passado estrito) sem trabalho: a
+    // obrigação canônica do calendário é o fato conhecido — o saldo factual
+    // negativo JÁ EXISTE (fonte buildResumoDayRow); nunca dizer
+    // “aguardando registro real / antes do fato”. Não inventa batidas e
+    // não cria déficit: apenas apresenta o resultado canônico. HOJE em
+    // andamento (date === today) NÃO cai aqui — segue sem déficit prematuro.
+    if (date < today && cctx.calendarEntry?.tratamento === "COMPENSAR") {
+      return {
+        kind: "compensar-realized",
+        punches: [],
+        representableMinutes: 0,
+        remainingMinutes: 0,
+        usedTotalMinutes,
+        totalMinutes,
+        message: `Folga a compensar realizada sem batidas — trate conforme a obrigação de ${formatMinutes(cctx.requiredWorkMinutes)} do calendário.`,
+      };
+    }
+    // 4I.1-E — FORA DO CONTROLE + SEM REGISTRO (data antes de
+    // controlStartDate, já passada): não há nada a “aguardar” nem pendência
+    // a cobrar — orientação NEUTRA, sem inventar déficit/obrigação/batidas.
+    // Registro histórico real existente continua exibido pelo caminho normal.
+    if (isHistoricalEmptyDate(date, today, controlStartDate)) {
+      return {
+        kind: "out-of-control",
+        punches: [],
+        representableMinutes: 0,
+        remainingMinutes: 0,
+        usedTotalMinutes,
+        totalMinutes,
+        message: "Fora do controle — nenhuma orientação de lançamento necessária.",
+      };
+    }
     return {
-      kind: noLaunch ? "calendar" : "none",
+      kind: "none",
       punches: [],
       representableMinutes: 0,
       remainingMinutes: 0,
       usedTotalMinutes,
       totalMinutes,
-      message: noLaunch
-        ? cctx.isWeekend || cctx.marker === "folga"
-          ? "Nenhum lançamento de batida necessário."
-          : "Dia sem batidas reais — nenhuma sugestão automática."
-        : row.missingExpected
-          ? "Sem registro — resolva o fato antes de uma orientação de lançamento."
-          : "Aguardando registro real — nenhuma sugestão antes do fato.",
+      message: row.missingExpected
+        ? "Sem registro — resolva o fato antes de uma orientação de lançamento."
+        : "Aguardando registro real — nenhuma sugestão antes do fato.",
     };
   }
 
@@ -407,6 +469,9 @@ export interface PointGuideDayRow {
   weekday: string;
   /** date <= today (o dia já aconteceu ou está em curso). */
   realized: boolean;
+  /** 4I.1 — date < today (dia encerrado no tempo; HOJE em andamento não é
+   *  “passado” — protege exibição de déficit factual prematuro). */
+  past: boolean;
   /** Fato suficiente para projeção (batidas OU evento de calendário). */
   factRealized: boolean;
   /** Batidas reais HH:MM em ordem cronológica. */
@@ -415,8 +480,11 @@ export interface PointGuideDayRow {
   /** Jornada real (fato canônico — nunca alterada pelo Guia). */
   jornadaRealMinutes: number;
   registrableMinutes: number;
-  /** Saldo regular factual do dia (fonte canônica). */
+  /** Saldo regular factual do dia (fonte canônica — eco de buildResumoDayRow). */
   saldoRegularMinutes: number;
+  /** 4I.1 — Saldo PROJETADO do dia (eco de projection.projectedBalanceMinutes
+   *  — motor 3A; o Guia NUNCA recalcula saldo). */
+  saldoProjetadoMinutes: number;
   /** "−30min" / "+1h" / "0min" — apresentação do saldo do dia. */
   saldoLabel: string;
   /** Rótulo primário da situação. */
@@ -463,6 +531,10 @@ export interface PointGuideView {
   days: PointGuideDayRow[];
   /** Estado do período pelo motor 4G (nunca status manual). */
   state: PeriodConsolidationStateId;
+  /** 4I.1 — período ainda não começou (period.from > today). O motor 4G é
+   *  intocado; esta é SOMENTE a apresentação do Guia: período futuro nunca
+   *  exibe “Em andamento” junto de “Período futuro” (estados contraditórios). */
+  periodFuture: boolean;
   stateLabel: string;
   /** Consolidação ATIVA do período (snapshot 4G). */
   consolidation: PeriodConsolidation | null;
@@ -568,6 +640,10 @@ export function buildPointGuideView(input: PointGuideViewInput): PointGuideView 
   });
   const consolidation = activeConsolidationForPeriod(consolidations, period.from, period.to);
   const consolidated = consolidation !== null;
+  // 4I.1 — APRESENTAÇÃO do Guia: período futuro (ainda não começou) nunca
+  // recebe “Em andamento”. O motor 4G (periodConsolidationState) permanece
+  // intocado — state continua o id canônico; apenas o rótulo exibido muda.
+  const periodFuture = period.from > today;
 
   // 3) [10+] utilizado (3B/3D) e reservado (4A) — insumos do motor 3A.
   const usedByDate = usedSpecialMinutesByDestination(uses);
@@ -633,6 +709,7 @@ export function buildPointGuideView(input: PointGuideViewInput): PointGuideView 
       cctx,
       projection,
       limits,
+      controlStartDate,
     });
 
     const attentionCategories = attentionCategoriesForDay({
@@ -686,12 +763,14 @@ export function buildPointGuideView(input: PointGuideViewInput): PointGuideView 
       date,
       weekday: weekdayLong(date),
       realized: date <= today,
+      past: date < today,
       factRealized: realizedFacts,
       realPunches: sortedPunchEntries(dayEntries).map((e) => e.time),
       punchCount: dayEntries.length,
       jornadaRealMinutes: row.workedMinutes,
       registrableMinutes: row.registrableMinutes,
       saldoRegularMinutes: row.balanceMinutes,
+      saldoProjetadoMinutes: projection.projectedBalanceMinutes,
       saldoLabel: formatMinutes(row.balanceMinutes),
       situacao: situacaoFinal,
       attentionCategories,
@@ -728,7 +807,8 @@ export function buildPointGuideView(input: PointGuideViewInput): PointGuideView 
     limits,
     days,
     state,
-    stateLabel: PERIOD_CONSOLIDATION_LABEL[state],
+    periodFuture,
+    stateLabel: periodFuture ? "Período futuro" : PERIOD_CONSOLIDATION_LABEL[state],
     consolidation,
     summary: {
       totalDays: days.length,
