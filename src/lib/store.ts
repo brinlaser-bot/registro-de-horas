@@ -273,7 +273,14 @@ function persist() {
  * e Registros calcula −8h em dia vazio antes de ler a data persistida.
  */
 function ensureLoaded() {
-  if (ready || typeof window === "undefined") return;
+  if (ready) return;
+  if (typeof window === "undefined") {
+    // ETAPA 4K: fora do navegador não há storage a ler, mas a prontidão deve
+    // virar uma única vez — senão `load()` emite a cada leitura e um assinante
+    // que lê o estado (ex.: motor de sync) recursa até estourar a pilha.
+    ready = true;
+    return;
+  }
   ready = true;
   pendingPersist = false;
   try {
@@ -3699,5 +3706,28 @@ export function storageBytes(): number {
     return (window.localStorage.getItem(STORAGE_KEY) ?? "").length;
   } catch {
     return 0;
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────
+   ETAPA 4K — ganchos de sincronização multi-dispositivo.
+
+   Aditivos e seguros: apenas assinatura de mudanças + leitura textual do
+   cache para guarda do slot da conta. Este módulo continua sem conhecer a
+   camada de nuvem (nenhuma escrita remota parte daqui).
+   ───────────────────────────────────────────────────────────── */
+
+/** Assina as mutações do estado operacional (usado pelo motor de sync). */
+export function subscribeToAppData(cb: () => void): () => void {
+  return subscribe(cb);
+}
+
+/** Lê o texto bruto do cache operacional (fora do navegador → null). */
+export function readRawAppCache(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.localStorage.getItem(STORAGE_KEY);
+  } catch {
+    return null;
   }
 }

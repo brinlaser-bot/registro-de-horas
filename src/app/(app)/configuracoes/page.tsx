@@ -26,6 +26,7 @@ import {
 import { expectedMinutesOf, formatMinutes, todayString } from "@/lib/time";
 import { Button, Card, ConfirmDialog, Input, Select, Skeleton, Toggle } from "@/components/ui";
 import { SignOutButton } from "@/components/sign-out-button";
+import { CloudSyncSettings } from "@/components/cloud-sync-settings";
 import { ImportBackupModal } from "@/components/import-backup-modal";
 import { useToast } from "@/components/toast";
 
@@ -627,6 +628,9 @@ export default function ConfiguracoesPage() {
           uma cópia.
         </p>
       </Card>
+
+      {/* ETAPA 4K — sincronização multi-dispositivo (nuvem como referência da conta). */}
+      <CloudSyncSettings />
 
       {/* Regras */}
       <Card title="Como o cálculo funciona" subtitle="Resumo das regras da empresa aplicadas no app">

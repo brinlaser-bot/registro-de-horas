@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { useAppData, useIsClient } from "@/lib/store";
 import { SignOutButton } from "@/components/sign-out-button";
+import { SyncStatusLine } from "@/components/sync-status-line";
 
 const NAV = [
   { href: "/", label: "Visão geral", icon: LayoutDashboard },
@@ -116,6 +117,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <p className="truncate text-[11px] text-slate-400">
               {mounted ? user.email : ""}
             </p>
+            {/* ETAPA 4K — estado da sincronização (discreto; some fora do provedor). */}
+            <SyncStatusLine />
           </div>
           <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-bold text-emerald-300 ring-1 ring-inset ring-emerald-500/30">
             Você
